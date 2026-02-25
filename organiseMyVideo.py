@@ -41,7 +41,7 @@ def setupLogging(logLevel: str = "INFO"):
 class VideoOrganizer:
     """Main class for organizing video files into structured directories."""
     
-    def __init__(self, sourceDir:  str = "/mnt/video2/toFile", dryRun: bool = False):
+    def __init__(self, sourceDir:  str = "/mnt/video2/toFile", dryRun: bool = True):
         """
         Initialize the video organizer.
         
@@ -527,10 +527,13 @@ def main():
         help="Source directory containing files to organize (default: /mnt/video2/toFile)"
     )
     parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Show what would be done without making changes"
+        '--confirm',
+        dest='dryRun',
+        action='store_false',
+        help='confirm execution — actually make changes (default is dry-run)',
     )
+    parser.add_argument('--dry-run', dest='dryRun', action='store_true', default=True, help=argparse.SUPPRESS)
+    parser.set_defaults(dryRun=True)
     parser.add_argument(
         "--non-interactive",
         action="store_true",
@@ -549,8 +552,13 @@ def main():
     setupLogging(args.log_level)
     logger.info("... organiseMyVideo starting")
     
+    if args.dryRun:
+        logger.info("...dry-run mode (no changes will be made) — use --confirm to execute")
+    else:
+        logger.info("...confirm mode — changes will be made")
+    
     # Create organizer and process files
-    organizer = VideoOrganizer(sourceDir=args.source, dryRun=args.dry_run)
+    organizer = VideoOrganizer(sourceDir=args.source, dryRun=args.dryRun)
     organizer.processFiles(interactive=not args.non_interactive)
     
     logger.info("...organiseMyVideo complete")
