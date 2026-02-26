@@ -532,7 +532,6 @@ def main():
         action='store_false',
         help='confirm execution — actually make changes (default is dry-run)',
     )
-    parser.add_argument('--dry-run', dest='dryRun', action='store_true', default=True, help=argparse.SUPPRESS)
     parser.set_defaults(dryRun=True)
     parser.add_argument(
         "--non-interactive",
