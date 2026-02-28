@@ -598,9 +598,8 @@ def main():
     else:
         logger.info("confirm mode — changes will be made")
     
-    # Create organizer and process files
+    # Create organizer and run the requested mode
     organizer = VideoOrganizer(sourceDir=args.source, dryRun=dryRun)
-    organizer.processFiles(interactive=not args.non_interactive)
 
     if args.clean:
         cleanStats = organizer.cleanEmptyFolders()
@@ -611,6 +610,8 @@ Folders kept:    {cleanStats['skipped']}
 Errors:          {cleanStats['errors']}
 """
         drawBox(summary)
+    else:
+        organizer.processFiles(interactive=not args.non_interactive)
 
     logger.info("organiseMyVideo complete")
 
