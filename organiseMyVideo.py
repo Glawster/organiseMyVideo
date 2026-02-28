@@ -7,6 +7,7 @@ TV Shows: /mnt/video<n>/TV/Show Name/Season NN/
 """
 
 import os
+import sys
 import re
 import shutil
 import argparse
@@ -222,9 +223,9 @@ class VideoOrganizer:
             Confirmed or corrected name
         """
         if fileType == "tv":
-            prompt = f"\nTV Show detected: '{defaultName}'\nIs this correct?  (y/n or enter new name): "
+            prompt = f"\nTV Show detected: '{defaultName}'\nIs this correct?  (y/n/q or enter new name): "
         else:
-            prompt = f"\nMovie detected: '{defaultName}'\nIs this correct? (y/n or enter new name): "
+            prompt = f"\nMovie detected: '{defaultName}'\nIs this correct? (y/n/q or enter new name): "
         
         response = input(prompt).strip()
         
@@ -233,6 +234,9 @@ class VideoOrganizer:
         elif response.lower() in ["n", "no"]:
             newName = input(f"Enter correct {fileType} name: ").strip()
             return newName if newName else defaultName
+        elif response.lower() in ["q", "quit"]:
+            logger.info("User requested to quit")
+            sys.exit(0)
         else:
             return response
     
