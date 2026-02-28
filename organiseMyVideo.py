@@ -366,6 +366,71 @@ class VideoOrganizer:
             logger.error(f"Failed to move TV show: {e}")
             return False
     
+    def _isSampleLikeFolder(self, path: Path) -> bool:
+        """Return True if the folder name indicates it is a sample/extras folder."""
+        return "sample" in path.name.lower()
+
+    def _hasRealVideoContent(self, folder: Path) -> bool:
+        """
+        Return True if folder contains real video files outside of sample-like sub-folders.
+
+        Args:
+            folder: Directory to inspect recursively
+        """
+        for item in folder.rglob("*"):
+            if item.is_file() and item.suffix.lower() in VIDEO_EXTENSIONS:
+                # Ignore files that live inside a sample-like folder
+                relativeParts = item.relative_to(folder).parts
+                if any(self._isSampleLikeFolder(Path(part)) for part in relativeParts[:-1]):
+                    continue
+                return True
+        return False
+
+    def cleanEmptyFolders(self) -> dict:
+        """
+        Remove sub-folders in the source directory that contain no real video files.
+
+        Folders whose only video content is inside sample-like sub-folders are
+        treated as empty and removed together with their contents.
+
+        Returns:
+            Dictionary with counts: {'removed': int, 'skipped': int, 'errors': int}
+        """
+        logger.info("...starting clean of empty folders")
+
+        stats = {"removed": 0, "skipped": 0, "errors": 0}
+
+        if not self.sourceDir.exists():
+            logger.error(f"source directory does not exist: {self.sourceDir}")
+            return stats
+
+        for subDir in sorted(self.sourceDir.iterdir()):
+            if not subDir.is_dir():
+                continue
+
+            if self._hasRealVideoContent(subDir):
+                logger.info(f"...keeping (has video content): {subDir.name}")
+                stats["skipped"] += 1
+                continue
+
+            action = "would remove" if self.dryRun else "removing"
+            logger.info(f"...{action} empty folder: {subDir}")
+
+            if self.dryRun:
+                stats["removed"] += 1
+                continue
+
+            try:
+                shutil.rmtree(str(subDir))
+                logger.info(f"...removed: {subDir}")
+                stats["removed"] += 1
+            except Exception as e:
+                logger.error(f"failed to remove {subDir}: {e}")
+                stats["errors"] += 1
+
+        logger.info(f"...clean complete: {stats}")
+        return stats
+
     def processFiles(self, interactive: bool = True):
         """
         Process all video files in the source directory.
@@ -510,6 +575,11 @@ def main():
         help='confirm execution — actually make changes (default is dry-run)',
     )
     parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="remove empty sub-folders from source directory (folders with only sample content are treated as empty)"
+    )
+    parser.add_argument(
         "--non-interactive",
         action="store_true",
         help="Run without user prompts (skip files that cannot be auto-detected)"
@@ -531,7 +601,17 @@ def main():
     # Create organizer and process files
     organizer = VideoOrganizer(sourceDir=args.source, dryRun=dryRun)
     organizer.processFiles(interactive=not args.non_interactive)
-    
+
+    if args.clean:
+        cleanStats = organizer.cleanEmptyFolders()
+        summary = f"""
+CLEAN SUMMARY
+Folders removed: {cleanStats['removed']}
+Folders kept:    {cleanStats['skipped']}
+Errors:          {cleanStats['errors']}
+"""
+        drawBox(summary)
+
     logger.info("organiseMyVideo complete")
 
 
