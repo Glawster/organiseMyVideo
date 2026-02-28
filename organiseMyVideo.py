@@ -80,7 +80,7 @@ class VideoOrganizer:
             Dictionary with parsed info or None if parsing failed
         """
         # Pattern for SnnEnn format
-        pattern = r"^(. +?)\.S(\d+)E(\d+)\..*\. (\w+)$"
+        pattern = r"^(.+?)\.S(\d+)E(\d+)\..*\.(\w+)$"
         match = re.match(pattern, filename, re.IGNORECASE)
         
         if match:
@@ -347,7 +347,7 @@ class VideoOrganizer:
             showDir = storage / showName
         
         # Create season directory
-        seasonDir = showDir / f"Season {season: 02d}"
+        seasonDir = showDir / f"Season {season:02d}"
         destFile = seasonDir / sourceFile.name
         
         logger.info(f"TV Show: {sourceFile.name}")
