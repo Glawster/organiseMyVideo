@@ -1,51 +1,60 @@
 """
 Stub the optional organiseMyProjects package so organiseMyVideo can be
 imported in environments where that package is not installed.
+
+The stub mirrors the real _OrganiseLoggerAdapter from organiseMyProjects.logUtils
+so that tests exercise the same call signatures.
 """
 
 import logging
 import sys
 import types
 
+# Matches organiseMyProjects.logUtils._DRY_RUN_PREFIX
+_DRY_RUN_PREFIX = "[] "
+
 
 class _StubLogger:
     """
-    Minimal stand-in for the organiseMyProjects custom logger.
+    Lightweight stand-in for organiseMyProjects._OrganiseLoggerAdapter.
 
-    Supports the standard methods (info, warning, error, debug) plus the
-    custom message-type methods used by organiseMyVideo.py:
-      - value(msg)  — key-value informational message
-      - doing(msg)  — "starting X" step message
-      - done(msg)   — "X complete" step message
+    Output formats match the real adapter:
+      doing(msg)            -> "{prefix}msg..."
+      done(msg)             -> "...{prefix}msg"
+      info(msg)             -> "...{prefix}msg"
+      value(msg, variable)  -> "...{prefix}msg: variable"
+      warning/error/debug   -> standard logging (with prefix when dryRun)
     """
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, dryRun: bool = False) -> None:
         self._log = logging.getLogger(name)
+        self._dryRun = dryRun
+        self._prefix = _DRY_RUN_PREFIX if dryRun else ""
 
-    def info(self, msg: str, *args, **kwargs) -> None:
-        self._log.info(msg, *args, **kwargs)
+    def doing(self, message: str) -> None:
+        self._log.info(f"{self._prefix}{message}...")
+
+    def done(self, message: str) -> None:
+        self._log.info(f"...{self._prefix}{message}")
+
+    def info(self, message: str) -> None:
+        self._log.info(f"...{self._prefix}{message}")
+
+    def value(self, message: str, variable) -> None:
+        self._log.info(f"...{self._prefix}{message}: {variable}")
 
     def warning(self, msg: str, *args, **kwargs) -> None:
-        self._log.warning(msg, *args, **kwargs)
+        self._log.warning(f"{self._prefix}{msg}", *args, **kwargs)
 
     def error(self, msg: str, *args, **kwargs) -> None:
         self._log.error(msg, *args, **kwargs)
 
     def debug(self, msg: str, *args, **kwargs) -> None:
-        self._log.debug(msg, *args, **kwargs)
-
-    def value(self, msg: str, *args, **kwargs) -> None:
-        self._log.info(msg, *args, **kwargs)
-
-    def doing(self, msg: str, *args, **kwargs) -> None:
-        self._log.info(msg, *args, **kwargs)
-
-    def done(self, msg: str, *args, **kwargs) -> None:
-        self._log.info(msg, *args, **kwargs)
+        self._log.debug(f"{self._prefix}{msg}", *args, **kwargs)
 
 
-def _getStubLogger(name: str, **kwargs) -> _StubLogger:
-    return _StubLogger(name)
+def _getStubLogger(name: str = "OrganiseMyTool", dryRun: bool = False, **kwargs) -> _StubLogger:
+    return _StubLogger(name, dryRun=dryRun)
 
 
 def _stubOrganiseMyProjects() -> None:

@@ -594,6 +594,8 @@ def main():
     global logger
     logger = getLogger("organiseMyVideo", includeConsole=True, dryRun=dryRun)
     logger.doing("organiseMyVideo starting")
+    logFile = Path.home() / ".local" / "state" / "organiseMy" / "logs" / "organiseMyVideo.log"
+    logger.value("logging to", logFile)
     
     if dryRun:
         logger.info("dry-run mode (no changes will be made) — use --confirm to execute")
