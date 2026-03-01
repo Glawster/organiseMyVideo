@@ -295,13 +295,13 @@ class VideoOrganizer:
         logger.value("  ->", destFile)
         
         if self.dryRun:
-            logger.value("would move to", destFile)
+            logger.action(f"would move to: {destFile}")
             return True
         
         try:
             destDir.mkdir(parents=True, exist_ok=True)
             shutil.move(str(sourceFile), str(destFile))
-            logger.value("movie moved successfully", destFile)
+            logger.action(f"movie moved successfully: {destFile}")
             return True
         except Exception as e:
             logger.error(f"Failed to move movie: {e}")
@@ -357,13 +357,13 @@ class VideoOrganizer:
         logger.value("  ->", destFile)
         
         if self.dryRun:
-            logger.value("would move to", destFile)
+            logger.action(f"would move to: {destFile}")
             return True
         
         try:
             seasonDir.mkdir(parents=True, exist_ok=True)
             shutil.move(str(sourceFile), str(destFile))
-            logger.value("TV show moved successfully", destFile)
+            logger.action(f"TV show moved successfully: {destFile}")
             return True
         except Exception as e: 
             logger.error(f"Failed to move TV show: {e}")
@@ -416,14 +416,14 @@ class VideoOrganizer:
                 stats["skipped"] += 1
                 continue
 
-            logger.value("removing empty folder", subDir)
+            logger.action(f"removing empty folder: {subDir}")
             if self.dryRun:
                 stats["removed"] += 1
                 continue
 
             try:
                 shutil.rmtree(str(subDir))
-                logger.value("removed", subDir)
+                logger.action(f"removed: {subDir}")
                 stats["removed"] += 1
             except Exception as e:
                 logger.error(f"failed to remove {subDir}: {e}")
@@ -607,8 +607,7 @@ def main():
 
     if args.clean:
         cleanStats = organizer.cleanEmptyFolders()
-        summary = f"""
-CLEAN SUMMARY
+        summary = f"""CLEAN SUMMARY
 Folders removed: {cleanStats['removed']}
 Folders kept:    {cleanStats['skipped']}
 Errors:          {cleanStats['errors']}
