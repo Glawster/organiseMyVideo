@@ -11,14 +11,15 @@ import sys
 import re
 import shutil
 import argparse
+import logging
 
 from pathlib import Path
 from typing import List, Tuple, Optional
 
 from organiseMyProjects.logUtils import getLogger, drawBox # type: ignore
 
-# Module-level logger used by class methods; configured for runtime mode in main().
-logger = getLogger("organiseMyVideo", includeConsole=True, dryRun=True)
+# Module-level logger used by class methods; replaced with runtime-configured logger in main().
+logger = getLogger("organiseMyVideo")
 
 # Video file extensions to process
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".m4v", ".mpg", ".mpeg"}
@@ -590,9 +591,15 @@ def main():
     
     dryRun = True if not args.confirm else False
 
-    # Setup logging
+    # Setup logging — dryRun passed so logger.action() applies [] prefix correctly.
+    # logUtils._setupLogging guards console handler with isinstance(h, StreamHandler)
+    # which also matches FileHandler (subclass); add console handler explicitly if absent.
     global logger
     logger = getLogger("organiseMyVideo", includeConsole=True, dryRun=dryRun)
+    if not any(type(h) is logging.StreamHandler for h in logger.logger.handlers):
+        _ch = logging.StreamHandler()
+        _ch.setFormatter(logging.Formatter("%(levelname)s - %(message)s"))
+        logger.logger.addHandler(_ch)
     logger.doing("organiseMyVideo starting")
     logFile = Path.home() / ".local" / "state" / "organiseMy" / "logs" / "organiseMyVideo.log"
     logger.value("logging to", logFile)
