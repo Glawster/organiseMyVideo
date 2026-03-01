@@ -1,0 +1,435 @@
+"""Tests for organiseMyVideo.py"""
+
+import shutil
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+# conftest.py stubs organiseMyProjects before this import
+import organiseMyVideo as omv
+from organiseMyVideo import VideoOrganizer
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def sourceDir(tmp_path: Path) -> Path:
+    """Return an empty temporary source directory."""
+    src = tmp_path / "source"
+    src.mkdir()
+    return src
+
+
+@pytest.fixture()
+def organizer(sourceDir: Path) -> VideoOrganizer:
+    """VideoOrganizer in dry-run mode (default) pointing at a temp source."""
+    return VideoOrganizer(sourceDir=str(sourceDir), dryRun=True)
+
+
+@pytest.fixture()
+def confirmedOrganizer(sourceDir: Path) -> VideoOrganizer:
+    """VideoOrganizer with dryRun=False (confirm mode)."""
+    return VideoOrganizer(sourceDir=str(sourceDir), dryRun=False)
+
+
+# ---------------------------------------------------------------------------
+# VideoOrganizer.__init__
+# ---------------------------------------------------------------------------
+
+
+def testDefaultDryRunIsTrue():
+    """dryRun must default to True (safe mode)."""
+    org = VideoOrganizer()
+    assert org.dryRun is True
+
+
+def testExplicitDryRunFalse(tmp_path: Path):
+    org = VideoOrganizer(sourceDir=str(tmp_path), dryRun=False)
+    assert org.dryRun is False
+
+
+# ---------------------------------------------------------------------------
+# parseTvFilename
+# ---------------------------------------------------------------------------
+
+
+def testParseTvFilenameValid(organizer: VideoOrganizer):
+    result = organizer.parseTvFilename("Breaking.Bad.S01E01.Pilot.mkv")
+    assert result is not None
+    assert result["showName"] == "Breaking Bad"
+    assert result["season"] == 1
+    assert result["episode"] == 1
+    assert result["type"] == "tv"
+
+
+def testParseTvFilenameHighSeasonEpisode(organizer: VideoOrganizer):
+    result = organizer.parseTvFilename("The.Office.S12E25.Finale.mkv")
+    assert result is not None
+    assert result["showName"] == "The Office"
+    assert result["season"] == 12
+    assert result["episode"] == 25
+
+
+def testParseTvFilenameReturnsNoneForMovie(organizer: VideoOrganizer):
+    assert organizer.parseTvFilename("Inception (2010).mp4") is None
+
+
+def testParseTvFilenameReturnsNoneForRandomName(organizer: VideoOrganizer):
+    assert organizer.parseTvFilename("some random file.mkv") is None
+
+
+# ---------------------------------------------------------------------------
+# parseMovieFilename
+# ---------------------------------------------------------------------------
+
+
+def testParseMovieFilenameParenthetical(organizer: VideoOrganizer):
+    result = organizer.parseMovieFilename("Inception (2010).mp4")
+    assert result is not None
+    assert result["title"] == "Inception"
+    assert result["year"] == "2010"
+    assert result["type"] == "movie"
+
+
+def testParseMovieFilenameDotSeparated(organizer: VideoOrganizer):
+    result = organizer.parseMovieFilename("The.Matrix.1999.mkv")
+    assert result is not None
+    assert result["year"] == "1999"
+    assert result["type"] == "movie"
+
+
+def testParseMovieFilenameReturnsNoneForUnparseable(organizer: VideoOrganizer):
+    assert organizer.parseMovieFilename("randomfile.mkv") is None
+
+
+# ---------------------------------------------------------------------------
+# findExistingMovieDir
+# ---------------------------------------------------------------------------
+
+
+def testFindExistingMovieDirFound(tmp_path: Path, organizer: VideoOrganizer):
+    movieRoot = tmp_path / "movie1"
+    (movieRoot / "Inception (2010)").mkdir(parents=True)
+    result = organizer.findExistingMovieDir("Inception", "2010", [movieRoot])
+    assert result is not None
+    assert result.name == "Inception (2010)"
+
+
+def testFindExistingMovieDirCaseInsensitive(tmp_path: Path, organizer: VideoOrganizer):
+    movieRoot = tmp_path / "movie1"
+    (movieRoot / "inception (2010)").mkdir(parents=True)
+    result = organizer.findExistingMovieDir("Inception", "2010", [movieRoot])
+    assert result is not None
+
+
+def testFindExistingMovieDirNotFound(tmp_path: Path, organizer: VideoOrganizer):
+    movieRoot = tmp_path / "movie1"
+    movieRoot.mkdir()
+    result = organizer.findExistingMovieDir("Inception", "2010", [movieRoot])
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# findExistingTvShowDir
+# ---------------------------------------------------------------------------
+
+
+def testFindExistingTvShowDirFound(tmp_path: Path, organizer: VideoOrganizer):
+    tvRoot = tmp_path / "TV"
+    (tvRoot / "Breaking Bad").mkdir(parents=True)
+    result = organizer.findExistingTvShowDir("Breaking Bad", [tvRoot])
+    assert result is not None
+    assert result.name == "Breaking Bad"
+
+
+def testFindExistingTvShowDirCaseInsensitive(tmp_path: Path, organizer: VideoOrganizer):
+    tvRoot = tmp_path / "TV"
+    (tvRoot / "breaking bad").mkdir(parents=True)
+    result = organizer.findExistingTvShowDir("Breaking Bad", [tvRoot])
+    assert result is not None
+
+
+def testFindExistingTvShowDirNotFound(tmp_path: Path, organizer: VideoOrganizer):
+    tvRoot = tmp_path / "TV"
+    tvRoot.mkdir()
+    result = organizer.findExistingTvShowDir("Breaking Bad", [tvRoot])
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# _isSampleLikeFolder
+# ---------------------------------------------------------------------------
+
+
+def testIsSampleLikeFolderLowercase(organizer: VideoOrganizer):
+    assert organizer._isSampleLikeFolder(Path("sample")) is True
+
+
+def testIsSampleLikeFolderMixedCase(organizer: VideoOrganizer):
+    assert organizer._isSampleLikeFolder(Path("Sample")) is True
+
+
+def testIsSampleLikeFolderContainsSample(organizer: VideoOrganizer):
+    assert organizer._isSampleLikeFolder(Path("sample-video")) is True
+
+
+def testIsSampleLikeFolderRegular(organizer: VideoOrganizer):
+    assert organizer._isSampleLikeFolder(Path("Season 01")) is False
+
+
+# ---------------------------------------------------------------------------
+# _hasRealVideoContent
+# ---------------------------------------------------------------------------
+
+
+def testHasRealVideoContentWithRealFile(tmp_path: Path, organizer: VideoOrganizer):
+    movieDir = tmp_path / "MovieA"
+    movieDir.mkdir()
+    (movieDir / "MovieA.mkv").write_bytes(b"x" * 100)
+    assert organizer._hasRealVideoContent(movieDir) is True
+
+
+def testHasRealVideoContentEmptyDir(tmp_path: Path, organizer: VideoOrganizer):
+    emptyDir = tmp_path / "Empty"
+    emptyDir.mkdir()
+    assert organizer._hasRealVideoContent(emptyDir) is False
+
+
+def testHasRealVideoContentSampleOnly(tmp_path: Path, organizer: VideoOrganizer):
+    movieDir = tmp_path / "MovieB"
+    sampleSubDir = movieDir / "Sample"
+    sampleSubDir.mkdir(parents=True)
+    (sampleSubDir / "sample.mkv").write_bytes(b"x" * 50)
+    assert organizer._hasRealVideoContent(movieDir) is False
+
+
+def testHasRealVideoContentRealAndSample(tmp_path: Path, organizer: VideoOrganizer):
+    movieDir = tmp_path / "MovieC"
+    sampleSubDir = movieDir / "Sample"
+    sampleSubDir.mkdir(parents=True)
+    (sampleSubDir / "sample.mkv").write_bytes(b"x" * 50)
+    (movieDir / "MovieC.mkv").write_bytes(b"x" * 200)
+    assert organizer._hasRealVideoContent(movieDir) is True
+
+
+def testHasRealVideoContentNonVideoFilesOnly(tmp_path: Path, organizer: VideoOrganizer):
+    movieDir = tmp_path / "MovieD"
+    movieDir.mkdir()
+    (movieDir / "readme.txt").write_text("notes")
+    assert organizer._hasRealVideoContent(movieDir) is False
+
+
+# ---------------------------------------------------------------------------
+# cleanEmptyFolders — dry-run
+# ---------------------------------------------------------------------------
+
+
+def testCleanEmptyFoldersDryRunDoesNotRemove(sourceDir: Path, organizer: VideoOrganizer):
+    emptyDir = sourceDir / "EmptyDir"
+    emptyDir.mkdir()
+    stats = organizer.cleanEmptyFolders()
+    assert emptyDir.exists(), "dry-run must not remove the folder"
+    assert stats["removed"] == 1
+    assert stats["errors"] == 0
+
+
+def testCleanEmptyFoldersDryRunKeepsRealContent(sourceDir: Path, organizer: VideoOrganizer):
+    realDir = sourceDir / "MovieA"
+    realDir.mkdir()
+    (realDir / "MovieA.mkv").write_bytes(b"x" * 100)
+    stats = organizer.cleanEmptyFolders()
+    assert realDir.exists()
+    assert stats["skipped"] == 1
+    assert stats["removed"] == 0
+
+
+def testCleanEmptyFoldersDryRunSampleOnlyCountedAsRemoved(sourceDir: Path, organizer: VideoOrganizer):
+    sampleDir = sourceDir / "MovieB"
+    (sampleDir / "Sample").mkdir(parents=True)
+    (sampleDir / "Sample" / "sample.mkv").write_bytes(b"x" * 50)
+    stats = organizer.cleanEmptyFolders()
+    assert sampleDir.exists(), "dry-run must not remove sample-only folder"
+    assert stats["removed"] == 1
+
+
+# ---------------------------------------------------------------------------
+# cleanEmptyFolders — confirm mode (actual removal)
+# ---------------------------------------------------------------------------
+
+
+def testCleanEmptyFoldersRemovesEmptyDir(sourceDir: Path, confirmedOrganizer: VideoOrganizer):
+    emptyDir = sourceDir / "EmptyDir"
+    emptyDir.mkdir()
+    stats = confirmedOrganizer.cleanEmptyFolders()
+    assert not emptyDir.exists()
+    assert stats["removed"] == 1
+
+
+def testCleanEmptyFoldersRemovesSampleOnlyDir(sourceDir: Path, confirmedOrganizer: VideoOrganizer):
+    sampleDir = sourceDir / "MovieB"
+    (sampleDir / "Sample").mkdir(parents=True)
+    (sampleDir / "Sample" / "sample.mkv").write_bytes(b"x" * 50)
+    stats = confirmedOrganizer.cleanEmptyFolders()
+    assert not sampleDir.exists()
+    assert stats["removed"] == 1
+
+
+def testCleanEmptyFoldersKeepsRealContentDir(sourceDir: Path, confirmedOrganizer: VideoOrganizer):
+    realDir = sourceDir / "MovieA"
+    realDir.mkdir()
+    (realDir / "MovieA.mkv").write_bytes(b"x" * 100)
+    confirmedOrganizer.cleanEmptyFolders()
+    assert realDir.exists()
+
+
+def testCleanEmptyFoldersMissingSrcReturnsZeroStats(tmp_path: Path):
+    org = VideoOrganizer(sourceDir=str(tmp_path / "nonexistent"), dryRun=False)
+    stats = org.cleanEmptyFolders()
+    assert stats == {"removed": 0, "skipped": 0, "errors": 0}
+
+
+def testCleanEmptyFoldersMixedDirs(sourceDir: Path, confirmedOrganizer: VideoOrganizer):
+    realDir = sourceDir / "MovieA"
+    realDir.mkdir()
+    (realDir / "MovieA.mkv").write_bytes(b"x" * 100)
+
+    emptyDir = sourceDir / "EmptyDir"
+    emptyDir.mkdir()
+
+    sampleDir = sourceDir / "MovieB"
+    (sampleDir / "Sample").mkdir(parents=True)
+    (sampleDir / "Sample" / "sample.mkv").write_bytes(b"x" * 50)
+
+    stats = confirmedOrganizer.cleanEmptyFolders()
+    assert stats["removed"] == 2
+    assert stats["skipped"] == 1
+    assert stats["errors"] == 0
+    assert realDir.exists()
+    assert not emptyDir.exists()
+    assert not sampleDir.exists()
+
+
+# ---------------------------------------------------------------------------
+# moveMovie — dry-run
+# ---------------------------------------------------------------------------
+
+
+def testMoveMovieDryRunReturnsTrueWithoutMoving(tmp_path: Path, organizer: VideoOrganizer):
+    srcFile = organizer.sourceDir / "Inception (2010).mp4"
+    srcFile.write_bytes(b"x" * 100)
+
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+
+    movieInfo = {"title": "Inception", "year": "2010", "extension": ".mp4", "type": "movie"}
+
+    with patch("organiseMyVideo.shutil.move") as mockMove:
+        result = organizer.moveMovie(srcFile, movieInfo, [movieStorage], interactive=False)
+
+    assert result is True
+    mockMove.assert_not_called()
+    assert srcFile.exists()
+
+
+# ---------------------------------------------------------------------------
+# moveMovie — confirm mode
+# ---------------------------------------------------------------------------
+
+
+def testMoveMovieConfirmMovesFile(tmp_path: Path, confirmedOrganizer: VideoOrganizer):
+    srcFile = confirmedOrganizer.sourceDir / "Inception (2010).mp4"
+    srcFile.write_bytes(b"x" * 100)
+
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+
+    movieInfo = {"title": "Inception", "year": "2010", "extension": ".mp4", "type": "movie"}
+    result = confirmedOrganizer.moveMovie(srcFile, movieInfo, [movieStorage], interactive=False)
+
+    assert result is True
+    destFile = movieStorage / "Inception (2010)" / "Inception (2010).mp4"
+    assert destFile.exists()
+    assert not srcFile.exists()
+
+
+def testMoveMovieUsesExistingDir(tmp_path: Path, confirmedOrganizer: VideoOrganizer):
+    srcFile = confirmedOrganizer.sourceDir / "Inception (2010).mp4"
+    srcFile.write_bytes(b"x" * 100)
+
+    movieStorage = tmp_path / "movie1"
+    existingDir = movieStorage / "Inception (2010)"
+    existingDir.mkdir(parents=True)
+
+    movieInfo = {"title": "Inception", "year": "2010", "extension": ".mp4", "type": "movie"}
+    result = confirmedOrganizer.moveMovie(srcFile, movieInfo, [movieStorage], interactive=False)
+
+    assert result is True
+    assert (existingDir / "Inception (2010).mp4").exists()
+
+
+def testMoveMovieNoStorageReturnsFalse(organizer: VideoOrganizer):
+    srcFile = organizer.sourceDir / "Inception (2010).mp4"
+    srcFile.write_bytes(b"x" * 100)
+    movieInfo = {"title": "Inception", "year": "2010", "extension": ".mp4", "type": "movie"}
+    # Pass no storage dirs and disable dry-run so it reaches the "no storage" branch
+    org = VideoOrganizer(sourceDir=str(organizer.sourceDir), dryRun=False)
+    result = org.moveMovie(srcFile, movieInfo, [], interactive=False)
+    assert result is False
+
+
+# ---------------------------------------------------------------------------
+# moveTvShow — dry-run
+# ---------------------------------------------------------------------------
+
+
+def testMoveTvShowDryRunReturnsTrueWithoutMoving(tmp_path: Path, organizer: VideoOrganizer):
+    srcFile = organizer.sourceDir / "Breaking.Bad.S01E01.Pilot.mkv"
+    srcFile.write_bytes(b"x" * 100)
+
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    tvInfo = {"showName": "Breaking Bad", "season": 1, "episode": 1,
+              "extension": ".mkv", "type": "tv"}
+
+    with patch("organiseMyVideo.shutil.move") as mockMove:
+        result = organizer.moveTvShow(srcFile, tvInfo, [tvStorage], interactive=False)
+
+    assert result is True
+    mockMove.assert_not_called()
+    assert srcFile.exists()
+
+
+# ---------------------------------------------------------------------------
+# moveTvShow — confirm mode
+# ---------------------------------------------------------------------------
+
+
+def testMoveTvShowConfirmMovesFile(tmp_path: Path, confirmedOrganizer: VideoOrganizer):
+    srcFile = confirmedOrganizer.sourceDir / "Breaking.Bad.S01E01.Pilot.mkv"
+    srcFile.write_bytes(b"x" * 100)
+
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    tvInfo = {"showName": "Breaking Bad", "season": 1, "episode": 1,
+              "extension": ".mkv", "type": "tv"}
+    result = confirmedOrganizer.moveTvShow(srcFile, tvInfo, [tvStorage], interactive=False)
+
+    assert result is True
+    destFile = tvStorage / "Breaking Bad" / "Season 01" / "Breaking.Bad.S01E01.Pilot.mkv"
+    assert destFile.exists()
+    assert not srcFile.exists()
+
+
+def testMoveTvShowNoStorageReturnsFalse(confirmedOrganizer: VideoOrganizer):
+    srcFile = confirmedOrganizer.sourceDir / "Breaking.Bad.S01E01.Pilot.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    tvInfo = {"showName": "Breaking Bad", "season": 1, "episode": 1,
+              "extension": ".mkv", "type": "tv"}
+    result = confirmedOrganizer.moveTvShow(srcFile, tvInfo, [], interactive=False)
+    assert result is False

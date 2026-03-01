@@ -7,41 +7,28 @@ TV Shows: /mnt/video<n>/TV/Show Name/Season NN/
 """
 
 import os
+import sys
 import re
 import shutil
 import argparse
 import logging
+import datetime
+
 from pathlib import Path
 from typing import List, Tuple, Optional
 
+from organiseMyProjects.logUtils import getLogger, drawBox # type: ignore
+
+# Module-level logger used by class methods; replaced with runtime-configured logger in main().
+logger = getLogger("organiseMyVideo")
+
 # Video file extensions to process
-VIDEO_EXTENSIONS = {". mp4", ".mkv", ". avi", ".mov", ".wmv", ".flv", ".m4v", ".mpg", ".mpeg"}
-
-# Setup logging
-logger = logging.getLogger(__name__)
-
-
-def setupLogging(logLevel: str = "INFO"):
-    """
-    Configure logging with appropriate handlers and formatting.
-    
-    Args:
-        logLevel:  Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-    """
-    logging.basicConfig(
-        level=getattr(logging, logLevel. upper()),
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.FileHandler("organiseMyVideo.log"),
-            logging.StreamHandler()
-        ]
-    )
-
+VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".m4v", ".mpg", ".mpeg"}
 
 class VideoOrganizer:
     """Main class for organizing video files into structured directories."""
     
-    def __init__(self, sourceDir:  str = "/mnt/video2/toFile", dryRun: bool = False):
+    def __init__(self, sourceDir:  str = "/mnt/video2/toFile", dryRun: bool = True):
         """
         Initialize the video organizer.
         
@@ -59,7 +46,7 @@ class VideoOrganizer:
         Returns:
             Tuple of (movie_directories, tv_directories)
         """
-        logger.info("... scanning for storage locations")
+        logger.info("scanning for storage locations...")
         
         movieDirs = []
         videoDirs = []
@@ -71,15 +58,15 @@ class VideoOrganizer:
                 if item.is_dir():
                     if re.match(r"movie\d*", item.name):
                         movieDirs.append(item)
-                        logger.info(f"... found movie storage: {item}")
+                        logger.value("found movie storage", item)
                     elif re.match(r"video\d*", item.name):
                         # Look for TV subdirectory
                         tvDir = item / "TV"
                         if tvDir.exists():
                             videoDirs.append(tvDir)
-                            logger. info(f"...found TV storage: {tvDir}")
+                            logger.value("found TV storage", tvDir)
         
-        logger.info(f"...storage scan complete: {len(movieDirs)} movie, {len(videoDirs)} TV locations")
+        logger.info(f"storage scan complete: {len(movieDirs)} movie, {len(videoDirs)} TV locations")
         return sorted(movieDirs), sorted(videoDirs)
     
     def parseTvFilename(self, filename: str) -> Optional[dict]:
@@ -95,7 +82,7 @@ class VideoOrganizer:
             Dictionary with parsed info or None if parsing failed
         """
         # Pattern for SnnEnn format
-        pattern = r"^(. +?)\.S(\d+)E(\d+)\..*\. (\w+)$"
+        pattern = r"^(.+?)\.S(\d+)E(\d+)\..*\.(\w+)$"
         match = re.match(pattern, filename, re.IGNORECASE)
         
         if match:
@@ -168,7 +155,7 @@ class VideoOrganizer:
         for movieRoot in movieDirs:
             for item in movieRoot.iterdir():
                 if item.is_dir() and item.name.lower() == searchPattern.lower():
-                    logger.info(f"...found existing movie directory: {item}")
+                    logger.value("found existing movie directory",item)
                     return item
         
         return None
@@ -187,7 +174,7 @@ class VideoOrganizer:
         for tvRoot in videoDirs:
             for item in tvRoot.iterdir():
                 if item.is_dir() and item.name.lower() == showName.lower():
-                    logger.info(f"...found existing TV show directory: {item}")
+                    logger.value("found existing TV show directory", item)
                     return item
         
         return None
@@ -216,11 +203,11 @@ class VideoOrganizer:
                     maxSpace = freeSpace
                     bestDir = storageDir
             except Exception as e:
-                logger.warning(f"Could not check space for {storageDir}: {e}")
+                logger.warning(f"could not check space for {storageDir}: {e}")
                 continue
         
         if bestDir:
-            logger.info(f"...selected storage with most space: {bestDir}")
+            logger.value("selected storage with most space", bestDir)
         
         return bestDir
     
@@ -237,9 +224,9 @@ class VideoOrganizer:
             Confirmed or corrected name
         """
         if fileType == "tv":
-            prompt = f"\nTV Show detected: '{defaultName}'\nIs this correct?  (y/n or enter new name): "
+            prompt = f"\nTV Show detected: '{defaultName}'\nIs this correct?  (y/n/q or enter new name): "
         else:
-            prompt = f"\nMovie detected: '{defaultName}'\nIs this correct? (y/n or enter new name): "
+            prompt = f"\nMovie detected: '{defaultName}'\nIs this correct? (y/n/q or enter new name): "
         
         response = input(prompt).strip()
         
@@ -248,6 +235,9 @@ class VideoOrganizer:
         elif response.lower() in ["n", "no"]:
             newName = input(f"Enter correct {fileType} name: ").strip()
             return newName if newName else defaultName
+        elif response.lower() in ["q", "quit"]:
+            logger.info("user requested to quit")
+            sys.exit(0)
         else:
             return response
     
@@ -268,7 +258,7 @@ class VideoOrganizer:
         title = movieInfo["title"]
         year = movieInfo["year"]
         
-        logger.info(f"...processing movie: {sourceFile. name}")
+        logger.value("processing movie", sourceFile.name)
         
         # Check if user confirmation needed
         if interactive:
@@ -303,22 +293,19 @@ class VideoOrganizer:
         
         destFile = destDir / sourceFile.name
         
-        print(f"\nMovie:  {sourceFile.name}")
-        print(f"  -> {destFile}")
+        logger.value("movie",sourceFile.name)
+        logger.value("  ->", destFile)
         
         if self.dryRun:
-            print("  [DRY RUN - no changes made]")
-            logger.info(f"... dry run: would move to {destFile}")
+            logger.action(f"would move to: {destFile}")
             return True
         
         try:
             destDir.mkdir(parents=True, exist_ok=True)
             shutil.move(str(sourceFile), str(destFile))
-            print("  ✓ Moved successfully")
-            logger.info(f"...movie moved successfully: {destFile}")
+            logger.action(f"movie moved successfully: {destFile}")
             return True
         except Exception as e:
-            print(f"  ✗ Error:  {e}")
             logger.error(f"Failed to move movie: {e}")
             return False
     
@@ -339,7 +326,7 @@ class VideoOrganizer:
         showName = tvInfo["showName"]
         season = tvInfo["season"]
         
-        logger.info(f"... processing TV show: {sourceFile. name}")
+        logger.value("processing TV show", sourceFile.name)
         
         # Check if user confirmation needed
         if interactive:
@@ -365,28 +352,88 @@ class VideoOrganizer:
             showDir = storage / showName
         
         # Create season directory
-        seasonDir = showDir / f"Season {season: 02d}"
+        seasonDir = showDir / f"Season {season:02d}"
         destFile = seasonDir / sourceFile.name
         
-        print(f"\nTV Show: {sourceFile.name}")
-        print(f"  -> {destFile}")
+        logger.value("TV Show", sourceFile.name)
+        logger.value("  ->", destFile)
         
         if self.dryRun:
-            print("  [DRY RUN - no changes made]")
-            logger.info(f"... dry run: would move to {destFile}")
+            logger.action(f"would move to: {destFile}")
             return True
         
         try:
             seasonDir.mkdir(parents=True, exist_ok=True)
             shutil.move(str(sourceFile), str(destFile))
-            print("  ✓ Moved successfully")
-            logger.info(f"...TV show moved successfully: {destFile}")
+            logger.action(f"TV show moved successfully: {destFile}")
             return True
         except Exception as e: 
-            print(f"  ✗ Error: {e}")
             logger.error(f"Failed to move TV show: {e}")
             return False
     
+    def _isSampleLikeFolder(self, path: Path) -> bool:
+        """Return True if the folder name indicates it is a sample/extras folder."""
+        return "sample" in path.name.lower()
+
+    def _hasRealVideoContent(self, folder: Path) -> bool:
+        """
+        Return True if folder contains real video files outside of sample-like sub-folders.
+
+        Args:
+            folder: Directory to inspect recursively
+        """
+        for item in folder.rglob("*"):
+            if item.is_file() and item.suffix.lower() in VIDEO_EXTENSIONS:
+                # Ignore files that live inside a sample-like folder
+                relativeParts = item.relative_to(folder).parts
+                if any(self._isSampleLikeFolder(Path(part)) for part in relativeParts[:-1]):
+                    continue
+                return True
+        return False
+
+    def cleanEmptyFolders(self) -> dict:
+        """
+        Remove sub-folders in the source directory that contain no real video files.
+
+        Folders whose only video content is inside sample-like sub-folders are
+        treated as empty and removed together with their contents.
+
+        Returns:
+            Dictionary with counts: {'removed': int, 'skipped': int, 'errors': int}
+        """
+        logger.doing("starting clean of empty folders")
+
+        stats = {"removed": 0, "skipped": 0, "errors": 0}
+
+        if not self.sourceDir.exists():
+            logger.error(f"source directory does not exist: {self.sourceDir}")
+            return stats
+
+        for subDir in sorted(self.sourceDir.iterdir()):
+            if not subDir.is_dir():
+                continue
+
+            if self._hasRealVideoContent(subDir):
+                logger.value("keeping (has video content)", subDir.name)
+                stats["skipped"] += 1
+                continue
+
+            logger.action(f"removing empty folder: {subDir}")
+            if self.dryRun:
+                stats["removed"] += 1
+                continue
+
+            try:
+                shutil.rmtree(str(subDir))
+                logger.action(f"removed: {subDir}")
+                stats["removed"] += 1
+            except Exception as e:
+                logger.error(f"failed to remove {subDir}: {e}")
+                stats["errors"] += 1
+
+        logger.done(f"clean complete")
+        return stats
+
     def processFiles(self, interactive: bool = True):
         """
         Process all video files in the source directory.
@@ -394,28 +441,28 @@ class VideoOrganizer:
         Args:
             interactive:  Whether to prompt user for ambiguous files
         """
-        logger.info("... starting file processing")
+        logger.doing("starting file processing")
         
         if not self.sourceDir.exists():
             logger.error(f"Source directory does not exist: {self.sourceDir}")
-            print(f"Error: Source directory does not exist: {self.sourceDir}")
             return
         
         # Scan for storage locations
-        print("Scanning for storage locations...")
+        logger.doing("scanning for storage locations...")
         movieDirs, videoDirs = self.scanStorageLocations()
         
-        print(f"\nFound {len(movieDirs)} movie storage location(s):")
+        logger.info(f"found {len(movieDirs)} movie storage location(s) and {len(videoDirs)} TV storage location(s)")
         for d in movieDirs:
-            print(f"  - {d}")
+            logger.value("  - ", d)
         
-        print(f"\nFound {len(videoDirs)} TV storage location(s):")
+        logger.info(f"found {len(videoDirs)} TV storage location(s):")
         for d in videoDirs:
-            print(f"  - {d}")
+            logger.value("  - ", d)
         
-        if not movieDirs and not videoDirs:
-            logger.error("No storage locations found")
-            print("\nError: No storage locations found!")
+        if not movieDirs:
+            logger.error("No Movie storage locations found")
+        if not videoDirs:   
+            logger.error("No TV storage locations found!")
             return
         
         # Get all video files
@@ -425,12 +472,10 @@ class VideoOrganizer:
         ]
         
         if not videoFiles:
-            logger. info(f"No video files found in {self.sourceDir}")
-            print(f"\nNo video files found in {self.sourceDir}")
+            logger.value("no video files found in", self.sourceDir)
             return
         
-        print(f"\nFound {len(videoFiles)} video file(s) to process\n")
-        print("=" * 60)
+        logger.info(f"found {len(videoFiles)} video file(s) to process")
         
         # Process each file
         stats = {"movies": 0, "tv": 0, "skipped": 0, "errors":  0}
@@ -455,9 +500,9 @@ class VideoOrganizer:
                 continue
             
             # Could not determine type
-            logger.warning(f"Could not parse filename: {videoFile.name}")
-            print(f"\nSkipped: {videoFile.name}")
-            print("  Could not determine if movie or TV show")
+            logger.warning(f"could not parse filename: {videoFile.name}")
+            logger.value("skipped:", videoFile.name)
+            logger.info("could not determine if movie or TV show")
             
             if interactive:
                 fileType = input("  Is this a (m)ovie or (t)v show? (or 's' to skip): ").strip().lower()
@@ -504,16 +549,15 @@ class VideoOrganizer:
             stats["skipped"] += 1
         
         # Print summary
-        print("\n" + "=" * 60)
-        print("SUMMARY")
-        print("=" * 60)
-        print(f"Movies moved:      {stats['movies']}")
-        print(f"TV shows moved:   {stats['tv']}")
-        print(f"Skipped:          {stats['skipped']}")
-        print(f"Errors:           {stats['errors']}")
-        print("=" * 60)
-        
-        logger.info(f"... processing complete:  {stats}")
+        summary = f"""
+SUMMARY
+Movies moved:   {stats['movies']}
+TV shows moved: {stats['tv']}
+Skipped:        {stats['skipped']}
+Errors:         {stats['errors']}
+"""
+        drawBox(summary)
+        logger.value("processing complete", stats)
 
 
 def main():
@@ -527,33 +571,68 @@ def main():
         help="Source directory containing files to organize (default: /mnt/video2/toFile)"
     )
     parser.add_argument(
-        "--dry-run",
+        '--confirm',
+        default=False,
+        action='store_true',
+        help='confirm execution — actually make changes (default is dry-run)',
+    )
+    parser.add_argument(
+        "--clean",
         action="store_true",
-        help="Show what would be done without making changes"
+        help="remove empty sub-folders from source directory (folders with only sample content are treated as empty)"
     )
     parser.add_argument(
         "--non-interactive",
+        dest="non_interactive",
         action="store_true",
         help="Run without user prompts (skip files that cannot be auto-detected)"
-    )
-    parser.add_argument(
-        "--log-level",
-        default="INFO",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-        help="Set logging level (default: INFO)"
     )
     
     args = parser.parse_args()
     
-    # Setup logging
-    setupLogging(args.log_level)
-    logger.info("... organiseMyVideo starting")
+    dryRun = True if not args.confirm else False
+
+    # Setup logging — dryRun passed so logger.action() applies [] prefix correctly.
+    # logUtils._setupLogging guards console handler with isinstance(h, StreamHandler)
+    # which also matches FileHandler (subclass); add console handler explicitly if absent.
+    global logger
+    logTimestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    logDir = Path.home() / ".local" / "state" / "organiseMy" / "logs"
+    logDir.mkdir(parents=True, exist_ok=True)
+    logFile = logDir / f"organiseMyVideo_{logTimestamp}.log"
+    logger = getLogger("organiseMyVideo", logDir=logDir, includeConsole=True, dryRun=dryRun)
+    if not any(type(h) is logging.StreamHandler for h in logger.logger.handlers):
+        _ch = logging.StreamHandler()
+        _ch.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+        logger.logger.addHandler(_ch)
+    else:
+        # Update the existing console handler formatter to include timestamp
+        for h in logger.logger.handlers:
+            if type(h) is logging.StreamHandler:
+                h.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+    logger.doing("organiseMyVideo starting")
+    logger.value("logging to", logFile)
     
-    # Create organizer and process files
-    organizer = VideoOrganizer(sourceDir=args.source, dryRun=args.dry_run)
-    organizer.processFiles(interactive=not args.non_interactive)
+    if dryRun:
+        logger.info("dry-run mode (no changes will be made) — use --confirm to execute")
+    else:
+        logger.info("confirm mode — changes will be made")
     
-    logger.info("...organiseMyVideo complete")
+    # Create organizer and run the requested mode
+    organizer = VideoOrganizer(sourceDir=args.source, dryRun=dryRun)
+
+    if args.clean:
+        cleanStats = organizer.cleanEmptyFolders()
+        summary = f"""CLEAN SUMMARY
+Folders removed: {cleanStats['removed']}
+Folders kept:    {cleanStats['skipped']}
+Errors:          {cleanStats['errors']}
+"""
+        drawBox(summary)
+    else:
+        organizer.processFiles(interactive=not args.non_interactive)
+
+    logger.done("organiseMyVideo complete")
 
 
 if __name__ == "__main__": 

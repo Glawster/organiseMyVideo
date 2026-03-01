@@ -10,7 +10,7 @@ A Python script to automatically organize video files from a staging directory i
   - Movies → `/mnt/movie<n>/Title (Year)/`
   - TV Shows → `/mnt/video<n>/TV/Show Name/Season NN/`
 - **User Confirmation**: Interactive prompts when filenames are ambiguous
-- **Dry Run Mode**: Preview changes before executing
+- **Dry Run Mode**: Safe default — preview changes before executing (use `--confirm` to apply)
 - **Space Management**: Automatically selects storage with most free space for new content
 - **Comprehensive Logging**: All operations logged to `organiseMyVideo.log`
 
@@ -35,14 +35,14 @@ Example: `The Matrix (1999).mp4`
 
 ## Usage
 
-### Basic Usage
+### Basic Usage (Dry Run — default, no changes made)
 ```bash
 python organiseMyVideo.py
 ```
 
-### Dry Run (preview without changes)
+### Confirm Execution (actually make changes)
 ```bash
-python organiseMyVideo.py --dry-run
+python organiseMyVideo.py --confirm
 ```
 
 ### Custom Source Directory
