@@ -21,7 +21,7 @@ from organiseMyProjects.logUtils import getLogger, drawBox # type: ignore
 logger = getLogger("organiseMyVideo", includeConsole=True, dryRun=True)
 
 # Video file extensions to process
-VIDEO_EXTENSIONS = {". mp4", ".mkv", ". avi", ".mov", ".wmv", ".flv", ".m4v", ".mpg", ".mpeg"}
+VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".m4v", ".mpg", ".mpeg"}
 
 class VideoOrganizer:
     """Main class for organizing video files into structured directories."""
@@ -571,7 +571,7 @@ def main():
     parser.add_argument(
         '--confirm',
         default=False,
-        action='store_false',
+        action='store_true',
         help='confirm execution — actually make changes (default is dry-run)',
     )
     parser.add_argument(
