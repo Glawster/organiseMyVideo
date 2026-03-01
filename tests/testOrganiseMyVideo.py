@@ -433,3 +433,95 @@ def testMoveTvShowNoStorageReturnsFalse(confirmedOrganizer: VideoOrganizer):
               "extension": ".mkv", "type": "tv"}
     result = confirmedOrganizer.moveTvShow(srcFile, tvInfo, [], interactive=False)
     assert result is False
+
+
+# ---------------------------------------------------------------------------
+# cleanNames — dry-run
+# ---------------------------------------------------------------------------
+
+
+def testCleanNamesDryRunDoesNotRename(sourceDir: Path, organizer: VideoOrganizer):
+    original = sourceDir / "www.UIndex.org - Some Movie (2020)"
+    original.mkdir()
+    stats = organizer.cleanNames()
+    assert original.exists(), "dry-run must not rename the folder"
+    assert stats["renamed"] == 1
+    assert stats["errors"] == 0
+
+
+def testCleanNamesDryRunSkipsNonMatching(sourceDir: Path, organizer: VideoOrganizer):
+    normal = sourceDir / "Normal Movie (2020)"
+    normal.mkdir()
+    stats = organizer.cleanNames()
+    assert normal.exists()
+    assert stats["renamed"] == 0
+    assert stats["skipped"] == 0
+
+
+def testCleanNamesDryRunTorrentingPrefix(sourceDir: Path, organizer: VideoOrganizer):
+    original = sourceDir / "www.Torrenting.com - Great Show S01E01.mkv"
+    original.write_bytes(b"x" * 50)
+    stats = organizer.cleanNames()
+    assert original.exists(), "dry-run must not rename the file"
+    assert stats["renamed"] == 1
+
+
+# ---------------------------------------------------------------------------
+# cleanNames — confirm mode (actual rename)
+# ---------------------------------------------------------------------------
+
+
+def testCleanNamesConfirmRenamesFolder(sourceDir: Path, confirmedOrganizer: VideoOrganizer):
+    original = sourceDir / "www.UIndex.org - Some Movie (2020)"
+    original.mkdir()
+    stats = confirmedOrganizer.cleanNames()
+    expected = sourceDir / "Some Movie (2020)"
+    assert not original.exists()
+    assert expected.exists()
+    assert stats["renamed"] == 1
+    assert stats["errors"] == 0
+
+
+def testCleanNamesConfirmRenamesFile(sourceDir: Path, confirmedOrganizer: VideoOrganizer):
+    original = sourceDir / "www.Torrenting.com - Great Show S01E01.mkv"
+    original.write_bytes(b"x" * 50)
+    stats = confirmedOrganizer.cleanNames()
+    expected = sourceDir / "Great Show S01E01.mkv"
+    assert not original.exists()
+    assert expected.exists()
+    assert stats["renamed"] == 1
+
+
+def testCleanNamesConfirmCaseInsensitive(sourceDir: Path, confirmedOrganizer: VideoOrganizer):
+    original = sourceDir / "WWW.UINDEX.ORG - Movie Title (2021)"
+    original.mkdir()
+    stats = confirmedOrganizer.cleanNames()
+    expected = sourceDir / "Movie Title (2021)"
+    assert expected.exists()
+    assert stats["renamed"] == 1
+
+
+def testCleanNamesMissingSrcReturnsZeroStats(tmp_path: Path):
+    org = VideoOrganizer(sourceDir=str(tmp_path / "nonexistent"), dryRun=False)
+    stats = org.cleanNames()
+    assert stats == {"renamed": 0, "skipped": 0, "errors": 0}
+
+
+def testCleanNamesLeavesNonMatchingUntouched(sourceDir: Path, confirmedOrganizer: VideoOrganizer):
+    keep = sourceDir / "Normal Movie (2019)"
+    keep.mkdir()
+    original = sourceDir / "www.UIndex.org - Prefixed Movie (2020)"
+    original.mkdir()
+    stats = confirmedOrganizer.cleanNames()
+    assert keep.exists()
+    assert stats["renamed"] == 1
+
+
+def testCleanNamesSkippedCounterWhenResultIsEmpty(sourceDir: Path, confirmedOrganizer: VideoOrganizer):
+    """A name that is only the prefix should be skipped (stripped result is empty)."""
+    prefixOnly = sourceDir / "www.UIndex.org - "
+    prefixOnly.mkdir()
+    stats = confirmedOrganizer.cleanNames()
+    assert prefixOnly.exists(), "prefix-only folder must not be removed"
+    assert stats["skipped"] == 1
+    assert stats["renamed"] == 0

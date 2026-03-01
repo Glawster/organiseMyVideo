@@ -25,6 +25,12 @@ logger = getLogger("organiseMyVideo")
 # Video file extensions to process
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".m4v", ".mpg", ".mpeg"}
 
+# Known torrent/index prefixes to strip from file and directory names
+PREFIX_PATTERNS = [
+    r"^\s*www\.UIndex\.org\s*-\s*",
+    r"^\s*www\.Torrenting\.com\s*-\s*",
+]
+
 class VideoOrganizer:
     """Main class for organizing video files into structured directories."""
     
@@ -391,6 +397,59 @@ class VideoOrganizer:
                 return True
         return False
 
+    def cleanNames(self) -> dict:
+        """
+        Strip known torrent/index prefixes from file and directory names in the source directory.
+
+        Returns:
+            Dictionary with counts: {'renamed': int, 'skipped': int, 'errors': int}
+        """
+        logger.doing("starting clean of prefixed names")
+
+        stats = {"renamed": 0, "skipped": 0, "errors": 0}
+
+        if not self.sourceDir.exists():
+            logger.error(f"source directory does not exist: {self.sourceDir}")
+            return stats
+
+        combinedRegex = re.compile("|".join(PREFIX_PATTERNS), re.IGNORECASE)
+
+        for entry in sorted(self.sourceDir.iterdir()):
+            oldName = entry.name
+            if not combinedRegex.match(oldName):
+                continue
+
+            newName = combinedRegex.sub("", oldName, count=1).strip()
+
+            if not newName or newName == oldName:
+                logger.value("skipped (no change)", oldName)
+                stats["skipped"] += 1
+                continue
+
+            newPath = self.sourceDir / newName
+
+            if self.dryRun:
+                logger.action(f"would rename: {oldName} → {newName}")
+                stats["renamed"] += 1
+                continue
+
+            try:
+                entry.rename(newPath)
+                logger.action(f"renamed: {oldName} → {newName}")
+                stats["renamed"] += 1
+            except FileExistsError:
+                logger.error(f"target already exists, skipping: {newName}")
+                stats["errors"] += 1
+            except PermissionError:
+                logger.error(f"permission denied renaming: {oldName}")
+                stats["errors"] += 1
+            except Exception as e:
+                logger.error(f"error renaming {oldName}: {e}")
+                stats["errors"] += 1
+
+        logger.done("clean names complete")
+        return stats
+
     def cleanEmptyFolders(self) -> dict:
         """
         Remove sub-folders in the source directory that contain no real video files.
@@ -622,11 +681,14 @@ def main():
     organizer = VideoOrganizer(sourceDir=args.source, dryRun=dryRun)
 
     if args.clean:
+        nameStats = organizer.cleanNames()
         cleanStats = organizer.cleanEmptyFolders()
         summary = f"""CLEAN SUMMARY
+Names renamed:   {nameStats['renamed']}
+Name errors:     {nameStats['errors']}
 Folders removed: {cleanStats['removed']}
 Folders kept:    {cleanStats['skipped']}
-Errors:          {cleanStats['errors']}
+Folder errors:   {cleanStats['errors']}
 """
         drawBox(summary)
     else:
