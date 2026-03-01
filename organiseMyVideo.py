@@ -431,7 +431,7 @@ class VideoOrganizer:
                 logger.error(f"failed to remove {subDir}: {e}")
                 stats["errors"] += 1
 
-        logger.done(f"clean complete: {stats}")
+        logger.done(f"clean complete")
         return stats
 
     def processFiles(self, interactive: bool = True):
