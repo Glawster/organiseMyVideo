@@ -12,6 +12,7 @@ import re
 import shutil
 import argparse
 import logging
+import datetime
 
 from pathlib import Path
 from typing import List, Tuple, Optional
@@ -595,13 +596,21 @@ def main():
     # logUtils._setupLogging guards console handler with isinstance(h, StreamHandler)
     # which also matches FileHandler (subclass); add console handler explicitly if absent.
     global logger
-    logger = getLogger("organiseMyVideo", includeConsole=True, dryRun=dryRun)
+    logTimestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    logDir = Path.home() / ".local" / "state" / "organiseMy" / "logs"
+    logDir.mkdir(parents=True, exist_ok=True)
+    logFile = logDir / f"organiseMyVideo_{logTimestamp}.log"
+    logger = getLogger("organiseMyVideo", logDir=logDir, includeConsole=True, dryRun=dryRun)
     if not any(type(h) is logging.StreamHandler for h in logger.logger.handlers):
         _ch = logging.StreamHandler()
-        _ch.setFormatter(logging.Formatter("%(levelname)s - %(message)s"))
+        _ch.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
         logger.logger.addHandler(_ch)
+    else:
+        # Update the existing console handler formatter to include timestamp
+        for h in logger.logger.handlers:
+            if type(h) is logging.StreamHandler:
+                h.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
     logger.doing("organiseMyVideo starting")
-    logFile = Path.home() / ".local" / "state" / "organiseMy" / "logs" / "organiseMyVideo.log"
     logger.value("logging to", logFile)
     
     if dryRun:
