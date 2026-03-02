@@ -368,6 +368,31 @@ def testCleanEmptyFoldersMixedDirs(sourceDir: Path, confirmedOrganizer: VideoOrg
 
 
 # ---------------------------------------------------------------------------
+# processFiles — video files in subdirectories
+# ---------------------------------------------------------------------------
+
+
+def testProcessFilesFindsVideoInSubdirectory(tmp_path: Path, confirmedOrganizer: VideoOrganizer):
+    """Files inside a subdirectory of sourceDir are found and moved."""
+    subDir = confirmedOrganizer.sourceDir / "One Mile (2026)"
+    subDir.mkdir(parents=True)
+    srcFile = subDir / "One.Mile.2026.1080p.WEBRip.x264.mp4"
+    srcFile.write_bytes(b"x" * 100)
+
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+
+    with patch.object(confirmedOrganizer, "scanStorageLocations", return_value=([movieStorage], [tmp_path / "TV"])):
+        with patch.object(confirmedOrganizer, "promptUserConfirmation",
+                          return_value={"name": "One Mile (2026)", "type": "movie"}):
+            confirmedOrganizer.processFiles(interactive=True)
+
+    destFile = movieStorage / "One Mile (2026)" / "One.Mile.2026.1080p.WEBRip.x264.mp4"
+    assert destFile.exists()
+    assert not srcFile.exists()
+
+
+# ---------------------------------------------------------------------------
 # moveMovie — dry-run
 # ---------------------------------------------------------------------------
 

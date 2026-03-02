@@ -575,9 +575,9 @@ class VideoOrganizer:
             logger.error("No TV storage locations found!")
             return
         
-        # Get all video files
+        # Get all video files (including those in subdirectories)
         videoFiles = [
-            f for f in self.sourceDir. iterdir()
+            f for f in self.sourceDir.rglob("*")
             if f.is_file() and f.suffix.lower() in VIDEO_EXTENSIONS
         ]
         
