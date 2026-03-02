@@ -436,6 +436,155 @@ def testMoveTvShowNoStorageReturnsFalse(confirmedOrganizer: VideoOrganizer):
 
 
 # ---------------------------------------------------------------------------
+# promptUserConfirmation — new behaviour (blank=skip, t/m=type switch)
+# ---------------------------------------------------------------------------
+
+
+def testPromptUserConfirmationYesReturnsName(organizer: VideoOrganizer):
+    with patch("builtins.input", return_value="y"):
+        result = organizer.promptUserConfirmation("file.mkv", "My Show", "tv")
+    assert result == {"name": "My Show", "type": "tv"}
+
+
+def testPromptUserConfirmationEnterReturnsDefault(organizer: VideoOrganizer):
+    with patch("builtins.input", return_value=""):
+        result = organizer.promptUserConfirmation("file.mkv", "My Show", "tv")
+    assert result == {"name": "My Show", "type": "tv"}
+
+
+def testPromptUserConfirmationCustomNameReturnsName(organizer: VideoOrganizer):
+    with patch("builtins.input", return_value="Better Show"):
+        result = organizer.promptUserConfirmation("file.mkv", "My Show", "tv")
+    assert result == {"name": "Better Show", "type": "tv"}
+
+
+def testPromptUserConfirmationNThenBlankUsesDefault(organizer: VideoOrganizer):
+    with patch("builtins.input", side_effect=["n", ""]):
+        result = organizer.promptUserConfirmation("file.mkv", "My Show", "tv")
+    assert result == {"name": "My Show", "type": "tv"}
+
+
+def testPromptUserConfirmationNThenSpaceUsesDefault(organizer: VideoOrganizer):
+    with patch("builtins.input", side_effect=["n", "   "]):
+        result = organizer.promptUserConfirmation("file.mkv", "My Show", "tv")
+    assert result == {"name": "My Show", "type": "tv"}
+
+
+def testPromptUserConfirmationNThenQuitReturnsNone(organizer: VideoOrganizer):
+    with patch("builtins.input", side_effect=["n", "quit"]):
+        result = organizer.promptUserConfirmation("file.mkv", "My Show", "tv")
+    assert result is None
+
+
+def testPromptUserConfirmationNThenNewNameReturnsName(organizer: VideoOrganizer):
+    with patch("builtins.input", side_effect=["n", "Corrected Show"]):
+        result = organizer.promptUserConfirmation("file.mkv", "My Show", "tv")
+    assert result == {"name": "Corrected Show", "type": "tv"}
+
+
+def testPromptUserConfirmationTSwitchesToTv(organizer: VideoOrganizer):
+    with patch("builtins.input", side_effect=["t", "Breaking Bad"]):
+        result = organizer.promptUserConfirmation("file.mkv", "Inception (2010)", "movie")
+    assert result == {"name": "Breaking Bad", "type": "tv"}
+
+
+def testPromptUserConfirmationTDefaultsToCurrentName(organizer: VideoOrganizer):
+    with patch("builtins.input", side_effect=["t", ""]):
+        result = organizer.promptUserConfirmation("file.mkv", "Inception (2010)", "movie")
+    assert result == {"name": "Inception (2010)", "type": "tv"}
+
+
+def testPromptUserConfirmationMSwitchesToMovie(organizer: VideoOrganizer):
+    with patch("builtins.input", side_effect=["m", "Inception"]):
+        result = organizer.promptUserConfirmation("file.mkv", "Breaking Bad", "tv")
+    assert result == {"name": "Inception", "type": "movie"}
+
+
+def testPromptUserConfirmationMDefaultsToCurrentName(organizer: VideoOrganizer):
+    with patch("builtins.input", side_effect=["m", ""]):
+        result = organizer.promptUserConfirmation("file.mkv", "Breaking Bad", "tv")
+    assert result == {"name": "Breaking Bad", "type": "movie"}
+
+
+# ---------------------------------------------------------------------------
+# moveMovie — skip and type-switch via promptUserConfirmation
+# ---------------------------------------------------------------------------
+
+
+def testMoveMovieUsesDefaultWhenUserEntersBlank(tmp_path: Path, confirmedOrganizer: VideoOrganizer):
+    srcFile = confirmedOrganizer.sourceDir / "Inception (2010).mp4"
+    srcFile.write_bytes(b"x" * 100)
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+    movieInfo = {"title": "Inception", "year": "2010", "extension": ".mp4", "type": "movie"}
+    with patch("builtins.input", side_effect=["n", ""]):
+        result = confirmedOrganizer.moveMovie(srcFile, movieInfo, [movieStorage])
+    assert result is True
+    assert not srcFile.exists()
+    destFile = movieStorage / "Inception (2010)" / "Inception (2010).mp4"
+    assert destFile.exists()
+
+
+def testMoveMovieSwitchesToTv(tmp_path: Path, confirmedOrganizer: VideoOrganizer):
+    srcFile = confirmedOrganizer.sourceDir / "Inception (2010).mp4"
+    srcFile.write_bytes(b"x" * 100)
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+    tvStorage = tmp_path / "tv1"
+    tvStorage.mkdir()
+    movieInfo = {"title": "Inception", "year": "2010", "extension": ".mp4", "type": "movie"}
+    # user says 't', enters show name "Inception Show", season 2
+    with patch("builtins.input", side_effect=["t", "Inception Show", "2"]):
+        result = confirmedOrganizer.moveMovie(
+            srcFile, movieInfo, [movieStorage], videoDirs=[tvStorage]
+        )
+    assert result is True
+    destFile = tvStorage / "Inception Show" / "Season 02" / "Inception (2010).mp4"
+    assert destFile.exists()
+    assert not srcFile.exists()
+
+
+# ---------------------------------------------------------------------------
+# moveTvShow — skip and type-switch via promptUserConfirmation
+# ---------------------------------------------------------------------------
+
+
+def testMoveTvShowUsesDefaultWhenUserEntersBlank(tmp_path: Path, confirmedOrganizer: VideoOrganizer):
+    srcFile = confirmedOrganizer.sourceDir / "Breaking.Bad.S01E01.Pilot.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    tvStorage = tmp_path / "tv1"
+    tvStorage.mkdir()
+    tvInfo = {"showName": "Breaking Bad", "season": 1, "episode": 1,
+              "extension": ".mkv", "type": "tv"}
+    with patch("builtins.input", side_effect=["n", ""]):
+        result = confirmedOrganizer.moveTvShow(srcFile, tvInfo, [tvStorage])
+    assert result is True
+    assert not srcFile.exists()
+    destFile = tvStorage / "Breaking Bad" / "Season 01" / "Breaking.Bad.S01E01.Pilot.mkv"
+    assert destFile.exists()
+
+
+def testMoveTvShowSwitchesToMovie(tmp_path: Path, confirmedOrganizer: VideoOrganizer):
+    srcFile = confirmedOrganizer.sourceDir / "Breaking.Bad.S01E01.Pilot.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    tvStorage = tmp_path / "tv1"
+    tvStorage.mkdir()
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+    tvInfo = {"showName": "Breaking Bad", "season": 1, "episode": 1,
+              "extension": ".mkv", "type": "tv"}
+    # user says 'm', enters movie title "Breaking Bad Movie", year 2013
+    with patch("builtins.input", side_effect=["m", "Breaking Bad Movie", "2013"]):
+        result = confirmedOrganizer.moveTvShow(
+            srcFile, tvInfo, [tvStorage], movieDirs=[movieStorage]
+        )
+    assert result is True
+    destFile = movieStorage / "Breaking Bad Movie (2013)" / "Breaking.Bad.S01E01.Pilot.mkv"
+    assert destFile.exists()
+    assert not srcFile.exists()
+
+
+# ---------------------------------------------------------------------------
 # cleanNames — dry-run
 # ---------------------------------------------------------------------------
 

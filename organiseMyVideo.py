@@ -217,69 +217,103 @@ class VideoOrganizer:
         
         return bestDir
     
-    def promptUserConfirmation(self, filename: str, defaultName: str, fileType: str) -> str:
+    def promptUserConfirmation(self, filename: str, defaultName: str, fileType: str) -> Optional[dict]:
         """
         Prompt user to confirm or correct the detected name.
-        
+
         Args:
             filename: Original filename
             defaultName:  Detected name to confirm
             fileType: Type of file ('tv' or 'movie')
-            
+
         Returns:
-            Confirmed or corrected name
+            dict with 'name' and 'type' keys, or None to skip this item.
+            'type' may differ from fileType when the user switches category.
         """
         if fileType == "tv":
-            prompt = f"\nTV Show detected: '{defaultName}'\nIs this correct?  (y/n/q or enter new name): "
+            prompt = f"\nTV Show detected: '{defaultName}'\nIs this correct?  (y/n/q/t/m or enter new name): "
         else:
-            prompt = f"\nMovie detected: '{defaultName}'\nIs this correct? (y/n/q or enter new name): "
-        
+            prompt = f"\nMovie detected: '{defaultName}'\nIs this correct? (y/n/q/t/m or enter new name): "
+
         response = input(prompt).strip()
-        
+
         if response.lower() in ["y", "yes", ""]:
-            return defaultName
+            return {"name": defaultName, "type": fileType}
         elif response.lower() in ["n", "no"]:
-            newName = input(f"Enter correct {fileType} name: ").strip()
-            return newName if newName else defaultName
+            rawName = input(f"Enter new name (blank for default, enter 'quit' to skip): ")
+            if not rawName:
+                return {"name": defaultName, "type": fileType}
+            if rawName.strip().lower() == "quit":
+                return None
+            strippedName = rawName.strip()
+            if not strippedName:
+                return {"name": defaultName, "type": fileType}
+            return {"name": strippedName, "type": fileType}
         elif response.lower() in ["q", "quit"]:
             logger.info("user requested to quit")
             sys.exit(0)
+        elif response.lower() == "t":
+            showName = input(f"  Enter show name (default: {defaultName}): ").strip()
+            return {"name": showName if showName else defaultName, "type": "tv"}
+        elif response.lower() == "m":
+            title = input(f"  Enter movie title (default: {defaultName}): ").strip()
+            return {"name": title if title else defaultName, "type": "movie"}
         else:
-            return response
+            return {"name": response, "type": fileType}
     
-    def moveMovie(self, sourceFile: Path, movieInfo: dict, movieDirs: List[Path], 
-                  interactive: bool = True) -> bool:
+    def moveMovie(self, sourceFile: Path, movieInfo: dict, movieDirs: List[Path],
+                  videoDirs: Optional[List[Path]] = None, interactive: bool = True) -> bool:
         """
         Move movie file to appropriate location.
-        
+
         Args:
             sourceFile: Source file path
             movieInfo:  Parsed movie information
             movieDirs: List of movie storage directories
+            videoDirs: Optional list of TV storage directories (used when switching type)
             interactive: Whether to prompt user for confirmation
-            
-        Returns: 
+
+        Returns:
             True if successful, False otherwise
         """
         title = movieInfo["title"]
         year = movieInfo["year"]
-        
+
         logger.value("processing movie", sourceFile.name)
-        
+
         # Check if user confirmation needed
         if interactive:
-            confirmedTitle = self.promptUserConfirmation(
+            result = self.promptUserConfirmation(
                 sourceFile.name,
                 f"{title} ({year})",
                 "movie"
             )
+            if result is None:
+                logger.info(f"skipping: {sourceFile.name}")
+                return False
+            if result["type"] == "tv":
+                # User wants to process as TV show instead
+                season = input("  Season number (default 1): ").strip()
+                season = int(season) if season.isdigit() else 1
+                tvInfo = {
+                    "showName": result["name"],
+                    "season": season,
+                    "episode": 0,
+                    "extension": sourceFile.suffix,
+                    "type": "tv",
+                }
+                if videoDirs:
+                    return self.moveTvShow(sourceFile, tvInfo, videoDirs, interactive=False)
+                logger.error("no TV storage locations available for type switch")
+                return False
+            confirmedTitle = result["name"]
             # Re-parse if user provided different input
             if confirmedTitle != f"{title} ({year})":
                 # Try to extract year from new input
-                match = re.match(r"^(.+? )\s*[\(\[]\s*(\d{4})\s*[\)\]]", confirmedTitle)
+                match = re.match(r"^(.+?)\s*[\(\[]\s*(\d{4})\s*[\)\]]", confirmedTitle)
                 if match:
                     title = match.group(1).strip()
-                    year = match. group(2)
+                    year = match.group(2)
                 else:
                     title = confirmedTitle
         
@@ -316,32 +350,49 @@ class VideoOrganizer:
             return False
     
     def moveTvShow(self, sourceFile: Path, tvInfo: dict, videoDirs: List[Path],
-                   interactive: bool = True) -> bool:
+                   movieDirs: Optional[List[Path]] = None, interactive: bool = True) -> bool:
         """
         Move TV show file to appropriate location.
-        
+
         Args:
             sourceFile: Source file path
             tvInfo: Parsed TV show information
             videoDirs: List of TV storage directories
+            movieDirs: Optional list of movie storage directories (used when switching type)
             interactive:  Whether to prompt user for confirmation
-            
+
         Returns:
             True if successful, False otherwise
         """
         showName = tvInfo["showName"]
         season = tvInfo["season"]
-        
+
         logger.value("processing TV show", sourceFile.name)
-        
+
         # Check if user confirmation needed
         if interactive:
-            confirmedShow = self.promptUserConfirmation(
+            result = self.promptUserConfirmation(
                 sourceFile.name,
                 showName,
                 "tv"
             )
-            showName = confirmedShow
+            if result is None:
+                logger.info(f"skipping: {sourceFile.name}")
+                return False
+            if result["type"] == "movie":
+                # User wants to process as movie instead
+                year = input("  Year (e.g. 2020): ").strip()
+                movieInfo = {
+                    "title": result["name"],
+                    "year": year if year else "Unknown",
+                    "extension": sourceFile.suffix,
+                    "type": "movie",
+                }
+                if movieDirs:
+                    return self.moveMovie(sourceFile, movieInfo, movieDirs, interactive=False)
+                logger.error("no movie storage locations available for type switch")
+                return False
+            showName = result["name"]
         
         # Find existing show directory or choose storage location
         existingShowDir = self.findExistingTvShowDir(showName, videoDirs)
@@ -543,16 +594,16 @@ class VideoOrganizer:
             # Try parsing as TV show first
             tvInfo = self.parseTvFilename(videoFile.name)
             if tvInfo and videoDirs:
-                if self.moveTvShow(videoFile, tvInfo, videoDirs, interactive):
+                if self.moveTvShow(videoFile, tvInfo, videoDirs, movieDirs=movieDirs, interactive=interactive):
                     stats["tv"] += 1
                 else:
                     stats["errors"] += 1
                 continue
             
             # Try parsing as movie
-            movieInfo = self. parseMovieFilename(videoFile.name)
+            movieInfo = self.parseMovieFilename(videoFile.name)
             if movieInfo and movieDirs:
-                if self.moveMovie(videoFile, movieInfo, movieDirs, interactive):
+                if self.moveMovie(videoFile, movieInfo, movieDirs, videoDirs=videoDirs, interactive=interactive):
                     stats["movies"] += 1
                 else: 
                     stats["errors"] += 1
