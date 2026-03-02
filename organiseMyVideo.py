@@ -2,8 +2,8 @@
 """
 Organise My Video
 Moves video files from a staging directory to organized storage locations.
-Movies:    /mnt/movie<n>/Title (Year)/
-TV Shows: /mnt/video<n>/TV/Show Name/Season NN/
+Movies:    /mnt/movie<n>/Title (Year)/  or  /mnt/myPictures/Title (Year)/
+TV Shows: /mnt/video<n>/TV/Show Name/Season NN/  or  /mnt/myVideo/TV/Show Name/Season NN/
 """
 
 import os
@@ -62,10 +62,10 @@ class VideoOrganizer:
         if mntPath.exists():
             for item in mntPath.iterdir():
                 if item.is_dir():
-                    if re.match(r"movie\d*", item.name):
+                    if re.match(r"movie\d*$|myPictures$", item.name):
                         movieDirs.append(item)
                         logger.value("found movie storage", item)
-                    elif re.match(r"video\d*", item.name):
+                    elif re.match(r"video\d*$|myVideo$", item.name):
                         # Look for TV subdirectory
                         tvDir = item / "TV"
                         if tvDir.exists():

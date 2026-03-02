@@ -107,6 +107,60 @@ def testParseMovieFilenameReturnsNoneForUnparseable(organizer: VideoOrganizer):
 
 
 # ---------------------------------------------------------------------------
+# scanStorageLocations
+# ---------------------------------------------------------------------------
+
+
+def testScanStorageLocationsFindsMovieDirs(tmp_path: Path, organizer: VideoOrganizer):
+    """movie<n> directories are detected as movie storage."""
+    mnt = tmp_path / "mnt"
+    (mnt / "movie1").mkdir(parents=True)
+    (mnt / "movie2").mkdir(parents=True)
+    with patch("organiseMyVideo.Path") as mockPath:
+        mockPath.return_value = mnt
+        movieDirs, videoDirs = organizer.scanStorageLocations()
+    assert len(movieDirs) == 2
+    assert len(videoDirs) == 0
+
+
+def testScanStorageLocationsFindsMyPicturesAsMovieStorage(tmp_path: Path, organizer: VideoOrganizer):
+    """/mnt/myPictures is detected as movie storage."""
+    mnt = tmp_path / "mnt"
+    (mnt / "myPictures").mkdir(parents=True)
+    with patch("organiseMyVideo.Path") as mockPath:
+        mockPath.return_value = mnt
+        movieDirs, videoDirs = organizer.scanStorageLocations()
+    assert any(d.name == "myPictures" for d in movieDirs)
+    assert len(videoDirs) == 0
+
+
+def testScanStorageLocationsFindsMyVideoAsTvStorage(tmp_path: Path, organizer: VideoOrganizer):
+    """/mnt/myVideo/TV is detected as TV storage."""
+    mnt = tmp_path / "mnt"
+    tvDir = mnt / "myVideo" / "TV"
+    tvDir.mkdir(parents=True)
+    with patch("organiseMyVideo.Path") as mockPath:
+        mockPath.return_value = mnt
+        movieDirs, videoDirs = organizer.scanStorageLocations()
+    assert len(movieDirs) == 0
+    assert any(d.name == "TV" for d in videoDirs)
+
+
+def testScanStorageLocationsFindsAllLocationTypes(tmp_path: Path, organizer: VideoOrganizer):
+    """movie<n>, myPictures, video<n>/TV, and myVideo/TV are all detected."""
+    mnt = tmp_path / "mnt"
+    (mnt / "movie1").mkdir(parents=True)
+    (mnt / "myPictures").mkdir(parents=True)
+    (mnt / "video1" / "TV").mkdir(parents=True)
+    (mnt / "myVideo" / "TV").mkdir(parents=True)
+    with patch("organiseMyVideo.Path") as mockPath:
+        mockPath.return_value = mnt
+        movieDirs, videoDirs = organizer.scanStorageLocations()
+    assert len(movieDirs) == 2
+    assert len(videoDirs) == 2
+
+
+# ---------------------------------------------------------------------------
 # findExistingMovieDir
 # ---------------------------------------------------------------------------
 
