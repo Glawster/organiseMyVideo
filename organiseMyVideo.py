@@ -240,9 +240,9 @@ class VideoOrganizer:
         if response.lower() in ["y", "yes", ""]:
             return {"name": defaultName, "type": fileType}
         elif response.lower() in ["n", "no"]:
-            rawName = input(f"Enter new name (space for default, blank/'quit' to skip): ")
+            rawName = input(f"Enter new name (blank for default, enter 'quit' to skip): ")
             if not rawName:
-                return None
+                return {"name": defaultName, "type": fileType}
             if rawName.strip().lower() == "quit":
                 return None
             strippedName = rawName.strip()
