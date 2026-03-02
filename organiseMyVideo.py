@@ -659,8 +659,7 @@ class VideoOrganizer:
             stats["skipped"] += 1
         
         # Print summary
-        summary = f"""
-SUMMARY
+        summary = f"""SUMMARY
 Movies moved:   {stats['movies']}
 TV shows moved: {stats['tv']}
 Skipped:        {stats['skipped']}
