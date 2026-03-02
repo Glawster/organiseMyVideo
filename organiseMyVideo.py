@@ -465,7 +465,9 @@ class VideoOrganizer:
 
         combinedRegex = re.compile("|".join(PREFIX_PATTERNS), re.IGNORECASE)
 
-        for entry in sorted(self.sourceDir.iterdir()):
+        for entry in sorted(self.sourceDir.rglob("*"), key=lambda p: (len(p.parts), str(p)), reverse=True):
+            if not entry.exists():
+                continue
             oldName = entry.name
             if not combinedRegex.match(oldName):
                 continue
@@ -477,7 +479,7 @@ class VideoOrganizer:
                 stats["skipped"] += 1
                 continue
 
-            newPath = self.sourceDir / newName
+            newPath = entry.parent / newName
 
             if self.dryRun:
                 logger.action(f"would rename: {oldName} → {newName}")
@@ -519,8 +521,8 @@ class VideoOrganizer:
             logger.error(f"source directory does not exist: {self.sourceDir}")
             return stats
 
-        for subDir in sorted(self.sourceDir.iterdir()):
-            if not subDir.is_dir():
+        for subDir in sorted(self.sourceDir.rglob("*"), key=lambda p: (len(p.parts), str(p)), reverse=True):
+            if not subDir.exists() or not subDir.is_dir():
                 continue
 
             if self._hasRealVideoContent(subDir):

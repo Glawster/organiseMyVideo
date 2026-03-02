@@ -360,11 +360,24 @@ def testCleanEmptyFoldersMixedDirs(sourceDir: Path, confirmedOrganizer: VideoOrg
 
     stats = confirmedOrganizer.cleanEmptyFolders()
     assert stats["removed"] == 2
-    assert stats["skipped"] == 1
+    assert stats["skipped"] == 2  # MovieA + MovieB/Sample (has direct video content)
     assert stats["errors"] == 0
     assert realDir.exists()
     assert not emptyDir.exists()
     assert not sampleDir.exists()
+
+
+def testCleanEmptyFoldersRemovesNestedEmptyDir(sourceDir: Path, confirmedOrganizer: VideoOrganizer):
+    """An empty subdirectory nested inside a real-content dir is removed."""
+    realDir = sourceDir / "MovieA"
+    realDir.mkdir()
+    (realDir / "MovieA.mkv").write_bytes(b"x" * 100)
+    nestedEmpty = realDir / "Extras"
+    nestedEmpty.mkdir()
+    stats = confirmedOrganizer.cleanEmptyFolders()
+    assert realDir.exists()
+    assert not nestedEmpty.exists()
+    assert stats["removed"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -753,3 +766,16 @@ def testCleanNamesSkippedCounterWhenResultIsEmpty(sourceDir: Path, confirmedOrga
     assert prefixOnly.exists(), "prefix-only folder must not be removed"
     assert stats["skipped"] == 1
     assert stats["renamed"] == 0
+
+
+def testCleanNamesConfirmRenamesNestedFile(sourceDir: Path, confirmedOrganizer: VideoOrganizer):
+    """A prefixed file inside a subdirectory is renamed in-place."""
+    subDir = sourceDir / "Some Movie (2020)"
+    subDir.mkdir()
+    original = subDir / "www.Torrenting.com - Some Movie (2020).mkv"
+    original.write_bytes(b"x" * 50)
+    stats = confirmedOrganizer.cleanNames()
+    expected = subDir / "Some Movie (2020).mkv"
+    assert not original.exists()
+    assert expected.exists()
+    assert stats["renamed"] == 1
