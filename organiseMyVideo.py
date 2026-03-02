@@ -240,10 +240,15 @@ class VideoOrganizer:
         if response.lower() in ["y", "yes", ""]:
             return {"name": defaultName, "type": fileType}
         elif response.lower() in ["n", "no"]:
-            newName = input(f"Enter new name (blank to skip): ").strip()
-            if not newName:
+            rawName = input(f"Enter new name (blank to skip, 'quit' to skip): ")
+            if not rawName:
                 return None
-            return {"name": newName, "type": fileType}
+            if rawName.strip().lower() == "quit":
+                return None
+            strippedName = rawName.strip()
+            if not strippedName:
+                return {"name": defaultName, "type": fileType}
+            return {"name": strippedName, "type": fileType}
         elif response.lower() in ["q", "quit"]:
             logger.info("user requested to quit")
             sys.exit(0)

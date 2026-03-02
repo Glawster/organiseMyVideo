@@ -464,6 +464,18 @@ def testPromptUserConfirmationNThenBlankReturnsNone(organizer: VideoOrganizer):
     assert result is None
 
 
+def testPromptUserConfirmationNThenSpaceUsesDefault(organizer: VideoOrganizer):
+    with patch("builtins.input", side_effect=["n", "   "]):
+        result = organizer.promptUserConfirmation("file.mkv", "My Show", "tv")
+    assert result == {"name": "My Show", "type": "tv"}
+
+
+def testPromptUserConfirmationNThenQuitReturnsNone(organizer: VideoOrganizer):
+    with patch("builtins.input", side_effect=["n", "quit"]):
+        result = organizer.promptUserConfirmation("file.mkv", "My Show", "tv")
+    assert result is None
+
+
 def testPromptUserConfirmationNThenNewNameReturnsName(organizer: VideoOrganizer):
     with patch("builtins.input", side_effect=["n", "Corrected Show"]):
         result = organizer.promptUserConfirmation("file.mkv", "My Show", "tv")
