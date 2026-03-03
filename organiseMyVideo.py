@@ -62,9 +62,15 @@ class VideoOrganizer:
         if mntPath.exists():
             for item in mntPath.iterdir():
                 if item.is_dir():
-                    if re.match(r"movie\d*$|myPictures$", item.name):
+                    if re.match(r"movie\d*$", item.name):
                         movieDirs.append(item)
                         logger.value("found movie storage", item)
+                    elif re.match(r"myPictures$", item.name):
+                        # Use Movies subdirectory if present, otherwise use root
+                        moviesSubDir = item / "Movies"
+                        movieStorage = moviesSubDir if moviesSubDir.exists() else item
+                        movieDirs.append(movieStorage)
+                        logger.value("found movie storage", movieStorage)
                     elif re.match(r"video\d*$|myVideo$", item.name):
                         # Look for TV subdirectory
                         tvDir = item / "TV"

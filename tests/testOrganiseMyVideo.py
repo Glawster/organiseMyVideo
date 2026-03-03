@@ -124,13 +124,24 @@ def testScanStorageLocationsFindsMovieDirs(tmp_path: Path, organizer: VideoOrgan
 
 
 def testScanStorageLocationsFindsMyPicturesAsMovieStorage(tmp_path: Path, organizer: VideoOrganizer):
-    """/mnt/myPictures is detected as movie storage."""
+    """/mnt/myPictures root is used as movie storage when no Movies subdir exists."""
     mnt = tmp_path / "mnt"
     (mnt / "myPictures").mkdir(parents=True)
     with patch("organiseMyVideo.Path") as mockPath:
         mockPath.return_value = mnt
         movieDirs, videoDirs = organizer.scanStorageLocations()
     assert any(d.name == "myPictures" for d in movieDirs)
+    assert len(videoDirs) == 0
+
+
+def testScanStorageLocationsUsesMyPicturesMoviesSubdir(tmp_path: Path, organizer: VideoOrganizer):
+    """/mnt/myPictures/Movies is used as movie storage when the Movies subdir exists."""
+    mnt = tmp_path / "mnt"
+    (mnt / "myPictures" / "Movies").mkdir(parents=True)
+    with patch("organiseMyVideo.Path") as mockPath:
+        mockPath.return_value = mnt
+        movieDirs, videoDirs = organizer.scanStorageLocations()
+    assert any(d.name == "Movies" for d in movieDirs)
     assert len(videoDirs) == 0
 
 
