@@ -2,8 +2,8 @@
 """
 Organise My Video
 Moves video files from a staging directory to organized storage locations.
-Movies:    /mnt/movie<n>/Title (Year)/
-TV Shows: /mnt/video<n>/TV/Show Name/Season NN/
+Movies:    /mnt/movie<n>/Title (Year)/  or  /mnt/myPictures/Title (Year)/
+TV Shows: /mnt/video<n>/TV/Show Name/Season NN/  or  /mnt/myVideo/TV/Show Name/Season NN/
 """
 
 import os
@@ -62,10 +62,16 @@ class VideoOrganizer:
         if mntPath.exists():
             for item in mntPath.iterdir():
                 if item.is_dir():
-                    if re.match(r"movie\d*", item.name):
+                    if re.match(r"movie\d*$", item.name):
                         movieDirs.append(item)
                         logger.value("found movie storage", item)
-                    elif re.match(r"video\d*", item.name):
+                    elif re.match(r"myPictures$", item.name):
+                        # Use Movies subdirectory if present, otherwise use root
+                        moviesSubDir = item / "Movies"
+                        movieStorage = moviesSubDir if moviesSubDir.exists() else item
+                        movieDirs.append(movieStorage)
+                        logger.value("found movie storage", movieStorage)
+                    elif re.match(r"video\d*$|myVideo$", item.name):
                         # Look for TV subdirectory
                         tvDir = item / "TV"
                         if tvDir.exists():
@@ -465,7 +471,9 @@ class VideoOrganizer:
 
         combinedRegex = re.compile("|".join(PREFIX_PATTERNS), re.IGNORECASE)
 
-        for entry in sorted(self.sourceDir.iterdir()):
+        for entry in sorted(self.sourceDir.rglob("*"), key=lambda p: (len(p.parts), str(p)), reverse=True):
+            if not entry.exists():
+                continue
             oldName = entry.name
             if not combinedRegex.match(oldName):
                 continue
@@ -477,7 +485,7 @@ class VideoOrganizer:
                 stats["skipped"] += 1
                 continue
 
-            newPath = self.sourceDir / newName
+            newPath = entry.parent / newName
 
             if self.dryRun:
                 logger.action(f"would rename: {oldName} → {newName}")
@@ -519,8 +527,8 @@ class VideoOrganizer:
             logger.error(f"source directory does not exist: {self.sourceDir}")
             return stats
 
-        for subDir in sorted(self.sourceDir.iterdir()):
-            if not subDir.is_dir():
+        for subDir in sorted(self.sourceDir.rglob("*"), key=lambda p: (len(p.parts), str(p)), reverse=True):
+            if not subDir.exists() or not subDir.is_dir():
                 continue
 
             if self._hasRealVideoContent(subDir):
@@ -575,9 +583,9 @@ class VideoOrganizer:
             logger.error("No TV storage locations found!")
             return
         
-        # Get all video files
+        # Get all video files (including those in subdirectories)
         videoFiles = [
-            f for f in self.sourceDir. iterdir()
+            f for f in self.sourceDir.rglob("*")
             if f.is_file() and f.suffix.lower() in VIDEO_EXTENSIONS
         ]
         

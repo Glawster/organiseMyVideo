@@ -107,6 +107,71 @@ def testParseMovieFilenameReturnsNoneForUnparseable(organizer: VideoOrganizer):
 
 
 # ---------------------------------------------------------------------------
+# scanStorageLocations
+# ---------------------------------------------------------------------------
+
+
+def testScanStorageLocationsFindsMovieDirs(tmp_path: Path, organizer: VideoOrganizer):
+    """movie<n> directories are detected as movie storage."""
+    mnt = tmp_path / "mnt"
+    (mnt / "movie1").mkdir(parents=True)
+    (mnt / "movie2").mkdir(parents=True)
+    with patch("organiseMyVideo.Path") as mockPath:
+        mockPath.return_value = mnt
+        movieDirs, videoDirs = organizer.scanStorageLocations()
+    assert len(movieDirs) == 2
+    assert len(videoDirs) == 0
+
+
+def testScanStorageLocationsFindsMyPicturesAsMovieStorage(tmp_path: Path, organizer: VideoOrganizer):
+    """/mnt/myPictures root is used as movie storage when no Movies subdir exists."""
+    mnt = tmp_path / "mnt"
+    (mnt / "myPictures").mkdir(parents=True)
+    with patch("organiseMyVideo.Path") as mockPath:
+        mockPath.return_value = mnt
+        movieDirs, videoDirs = organizer.scanStorageLocations()
+    assert any(d.name == "myPictures" for d in movieDirs)
+    assert len(videoDirs) == 0
+
+
+def testScanStorageLocationsUsesMyPicturesMoviesSubdir(tmp_path: Path, organizer: VideoOrganizer):
+    """/mnt/myPictures/Movies is used as movie storage when the Movies subdir exists."""
+    mnt = tmp_path / "mnt"
+    (mnt / "myPictures" / "Movies").mkdir(parents=True)
+    with patch("organiseMyVideo.Path") as mockPath:
+        mockPath.return_value = mnt
+        movieDirs, videoDirs = organizer.scanStorageLocations()
+    assert any(d.name == "Movies" for d in movieDirs)
+    assert len(videoDirs) == 0
+
+
+def testScanStorageLocationsFindsMyVideoAsTvStorage(tmp_path: Path, organizer: VideoOrganizer):
+    """/mnt/myVideo/TV is detected as TV storage."""
+    mnt = tmp_path / "mnt"
+    tvDir = mnt / "myVideo" / "TV"
+    tvDir.mkdir(parents=True)
+    with patch("organiseMyVideo.Path") as mockPath:
+        mockPath.return_value = mnt
+        movieDirs, videoDirs = organizer.scanStorageLocations()
+    assert len(movieDirs) == 0
+    assert any(d.name == "TV" for d in videoDirs)
+
+
+def testScanStorageLocationsFindsAllLocationTypes(tmp_path: Path, organizer: VideoOrganizer):
+    """movie<n>, myPictures, video<n>/TV, and myVideo/TV are all detected."""
+    mnt = tmp_path / "mnt"
+    (mnt / "movie1").mkdir(parents=True)
+    (mnt / "myPictures").mkdir(parents=True)
+    (mnt / "video1" / "TV").mkdir(parents=True)
+    (mnt / "myVideo" / "TV").mkdir(parents=True)
+    with patch("organiseMyVideo.Path") as mockPath:
+        mockPath.return_value = mnt
+        movieDirs, videoDirs = organizer.scanStorageLocations()
+    assert len(movieDirs) == 2
+    assert len(videoDirs) == 2
+
+
+# ---------------------------------------------------------------------------
 # findExistingMovieDir
 # ---------------------------------------------------------------------------
 
@@ -306,11 +371,49 @@ def testCleanEmptyFoldersMixedDirs(sourceDir: Path, confirmedOrganizer: VideoOrg
 
     stats = confirmedOrganizer.cleanEmptyFolders()
     assert stats["removed"] == 2
-    assert stats["skipped"] == 1
+    assert stats["skipped"] == 2  # MovieA + MovieB/Sample (has direct video content)
     assert stats["errors"] == 0
     assert realDir.exists()
     assert not emptyDir.exists()
     assert not sampleDir.exists()
+
+
+def testCleanEmptyFoldersRemovesNestedEmptyDir(sourceDir: Path, confirmedOrganizer: VideoOrganizer):
+    """An empty subdirectory nested inside a real-content dir is removed."""
+    realDir = sourceDir / "MovieA"
+    realDir.mkdir()
+    (realDir / "MovieA.mkv").write_bytes(b"x" * 100)
+    nestedEmpty = realDir / "Extras"
+    nestedEmpty.mkdir()
+    stats = confirmedOrganizer.cleanEmptyFolders()
+    assert realDir.exists()
+    assert not nestedEmpty.exists()
+    assert stats["removed"] == 1
+
+
+# ---------------------------------------------------------------------------
+# processFiles — video files in subdirectories
+# ---------------------------------------------------------------------------
+
+
+def testProcessFilesFindsVideoInSubdirectory(tmp_path: Path, confirmedOrganizer: VideoOrganizer):
+    """Files inside a subdirectory of sourceDir are found and moved."""
+    subDir = confirmedOrganizer.sourceDir / "One Mile (2026)"
+    subDir.mkdir(parents=True)
+    srcFile = subDir / "One.Mile.2026.1080p.WEBRip.x264.mp4"
+    srcFile.write_bytes(b"x" * 100)
+
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+
+    with patch.object(confirmedOrganizer, "scanStorageLocations", return_value=([movieStorage], [tmp_path / "TV"])):
+        with patch.object(confirmedOrganizer, "promptUserConfirmation",
+                          return_value={"name": "One Mile (2026)", "type": "movie"}):
+            confirmedOrganizer.processFiles(interactive=True)
+
+    destFile = movieStorage / "One Mile (2026)" / "One.Mile.2026.1080p.WEBRip.x264.mp4"
+    assert destFile.exists()
+    assert not srcFile.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -674,3 +777,16 @@ def testCleanNamesSkippedCounterWhenResultIsEmpty(sourceDir: Path, confirmedOrga
     assert prefixOnly.exists(), "prefix-only folder must not be removed"
     assert stats["skipped"] == 1
     assert stats["renamed"] == 0
+
+
+def testCleanNamesConfirmRenamesNestedFile(sourceDir: Path, confirmedOrganizer: VideoOrganizer):
+    """A prefixed file inside a subdirectory is renamed in-place."""
+    subDir = sourceDir / "Some Movie (2020)"
+    subDir.mkdir()
+    original = subDir / "www.Torrenting.com - Some Movie (2020).mkv"
+    original.write_bytes(b"x" * 50)
+    stats = confirmedOrganizer.cleanNames()
+    expected = subDir / "Some Movie (2020).mkv"
+    assert not original.exists()
+    assert expected.exists()
+    assert stats["renamed"] == 1
