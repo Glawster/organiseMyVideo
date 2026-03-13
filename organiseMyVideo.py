@@ -866,6 +866,22 @@ Errors:         {stats['errors']}
                 mediaUrls.add(url)
         return sorted(mediaUrls)
 
+    def _collectPostUrls(self, page) -> List[str]:
+        """Return all unique ``/imagine/post/{uuid}`` URLs found on the current page.
+
+        Queries the live DOM for anchor elements whose ``href`` contains
+        ``/imagine/post/`` and returns a deduplicated, sorted list of absolute
+        URLs.  Empty strings and duplicates are removed automatically.  Called
+        on the saved-gallery page so that the scraper can then visit each post
+        page individually to capture full-resolution media (including videos
+        that are not loaded as part of the thumbnail grid).
+        """
+        hrefs: List[str] = page.eval_on_selector_all(
+            "a[href*='/imagine/post/']",
+            "els => els.map(el => el.href)",
+        )
+        return sorted({h for h in hrefs if h})
+
     def _isGrokMediaResponse(self, url: str, contentType: str) -> bool:
         """Return True when a Playwright network response should be captured as user media.
 
@@ -982,14 +998,20 @@ Errors:         {stats['errors']}
         return username, password
 
     def scrapeGrokSavedMedia(self) -> dict:
-        """Log into Grok and scrape saved Imagine media, downloading to ~/Downloads.
+        """Log into Grok and scrape saved Imagine media, downloading to ~/Downloads/Grok.
 
-        Uses Playwright network-response interception to capture every image and
-        video URL that the browser actually loads while scrolling
-        ``grok.com/imagine/saved``.  Captured URLs are filtered to
-        :data:`GROK_USER_CONTENT_DOMAINS` so that only the user's own
-        generated content is collected — not profile pictures, analytics
-        pixels, or any other third-party images on the page.
+        Uses a two-phase Playwright strategy:
+
+        1. **Gallery phase** — navigates to ``grok.com/imagine/saved`` and
+           scrolls to the bottom so that all post thumbnails are rendered.
+           Collects every ``/imagine/post/{uuid}`` link found in the DOM.
+
+        2. **Post phase** — visits each post page in turn.  Full-resolution
+           images and videos are loaded by the browser as each post page
+           opens.  Network-response interception captures any URL whose
+           hostname is in :data:`GROK_USER_CONTENT_DOMAINS`.
+
+        All captured media URLs are then downloaded to ``~/Downloads/Grok``.
         """
         username, password = self._loadOrPromptGrokCredentials()
 
@@ -1004,12 +1026,6 @@ Errors:         {stats['errors']}
             context = browser.new_context()
             page = context.new_page()
 
-            # ------------------------------------------------------------------
-            # Intercept network responses to capture the URLs of every media
-            # file the browser loads.  We register the listener before navigating
-            # to the saved-images page so that even the first batch of thumbnails
-            # is caught.
-            # ------------------------------------------------------------------
             capturedUrls: set = set()
 
             def _onResponse(response) -> None:
@@ -1038,14 +1054,14 @@ Errors:         {stats['errors']}
 
             page.wait_for_timeout(2500)
 
-            # Start intercepting responses before navigating to the saved-media
-            # page so that the initial grid load is included.
+            # ------------------------------------------------------------------
+            # Phase 1: Gallery — scroll /imagine/saved to render all post cards
+            # and collect their individual post-page links.
+            # ------------------------------------------------------------------
             page.on("response", _onResponse)
             page.goto("https://grok.com/imagine/saved", wait_until="domcontentloaded")
             page.wait_for_timeout(2000)
 
-            # Scroll the page to trigger lazy-loading of additional images.
-            # Stop early when two consecutive scroll passes load no new images.
             previousCount = 0
             stallCount = 0
             for _ in range(20):
@@ -1060,6 +1076,18 @@ Errors:         {stats['errors']}
                     stallCount = 0
                 previousCount = currentCount
 
+            postUrls = self._collectPostUrls(page)
+            logger.value("found Grok post pages", len(postUrls))
+
+            # ------------------------------------------------------------------
+            # Phase 2: Post pages — visit each post so that full-resolution
+            # media (including videos) is loaded and intercepted.
+            # ------------------------------------------------------------------
+            for i, postUrl in enumerate(postUrls, 1):
+                logger.doing(f"scraping post {i}/{len(postUrls)}: {postUrl}")
+                page.goto(postUrl, wait_until="domcontentloaded")
+                page.wait_for_timeout(1500)
+
             page.remove_listener("response", _onResponse)
             mediaUrls = sorted(capturedUrls)
             logger.value("found Grok media URLs", len(mediaUrls))
@@ -1068,6 +1096,7 @@ Errors:         {stats['errors']}
 
         logger.done("Grok scrape complete")
         return {
+            "postsFound": len(postUrls),
             "urlsFound": len(mediaUrls),
             **downloadStats,
         }
@@ -1146,6 +1175,7 @@ def main():
     if args.grok:
         grokStats = organizer.scrapeGrokSavedMedia()
         summary = f"""GROK SUMMARY
+Posts found:     {grokStats['postsFound']}
 URLs found:      {grokStats['urlsFound']}
 Files handled:   {grokStats['downloaded']}
 Already present: {grokStats['skipped']}

@@ -1142,6 +1142,53 @@ def testExtractMediaUrlsFromPageFiltersToUserContentDomains(organizer: VideoOrga
     assert nonMedia not in urls
 
 
+# ---------------------------------------------------------------------------
+# _collectPostUrls
+# ---------------------------------------------------------------------------
+
+
+def testCollectPostUrlsExtractsPostLinks(organizer: VideoOrganizer):
+    """Links matching /imagine/post/ are extracted from the page DOM."""
+    post1 = "https://grok.com/imagine/post/9a826579-a4c4-4b44-b29c-e2a20d316c92"
+    post2 = "https://grok.com/imagine/post/1b2c3d4e-0000-1111-2222-333344445555"
+
+    fakePage = MagicMock()
+    # The CSS selector a[href*='/imagine/post/'] already excludes non-post hrefs;
+    # the mock returns only what the selector would yield.
+    fakePage.eval_on_selector_all.return_value = [post1, post2, ""]
+
+    urls = organizer._collectPostUrls(fakePage)
+
+    assert post1 in urls
+    assert post2 in urls
+    assert "" not in urls
+    assert len(urls) == 2
+    fakePage.eval_on_selector_all.assert_called_once_with(
+        "a[href*='/imagine/post/']",
+        "els => els.map(el => el.href)",
+    )
+
+
+def testCollectPostUrlsDeduplicates(organizer: VideoOrganizer):
+    """Duplicate hrefs (same post linked twice on the gallery page) are collapsed."""
+    post = "https://grok.com/imagine/post/9a826579-a4c4-4b44-b29c-e2a20d316c92"
+
+    fakePage = MagicMock()
+    fakePage.eval_on_selector_all.return_value = [post, post, post]
+
+    urls = organizer._collectPostUrls(fakePage)
+
+    assert urls == [post]
+
+
+def testCollectPostUrlsReturnsEmptyWhenNoLinks(organizer: VideoOrganizer):
+    """An empty gallery page yields an empty list without raising."""
+    fakePage = MagicMock()
+    fakePage.eval_on_selector_all.return_value = []
+
+    assert organizer._collectPostUrls(fakePage) == []
+
+
 def testIsGrokMediaResponseMatchesByExtension(organizer: VideoOrganizer):
     """Media extension in URL path is sufficient when the host is a known user-content CDN."""
     for domain in ("imagine-public.x.ai", "images-public.x.ai"):
