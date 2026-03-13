@@ -615,11 +615,16 @@ class VideoOrganizer:
 
     def cleanTorrentNames(self, torrentDir: str = "/mnt/video2/Downloads") -> dict:
         """
-        Scan the download directory for .torrent files and rename those whose
-        file names contain known torrent-site prefixes (e.g. "www.Torrenting.com - ").
+        Scan the top level of the download directory and rename any entries (files
+        or directories) whose names contain known torrent-site prefixes
+        (e.g. "www.Torrenting.com - " or "www.UIndex.org    -    ").
+
+        Only the direct children of torrentDir are examined; the method does not
+        recurse into sub-directories, which avoids renaming files that are already
+        inside a correctly-named download folder.
 
         Args:
-            torrentDir: Directory to scan for .torrent files (default: /mnt/video2/Downloads)
+            torrentDir: Directory to scan (default: /mnt/video2/Downloads)
 
         Returns:
             Dictionary with counts: {'renamed': int, 'skipped': int, 'errors': int}
@@ -633,10 +638,7 @@ class VideoOrganizer:
             logger.error(f"torrent directory does not exist: {torrentDir}")
             return stats
 
-        for entry in sorted(downloadPath.rglob("*.torrent")):
-            if not entry.is_file():
-                continue
-
+        for entry in sorted(downloadPath.iterdir()):
             oldName = entry.name
             if not _PREFIX_REGEX.match(oldName):
                 continue
@@ -651,13 +653,13 @@ class VideoOrganizer:
             newPath = entry.parent / newName
 
             if self.dryRun:
-                logger.action(f"would rename torrent: {oldName} → {newName}")
+                logger.action(f"would rename: {oldName} → {newName}")
                 stats["renamed"] += 1
                 continue
 
             try:
                 entry.rename(newPath)
-                logger.action(f"renamed torrent: {oldName} → {newName}")
+                logger.action(f"renamed: {oldName} → {newName}")
                 stats["renamed"] += 1
             except FileExistsError:
                 logger.error(f"target already exists, skipping: {newName}")

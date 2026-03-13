@@ -941,18 +941,63 @@ def testCleanTorrentNamesHandlesUIndexPrefix(tmp_path: Path):
     assert stats["errors"] == 0
 
 
-def testCleanTorrentNamesScansSubdirectories(tmp_path: Path):
-    """Torrents nested in sub-directories are also renamed."""
+def testCleanTorrentNamesRenamesPrefixedDirectory(tmp_path: Path):
+    """Confirm mode: a prefixed download directory is renamed to its clean name."""
     downloadDir = tmp_path / "Download"
-    subDir = downloadDir / "tv"
-    subDir.mkdir(parents=True)
-    torrentFile = subDir / "www.Torrenting.com - The.Office.S03E07.mkv.torrent"
-    torrentFile.write_bytes(b"torrent data")
-    expectedFile = subDir / "The.Office.S03E07.mkv.torrent"
+    prefixedDir = downloadDir / "www.Torrenting.com - Silent.Witness.S28E09.720p.x265-TiPEX"
+    prefixedDir.mkdir(parents=True)
+    expectedDir = downloadDir / "Silent.Witness.S28E09.720p.x265-TiPEX"
 
     org = VideoOrganizer(sourceDir=str(tmp_path / "source"), dryRun=False)
     stats = org.cleanTorrentNames(torrentDir=str(downloadDir))
 
-    assert not torrentFile.exists()
-    assert expectedFile.exists()
+    assert not prefixedDir.exists(), "original prefixed directory should be gone"
+    assert expectedDir.exists(), "renamed directory should exist"
     assert stats["renamed"] == 1
+    assert stats["errors"] == 0
+
+
+def testCleanTorrentNamesDryRunRenamesPrefixedDirectory(tmp_path: Path):
+    """Dry-run: a prefixed download directory is counted but not actually renamed."""
+    downloadDir = tmp_path / "Download"
+    prefixedDir = downloadDir / "www.UIndex.org    -    FBI Most Wanted S06E13 Greek Tragedy 1080p"
+    prefixedDir.mkdir(parents=True)
+
+    org = VideoOrganizer(sourceDir=str(tmp_path / "source"), dryRun=True)
+    stats = org.cleanTorrentNames(torrentDir=str(downloadDir))
+
+    assert prefixedDir.exists(), "dry-run must not rename the directory"
+    assert stats["renamed"] == 1
+    assert stats["skipped"] == 0
+    assert stats["errors"] == 0
+
+
+def testCleanTorrentNamesHandlesMultipleSpacesInUIndexPrefix(tmp_path: Path):
+    """UIndex prefix with multiple spaces before and after the dash is stripped correctly."""
+    downloadDir = tmp_path / "Download"
+    prefixedDir = downloadDir / "www.UIndex.org    -    Criminal Minds S08E24 The Replicator 1080p"
+    prefixedDir.mkdir(parents=True)
+    expectedDir = downloadDir / "Criminal Minds S08E24 The Replicator 1080p"
+
+    org = VideoOrganizer(sourceDir=str(tmp_path / "source"), dryRun=False)
+    stats = org.cleanTorrentNames(torrentDir=str(downloadDir))
+
+    assert not prefixedDir.exists()
+    assert expectedDir.exists()
+    assert stats["renamed"] == 1
+    assert stats["errors"] == 0
+
+
+def testCleanTorrentNamesDoesNotRecurseIntoSubdirectories(tmp_path: Path):
+    """Files inside a top-level directory are not renamed — only top-level entries are processed."""
+    downloadDir = tmp_path / "Download"
+    subDir = downloadDir / "SomeShow.S01E01"
+    subDir.mkdir(parents=True)
+    nestedFile = subDir / "www.Torrenting.com - SomeShow.S01E01.mkv.torrent"
+    nestedFile.write_bytes(b"torrent data")
+
+    org = VideoOrganizer(sourceDir=str(tmp_path / "source"), dryRun=False)
+    stats = org.cleanTorrentNames(torrentDir=str(downloadDir))
+
+    assert nestedFile.exists(), "nested entries must not be renamed"
+    assert stats["renamed"] == 0
