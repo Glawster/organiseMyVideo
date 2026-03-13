@@ -1289,7 +1289,7 @@ def testDownloadMediaFilesPlaywrightContextNonOkResponse(confirmedOrganizer: Vid
 
 def testLoadOrPromptGrokCredentialsLoadsFromFile(organizer: VideoOrganizer, tmp_path: Path):
     """Existing credentials file is read without prompting the user."""
-    credFile = tmp_path / "grok_credentials.json"
+    credFile = tmp_path / "grokCredentials.json"
     credFile.write_text(json.dumps({"username": "user@example.com", "password": "s3cr3t"}))
 
     username, password = organizer._loadOrPromptGrokCredentials(credentialsFile=credFile)
@@ -1302,7 +1302,7 @@ def testLoadOrPromptGrokCredentialsPromptsAndSavesWhenFileMissing(
     organizer: VideoOrganizer, tmp_path: Path
 ):
     """When no credentials file exists, the user is prompted and the result is saved."""
-    credFile = tmp_path / "sub" / "grok_credentials.json"
+    credFile = tmp_path / "sub" / "grokCredentials.json"
 
     with patch("builtins.input", return_value="user@example.com"), patch(
         "getpass.getpass", return_value="s3cr3t"
@@ -1321,7 +1321,7 @@ def testLoadOrPromptGrokCredentialsPromptsWhenFileIncomplete(
     organizer: VideoOrganizer, tmp_path: Path
 ):
     """A credentials file missing the password triggers a fresh prompt."""
-    credFile = tmp_path / "grok_credentials.json"
+    credFile = tmp_path / "grokCredentials.json"
     credFile.write_text(json.dumps({"username": "user@example.com", "password": ""}))
 
     with patch("builtins.input", return_value="user@example.com"), patch(
@@ -1344,7 +1344,7 @@ def testScrapeGrokSavedMediaUsesSessionFileWhenPresent(
 ):
     """When a session file exists the browser context is initialised from it
     and the login form automation code is never reached."""
-    sessionFile = tmp_path / "grok_session.json"
+    sessionFile = tmp_path / "grokSession.json"
     sessionFile.write_text("{}")  # minimal valid storage-state
 
     fakePage = MagicMock()
@@ -1422,8 +1422,8 @@ def testScrapeGrokSavedMediaSavesSessionAfterLogin(
 
 def testResetGrokConfigDeletesBothFiles(confirmedOrganizer: VideoOrganizer, tmp_path: Path):
     """Both session and credentials files are deleted when they exist."""
-    sessionFile = tmp_path / "grok_session.json"
-    credFile = tmp_path / "grok_credentials.json"
+    sessionFile = tmp_path / "grokSession.json"
+    credFile = tmp_path / "grokCredentials.json"
     sessionFile.write_text("{}")
     credFile.write_text(json.dumps({"username": "u", "password": "p"}))
 
@@ -1438,8 +1438,8 @@ def testResetGrokConfigDeletesBothFiles(confirmedOrganizer: VideoOrganizer, tmp_
 
 def testResetGrokConfigReportsNotFoundWhenFilesAbsent(confirmedOrganizer: VideoOrganizer, tmp_path: Path):
     """Files that don't exist are reported in notFound, nothing is deleted."""
-    sessionFile = tmp_path / "grok_session.json"
-    credFile = tmp_path / "grok_credentials.json"
+    sessionFile = tmp_path / "grokSession.json"
+    credFile = tmp_path / "grokCredentials.json"
 
     result = confirmedOrganizer.resetGrokConfig(sessionFile=sessionFile, credentialsFile=credFile)
 
@@ -1450,8 +1450,8 @@ def testResetGrokConfigReportsNotFoundWhenFilesAbsent(confirmedOrganizer: VideoO
 
 def testResetGrokConfigDryRunDoesNotDelete(organizer: VideoOrganizer, tmp_path: Path):
     """In dry-run mode the files are NOT deleted but are reported as deleted."""
-    sessionFile = tmp_path / "grok_session.json"
-    credFile = tmp_path / "grok_credentials.json"
+    sessionFile = tmp_path / "grokSession.json"
+    credFile = tmp_path / "grokCredentials.json"
     sessionFile.write_text("{}")
     credFile.write_text(json.dumps({"username": "u", "password": "p"}))
 
@@ -1467,8 +1467,8 @@ def testResetGrokConfigDryRunDoesNotDelete(organizer: VideoOrganizer, tmp_path: 
 
 def testResetGrokConfigDeletesOnlyExistingFiles(confirmedOrganizer: VideoOrganizer, tmp_path: Path):
     """Only the session file exists — only it is deleted; credentials go to notFound."""
-    sessionFile = tmp_path / "grok_session.json"
-    credFile = tmp_path / "grok_credentials.json"
+    sessionFile = tmp_path / "grokSession.json"
+    credFile = tmp_path / "grokCredentials.json"
     sessionFile.write_text("{}")
 
     result = confirmedOrganizer.resetGrokConfig(sessionFile=sessionFile, credentialsFile=credFile)
