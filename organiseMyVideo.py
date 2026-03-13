@@ -15,8 +15,6 @@ import logging
 import datetime
 import urllib.parse
 import urllib.request
-import urllib.parse
-import urllib.request
 
 from pathlib import Path
 from typing import List, Tuple, Optional
@@ -958,7 +956,22 @@ def main():
         action="store_true",
         help="Run without user prompts (skip files that cannot be auto-detected)"
     )
-    
+    parser.add_argument(
+        "--grok",
+        action="store_true",
+        help="Log into Grok and download media from saved Imagine items into --source"
+    )
+    parser.add_argument(
+        "--grok-limit",
+        type=int,
+        default=None,
+        help="Maximum number of Grok media files to download (default: no limit)"
+    )
+    parser.add_argument(
+        "--torrent",
+        action="store_true",
+        help="scan the torrent download directory for .torrent files and delete those already in the library (dry-run by default; use --confirm to delete)"
+    )
     args = parser.parse_args()
     
     dryRun = True if not args.confirm else False
@@ -992,7 +1005,29 @@ def main():
     # Create organizer and run the requested mode
     organizer = VideoOrganizer(sourceDir=args.source, dryRun=dryRun)
 
-    if args.clean:
+    if args.grok:
+        grokStats = organizer.scrapeGrokSavedMedia(limit=args.grok_limit)
+        summary = f"""GROK SUMMARY
+URLs found:      {grokStats['urlsFound']}
+Files handled:   {grokStats['downloaded']}
+Already present: {grokStats['skipped']}
+Errors:          {grokStats['errors']}
+"""
+        drawBox(summary)
+    elif args.torrent:
+        torrentDir = organizer.sourceDir.parent / "Downloads" if organizer.sourceDir else Path("/mnt/video2/Downloads")
+        nameStats = organizer.cleanTorrentNames(torrentDir=torrentDir) if args.clean else {"renamed": 0, "skipped": 0, "errors": 0}
+        removeStats = organizer.removeTorrentsInLibrary(torrentDir=torrentDir)
+        summary = f"""TORRENT SUMMARY
+Torrents deleted: {removeStats['deleted']}
+Torrents kept:    {removeStats['skipped']}
+Delete errors:    {removeStats['errors']}
+Names renamed:    {nameStats['renamed']}
+Names skipped:    {nameStats['skipped']}
+Rename errors:    {nameStats['errors']}
+"""
+        drawBox(summary)
+    elif args.clean:
         nameStats = organizer.cleanNames()
         cleanStats = organizer.cleanEmptyFolders()
         summary = f"""CLEAN SUMMARY
