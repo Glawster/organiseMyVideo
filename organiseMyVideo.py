@@ -544,13 +544,13 @@ class VideoOrganizer:
         logger.done(f"clean complete")
         return stats
 
-    def cleanTorrents(self, torrentDir: str = "/mnt/video2/Download") -> dict:
+    def cleanTorrents(self, torrentDir: str = "/mnt/video2/Downloads") -> dict:
         """
         Scan the download directory for .torrent files and delete those
         belonging to movies or TV shows already present in the library.
 
         Args:
-            torrentDir: Directory to scan for .torrent files (default: /mnt/video2/Download)
+            torrentDir: Directory to scan for .torrent files (default: /mnt/video2/Downloads)
 
         Returns:
             Dictionary with counts: {'deleted': int, 'skipped': int, 'errors': int}
@@ -771,8 +771,8 @@ def main():
     parser.add_argument(
         "--torrent-dir",
         dest="torrent_dir",
-        default="/mnt/video2/Download",
-        help="directory to scan for .torrent files (default: /mnt/video2/Download)"
+        default="/mnt/video2/Downloads",
+        help="directory to scan for .torrent files (default: /mnt/video2/Downloads)"
     )
 
     args = parser.parse_args()
