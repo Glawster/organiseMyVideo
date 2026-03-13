@@ -37,12 +37,12 @@ logger = getLogger("organiseMyVideo")
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".m4v", ".mpg", ".mpeg"}
 GROK_MEDIA_EXTENSIONS = {".mp4", ".mov", ".webm", ".png", ".jpg", ".jpeg", ".gif", ".webp"}
 GROK_USER_CONTENT_DOMAINS = {"imagine-public.x.ai", "images-public.x.ai"}
-GROK_CREDENTIALS_FILE = Path.home() / ".config" / "organiseMyVideo" / "grok_credentials.json"
+GROK_CREDENTIALS_FILE = Path.home() / ".config" / "organiseMyVideo" / "grokCredentials.json"
 # Playwright storage-state file (cookies + localStorage) persisted after login.
 # When this file exists the browser starts already authenticated and no
 # username/password interaction is needed.  Delete this file to force a fresh
 # login (e.g. after a session expires or credentials change).
-GROK_SESSION_FILE = Path.home() / ".config" / "organiseMyVideo" / "grok_session.json"
+GROK_SESSION_FILE = Path.home() / ".config" / "organiseMyVideo" / "grokSession.json"
 
 # Known torrent/index prefixes to strip from file and directory names
 PREFIX_PATTERNS = [
@@ -1280,9 +1280,9 @@ def main():
     logger.value("logging to", logFile)
     
     if dryRun:
-        logger.info("dry-run mode (no changes will be made) — use --confirm to execute")
+        logger.info("entering dry-run mode, use --confirm to execute")
     else:
-        logger.info("confirm mode — changes will be made")
+        logger.info("confirm mode, changes will be made")
     
     # Create organizer and run the requested mode
     organizer = VideoOrganizer(sourceDir=args.source, dryRun=dryRun)
