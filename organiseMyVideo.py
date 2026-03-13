@@ -170,7 +170,7 @@ class VideoOrganizer:
         for movieRoot in movieDirs:
             for item in movieRoot.iterdir():
                 if item.is_dir() and item.name.lower() == searchPattern.lower():
-                    logger.value("found existing movie directory",item)
+                    logger.value("found existing movie",item)
                     return item
         
         return None
@@ -189,7 +189,7 @@ class VideoOrganizer:
         for tvRoot in videoDirs:
             for item in tvRoot.iterdir():
                 if item.is_dir() and item.name.lower() == showName.lower():
-                    logger.value("found existing TV show directory", item)
+                    logger.value("found existing TV show", item)
                     return item
         
         return None
@@ -346,7 +346,7 @@ class VideoOrganizer:
         logger.value("  ->", destFile)
         
         if self.dryRun:
-            logger.action(f"would move to: {destFile}")
+            logger.action(f"move to: {destFile}")
             return True
         
         try:
@@ -425,7 +425,7 @@ class VideoOrganizer:
         logger.value("  ->", destFile)
         
         if self.dryRun:
-            logger.action(f"would move to: {destFile}")
+            logger.action(f"move to: {destFile}")
             return True
         
         try:
@@ -487,7 +487,7 @@ class VideoOrganizer:
             newPath = entry.parent / newName
 
             if self.dryRun:
-                logger.action(f"would rename: {oldName} → {newName}")
+                logger.action(f"rename: {oldName} → {newName}")
                 stats["renamed"] += 1
                 continue
 
@@ -603,22 +603,22 @@ class VideoOrganizer:
                 existingDir = self.findExistingTvShowDir(tvInfo["showName"], videoDirs)
                 if existingDir:
                     inLibrary = True
-                    logger.value("torrent matches library tv show", f"{entry.name} → {existingDir}")
+                    logger.value("torrent matches TV show", f"{entry.name} → {existingDir}")
 
             if not inLibrary and movieInfo and movieDirs:
                 existingDir = self.findExistingMovieDir(movieInfo["title"], movieInfo["year"], movieDirs)
                 if existingDir:
                     inLibrary = True
-                    logger.value("torrent matches library movie", f"{entry.name} → {existingDir}")
+                    logger.value("torrent matches Movie", f"{entry.name} → {existingDir}")
 
             if inLibrary:
                 downloadSubDir = entry.parent if entry.parent != downloadPath else None
                 if self.dryRun:
                     if downloadSubDir is not None:
-                        logger.action(f"would delete folder: {downloadSubDir.name}")
+                        logger.action(f"delete folder: {downloadSubDir.name}")
                         removedDirs.add(downloadSubDir)
                     else:
-                        logger.action(f"would delete torrent: {entry.name}")
+                        logger.action(f"delete torrent: {entry.name}")
                     stats["deleted"] += 1
                 else:
                     try:
@@ -634,7 +634,7 @@ class VideoOrganizer:
                         logger.error(f"failed to delete {entry.name}: {e}")
                         stats["errors"] += 1
             else:
-                logger.value("keeping torrent (not in library)", entry.name)
+                logger.value("keeping torrent", entry.name)
                 stats["skipped"] += 1
 
         logger.done("remove torrents in library complete")
@@ -678,7 +678,7 @@ class VideoOrganizer:
             newPath = entry.parent / newName
 
             if self.dryRun:
-                logger.action(f"would rename torrent: {oldName} → {newName}")
+                logger.action(f"rename torrent: {oldName} → {newName}")
                 stats["renamed"] += 1
                 continue
 
