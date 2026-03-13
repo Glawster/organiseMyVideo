@@ -840,14 +840,15 @@ Errors:         {stats['errors']}
         return sorted(mediaUrls)
 
     def _downloadMediaFiles(self, mediaUrls: List[str]) -> dict:
-        """Download URLs into sourceDir and return download stats."""
+        """Download URLs into ~/Downloads and return download stats."""
         stats = {"downloaded": 0, "skipped": 0, "errors": 0}
-        self.sourceDir.mkdir(parents=True, exist_ok=True)
+        destDir = Path.home() / "Downloads"
+        destDir.mkdir(parents=True, exist_ok=True)
 
         for mediaUrl in mediaUrls:
             parsed = urllib.parse.urlparse(mediaUrl)
             filename = Path(parsed.path).name or f"grok_media_{stats['downloaded'] + stats['errors'] + 1}"
-            dest = self.sourceDir / filename
+            dest = destDir / filename
 
             if dest.exists():
                 logger.value("grok media already exists, skipping", dest)
