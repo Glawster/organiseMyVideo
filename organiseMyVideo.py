@@ -899,7 +899,7 @@ Errors:         {stats['errors']}
         return ext in GROK_MEDIA_EXTENSIONS or contentType.startswith(("image/", "video/"))
 
     def _downloadMediaFiles(self, mediaUrls: List[str], playwrightContext=None) -> dict:
-        """Download URLs into ~/Downloads and return download stats.
+        """Download URLs into ~/Downloads/Grok and return download stats.
 
         Args:
             mediaUrls: List of media URLs to download.
@@ -910,7 +910,7 @@ Errors:         {stats['errors']}
                 Falls back to ``urllib`` when *None*.
         """
         stats = {"downloaded": 0, "skipped": 0, "errors": 0}
-        destDir = Path.home() / "Downloads"
+        destDir = Path.home() / "Downloads" / "Grok"
         destDir.mkdir(parents=True, exist_ok=True)
 
         for mediaUrl in mediaUrls:
