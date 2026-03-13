@@ -836,13 +836,12 @@ Errors:         {stats['errors']}
                 mediaUrls.add(match)
         return sorted(mediaUrls)
 
-    def _downloadMediaFiles(self, mediaUrls: List[str], limit: Optional[int] = None) -> dict:
+    def _downloadMediaFiles(self, mediaUrls: List[str]) -> dict:
         """Download URLs into sourceDir and return download stats."""
         stats = {"downloaded": 0, "skipped": 0, "errors": 0}
         self.sourceDir.mkdir(parents=True, exist_ok=True)
 
-        urlsToDownload = mediaUrls if limit is None else mediaUrls[:limit]
-        for mediaUrl in urlsToDownload:
+        for mediaUrl in mediaUrls:
             parsed = urllib.parse.urlparse(mediaUrl)
             filename = Path(parsed.path).name or f"grok_media_{stats['downloaded'] + stats['errors'] + 1}"
             dest = self.sourceDir / filename
@@ -868,7 +867,7 @@ Errors:         {stats['errors']}
 
         return stats
 
-    def scrapeGrokSavedMedia(self, limit: Optional[int] = None) -> dict:
+    def scrapeGrokSavedMedia(self) -> dict:
         """
         Log into Grok and scrape saved Imagine media URLs, then download to sourceDir.
 
@@ -921,7 +920,7 @@ Errors:         {stats['errors']}
             browser.close()
 
         logger.value("found Grok media URLs", len(mediaUrls))
-        downloadStats = self._downloadMediaFiles(mediaUrls, limit=limit)
+        downloadStats = self._downloadMediaFiles(mediaUrls)
         logger.done("Grok scrape complete")
         return {
             "urlsFound": len(mediaUrls),
@@ -962,12 +961,6 @@ def main():
         help="Log into Grok and download media from saved Imagine items into --source"
     )
     parser.add_argument(
-        "--grok-limit",
-        type=int,
-        default=None,
-        help="Maximum number of Grok media files to download (default: no limit)"
-    )
-    parser.add_argument(
         "--torrent",
         action="store_true",
         help="scan the torrent download directory for .torrent files and delete those already in the library (dry-run by default; use --confirm to delete)"
@@ -1006,7 +999,7 @@ def main():
     organizer = VideoOrganizer(sourceDir=args.source, dryRun=dryRun)
 
     if args.grok:
-        grokStats = organizer.scrapeGrokSavedMedia(limit=args.grok_limit)
+        grokStats = organizer.scrapeGrokSavedMedia()
         summary = f"""GROK SUMMARY
 URLs found:      {grokStats['urlsFound']}
 Files handled:   {grokStats['downloaded']}

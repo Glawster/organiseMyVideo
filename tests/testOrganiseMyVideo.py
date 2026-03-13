@@ -1114,7 +1114,7 @@ def testExtractMediaUrlsFromHtmlFindsSupportedExtensions(organizer: VideoOrganiz
 
 
 def testDownloadMediaFilesDryRunDoesNotWrite(organizer: VideoOrganizer):
-    stats = organizer._downloadMediaFiles(["https://example.com/image01.png"], limit=None)
+    stats = organizer._downloadMediaFiles(["https://example.com/image01.png"])
     assert stats == {"downloaded": 1, "skipped": 0, "errors": 0}
     assert not (organizer.sourceDir / "image01.png").exists()
 
@@ -1123,5 +1123,5 @@ def testDownloadMediaFilesSkipsExisting(confirmedOrganizer: VideoOrganizer):
     target = confirmedOrganizer.sourceDir / "image01.png"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(b"exists")
-    stats = confirmedOrganizer._downloadMediaFiles(["https://example.com/image01.png"], limit=None)
+    stats = confirmedOrganizer._downloadMediaFiles(["https://example.com/image01.png"])
     assert stats == {"downloaded": 0, "skipped": 1, "errors": 0}
