@@ -13,6 +13,8 @@ import shutil
 import argparse
 import logging
 import datetime
+import urllib.parse
+import urllib.request
 
 from pathlib import Path
 from typing import List, Tuple, Optional
@@ -24,6 +26,7 @@ logger = getLogger("organiseMyVideo")
 
 # Video file extensions to process
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".m4v", ".mpg", ".mpeg"}
+GROK_MEDIA_EXTENSIONS = {".mp4", ".mov", ".webm", ".png", ".jpg", ".jpeg", ".gif", ".webp"}
 
 # Known torrent/index prefixes to strip from file and directory names
 PREFIX_PATTERNS = [
@@ -823,6 +826,108 @@ Errors:         {stats['errors']}
         drawBox(summary)
         logger.value("processing complete", stats)
 
+    def _extractMediaUrlsFromHtml(self, html: str) -> List[str]:
+        """Extract likely media URLs from Grok saved-image HTML."""
+        mediaUrls = set()
+        for match in re.findall(r'https?://[^\s"\']+', html, re.IGNORECASE):
+            parsed = urllib.parse.urlparse(match)
+            ext = Path(parsed.path).suffix.lower()
+            if ext in GROK_MEDIA_EXTENSIONS:
+                mediaUrls.add(match)
+        return sorted(mediaUrls)
+
+    def _downloadMediaFiles(self, mediaUrls: List[str], limit: Optional[int] = None) -> dict:
+        """Download URLs into sourceDir and return download stats."""
+        stats = {"downloaded": 0, "skipped": 0, "errors": 0}
+        self.sourceDir.mkdir(parents=True, exist_ok=True)
+
+        urlsToDownload = mediaUrls if limit is None else mediaUrls[:limit]
+        for mediaUrl in urlsToDownload:
+            parsed = urllib.parse.urlparse(mediaUrl)
+            filename = Path(parsed.path).name or f"grok_media_{stats['downloaded'] + stats['errors'] + 1}"
+            dest = self.sourceDir / filename
+
+            if dest.exists():
+                logger.value("grok media already exists, skipping", dest)
+                stats["skipped"] += 1
+                continue
+
+            if self.dryRun:
+                logger.action(f"would download grok media: {mediaUrl} -> {dest}")
+                stats["downloaded"] += 1
+                continue
+
+            try:
+                with urllib.request.urlopen(mediaUrl, timeout=30) as response:
+                    dest.write_bytes(response.read())
+                logger.action(f"downloaded grok media: {dest}")
+                stats["downloaded"] += 1
+            except Exception as e:
+                logger.error(f"failed downloading {mediaUrl}: {e}")
+                stats["errors"] += 1
+
+        return stats
+
+    def scrapeGrokSavedMedia(self, limit: Optional[int] = None) -> dict:
+        """
+        Log into Grok and scrape saved Imagine media URLs, then download to sourceDir.
+
+        Requires environment variables GROK_USERNAME and GROK_PASSWORD.
+        """
+        username = os.getenv("GROK_USERNAME")
+        password = os.getenv("GROK_PASSWORD")
+        if not username or not password:
+            raise RuntimeError("GROK_USERNAME and GROK_PASSWORD must be set for --grok")
+
+        try:
+            from playwright.sync_api import sync_playwright  # type: ignore
+        except Exception as e:
+            raise RuntimeError(f"Playwright is required for --grok: {e}") from e
+
+        logger.doing("starting Grok scrape for saved Imagine media")
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context()
+            page = context.new_page()
+
+            page.goto("https://grok.com", wait_until="domcontentloaded")
+
+            # Attempt to fill login forms across common variants.
+            if page.locator("input[name='text']").count() > 0:
+                page.fill("input[name='text']", username)
+                page.keyboard.press("Enter")
+            elif page.locator("input[type='email']").count() > 0:
+                page.fill("input[type='email']", username)
+                page.keyboard.press("Enter")
+
+            page.wait_for_timeout(1200)
+
+            if page.locator("input[name='password']").count() > 0:
+                page.fill("input[name='password']", password)
+                page.keyboard.press("Enter")
+            elif page.locator("input[type='password']").count() > 0:
+                page.fill("input[type='password']", password)
+                page.keyboard.press("Enter")
+
+            page.wait_for_timeout(2500)
+            page.goto("https://grok.com/imagine/saved", wait_until="domcontentloaded")
+            page.wait_for_timeout(2000)
+
+            for _ in range(6):
+                page.mouse.wheel(0, 2500)
+                page.wait_for_timeout(700)
+
+            mediaUrls = self._extractMediaUrlsFromHtml(page.content())
+            browser.close()
+
+        logger.value("found Grok media URLs", len(mediaUrls))
+        downloadStats = self._downloadMediaFiles(mediaUrls, limit=limit)
+        logger.done("Grok scrape complete")
+        return {
+            "urlsFound": len(mediaUrls),
+            **downloadStats,
+        }
+
 
 def main():
     """Main entry point for the video organizer."""
@@ -850,6 +955,17 @@ def main():
         dest="non_interactive",
         action="store_true",
         help="Run without user prompts (skip files that cannot be auto-detected)"
+    )
+    parser.add_argument(
+        "--grok",
+        action="store_true",
+        help="Log into Grok and download media from saved Imagine items into --source"
+    )
+    parser.add_argument(
+        "--grok-limit",
+        type=int,
+        default=None,
+        help="Maximum number of Grok media files to download (default: no limit)"
     )
     parser.add_argument(
         "--torrent",
@@ -891,7 +1007,16 @@ def main():
 
     if args.torrent:
         torrentDir = organizer.sourceDir.parent / "Downloads" if organizer.sourceDir else Path("/mnt/video2/Downloads")
-        if args.clean:
+        if args.grok:
+        grokStats = organizer.scrapeGrokSavedMedia(limit=args.grok_limit)
+        summary = f"""GROK SUMMARY
+URLs found:      {grokStats['urlsFound']}
+Files handled:   {grokStats['downloaded']}
+Already present: {grokStats['skipped']}
+Errors:          {grokStats['errors']}
+"""
+        drawBox(summary)
+    elif args.clean:
             nameStats = organizer.cleanTorrentNames(torrentDir=torrentDir)
         removeStats = organizer.removeTorrentsInLibrary(torrentDir=torrentDir)
         summary = f"""TORRENT SUMMARY
