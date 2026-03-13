@@ -768,13 +768,6 @@ def main():
         action="store_true",
         help="scan the torrent download directory for .torrent files and delete those already in the library (dry-run by default; use --confirm to delete)"
     )
-    parser.add_argument(
-        "--torrent-dir",
-        dest="torrent_dir",
-        default="/mnt/video2/Downloads",
-        help="directory to scan for .torrent files (default: /mnt/video2/Downloads)"
-    )
-
     args = parser.parse_args()
     
     dryRun = True if not args.confirm else False
@@ -820,7 +813,7 @@ Folder errors:   {cleanStats['errors']}
 """
         drawBox(summary)
     elif args.torrent:
-        torrentStats = organizer.cleanTorrents(torrentDir=args.torrent_dir)
+        torrentStats = organizer.cleanTorrents()
         summary = f"""TORRENT SUMMARY
 Torrents deleted: {torrentStats['deleted']}
 Torrents kept:    {torrentStats['skipped']}
