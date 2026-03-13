@@ -1261,7 +1261,9 @@ def testDownloadMediaFilesUsesPlaywrightContext(confirmedOrganizer: VideoOrganiz
         )
 
     assert stats == {"downloaded": 1, "skipped": 0, "errors": 0}
-    fakeContext.request.get.assert_called_once_with("https://example.com/image01.png")
+    fakeContext.request.get.assert_called_once_with(
+        "https://example.com/image01.png", headers={"Referer": "https://grok.com/"}
+    )
     assert (tmp_path / "Downloads" / "Grok" / "image01.png").read_bytes() == b"image-data"
 
 
@@ -1348,6 +1350,7 @@ def testScrapeGrokSavedMediaUsesSessionFileWhenPresent(
     sessionFile.write_text("{}")  # minimal valid storage-state
 
     fakePage = MagicMock()
+    fakePage.url = "https://grok.com/imagine/saved"  # valid session → stays on saved page
     fakePage.eval_on_selector_all.return_value = []  # empty gallery → 0 posts
 
     fakeContext = MagicMock()
@@ -1381,6 +1384,7 @@ def testScrapeGrokSavedMediaSavesSessionAfterLogin(
     assert not sessionFile.exists()
 
     fakePage = MagicMock()
+    fakePage.url = "https://grok.com/imagine/saved"  # successful login → stays on saved page
     fakePage.eval_on_selector_all.return_value = []
 
     fakeContext = MagicMock()

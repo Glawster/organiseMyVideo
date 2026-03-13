@@ -951,7 +951,10 @@ Errors:         {stats['errors']}
 
             try:
                 if playwrightContext is not None:
-                    response = playwrightContext.request.get(mediaUrl)
+                    response = playwrightContext.request.get(
+                        mediaUrl,
+                        headers={"Referer": "https://grok.com/"},
+                    )
                     if not response.ok:
                         raise RuntimeError(f"HTTP {response.status}")
                     dest.write_bytes(response.body())
@@ -1049,12 +1052,14 @@ Errors:         {stats['errors']}
         * **If the session file exists** the browser starts already authenticated
           and no username/password interaction is needed.
 
-        * **If the session file is absent** the stored credentials are used to
-          attempt automated form login, after which the resulting session is
-          saved so that subsequent runs are instant.
+        * **If the session file is absent** a visible browser window opens so the
+          user can log in manually; the resulting session is then saved so that
+          subsequent runs are instant.
 
-        * To force a fresh login (e.g. after session expiry) delete the session
-          file and re-run.
+        * **If the saved session has expired** (detected when Grok redirects the
+          browser away from ``/imagine/saved`` rather than loading the page), the
+          stale session file is deleted automatically and the user is prompted to
+          log in again via a visible browser window.
 
         After authentication the scrape runs in two phases:
 
@@ -1134,6 +1139,12 @@ Errors:         {stats['errors']}
                 if self._isGrokMediaResponse(response.url, contentType):
                     capturedUrls.add(response.url)
 
+            def _navigateToSaved(pg) -> None:
+                """Attach the response listener and navigate to /imagine/saved."""
+                pg.on("response", _onResponse)
+                pg.goto("https://grok.com/imagine/saved", wait_until="domcontentloaded")
+                pg.wait_for_timeout(2000)
+
             # ------------------------------------------------------------------
             # Phase 1: Gallery — scroll /imagine/saved to render all post cards
             # and collect their individual post-page links.
@@ -1143,9 +1154,38 @@ Errors:         {stats['errors']}
             # from GROK_USER_CONTENT_DOMAINS, so capturedUrls could stay at
             # zero and cause the scroll to abort after just two passes.
             # ------------------------------------------------------------------
-            page.on("response", _onResponse)
-            page.goto("https://grok.com/imagine/saved", wait_until="domcontentloaded")
-            page.wait_for_timeout(2000)
+            _navigateToSaved(page)
+
+            # Detect session expiry: an expired (or invalid) session causes
+            # Grok to redirect the browser to the login page instead of loading
+            # /imagine/saved.  When that happens, wipe the stale session file,
+            # relaunch the browser as visible, and let the user log in again.
+            if urllib.parse.urlparse(page.url).path != "/imagine/saved":
+                logger.warning(
+                    f"session appears expired (redirected to {page.url!r}); "
+                    "deleting saved session and switching to manual login"
+                )
+                context.close()
+                browser.close()
+                sessionFile.unlink(missing_ok=True)
+                browser = playwright.chromium.launch(headless=False)
+                context = browser.new_context()
+                page = context.new_page()
+                page.goto("https://grok.com", wait_until="domcontentloaded")
+                print(
+                    "\nA browser window has opened.\n"
+                    "Your previous Grok session has expired.\n"
+                    "Please log in to Grok/X and, once logged in, "
+                    "press Enter here to continue...",
+                    flush=True,
+                )
+                input()
+                sessionFile.parent.mkdir(parents=True, exist_ok=True)
+                context.storage_state(path=str(sessionFile))
+                if sessionFile.exists():
+                    sessionFile.chmod(0o600)
+                logger.value("saved Grok session to", str(sessionFile))
+                _navigateToSaved(page)
 
             previousLinkCount = 0
             stallCount = 0
