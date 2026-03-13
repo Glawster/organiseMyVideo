@@ -1142,6 +1142,26 @@ def testExtractMediaUrlsFromPageFiltersToUserContentDomains(organizer: VideoOrga
     assert nonMedia not in urls
 
 
+def testIsGrokMediaResponseMatchesByExtension(organizer: VideoOrganizer):
+    """Media extension in URL path is enough to capture the response."""
+    assert organizer._isGrokMediaResponse("https://cdn.example.ai/user/abc.png", "")
+    assert organizer._isGrokMediaResponse("https://cdn.example.ai/user/abc.jpg", "")
+    assert organizer._isGrokMediaResponse("https://cdn.example.ai/user/abc.mp4", "")
+    assert organizer._isGrokMediaResponse("https://cdn.example.ai/user/abc.webp", "")
+    assert not organizer._isGrokMediaResponse("https://cdn.example.ai/user/abc.js", "")
+    assert not organizer._isGrokMediaResponse("https://cdn.example.ai/user/abc.html", "")
+
+
+def testIsGrokMediaResponseMatchesByContentType(organizer: VideoOrganizer):
+    """image/* and video/* content-types are captured regardless of URL extension."""
+    assert organizer._isGrokMediaResponse("https://cdn.example.ai/image", "image/png")
+    assert organizer._isGrokMediaResponse("https://cdn.example.ai/image", "image/jpeg")
+    assert organizer._isGrokMediaResponse("https://cdn.example.ai/video", "video/mp4")
+    assert organizer._isGrokMediaResponse("https://cdn.example.ai/video", "video/webm")
+    assert not organizer._isGrokMediaResponse("https://cdn.example.ai/api", "application/json")
+    assert not organizer._isGrokMediaResponse("https://cdn.example.ai/js", "text/javascript")
+
+
 def testDownloadMediaFilesDryRunDoesNotWrite(organizer: VideoOrganizer, tmp_path: Path):
     downloadsDir = tmp_path / "Downloads"
     with patch("organiseMyVideo.Path.home", return_value=tmp_path):

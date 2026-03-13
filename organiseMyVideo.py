@@ -866,6 +866,19 @@ Errors:         {stats['errors']}
                 mediaUrls.add(url)
         return sorted(mediaUrls)
 
+    def _isGrokMediaResponse(self, url: str, contentType: str) -> bool:
+        """Return True when a Playwright network response should be captured as user media.
+
+        A response is considered media when its URL path has a recognised media
+        extension **or** when the ``Content-Type`` header indicates an image or
+        video.  This is used by the ``page.on("response", ...)`` listener inside
+        :meth:`scrapeGrokSavedMedia` and is extracted here so it can be tested
+        without a live Playwright session.
+        """
+        parsed = urllib.parse.urlparse(url)
+        ext = Path(parsed.path).suffix.lower()
+        return ext in GROK_MEDIA_EXTENSIONS or contentType.startswith(("image/", "video/"))
+
     def _downloadMediaFiles(self, mediaUrls: List[str], playwrightContext=None) -> dict:
         """Download URLs into ~/Downloads and return download stats.
 
@@ -957,7 +970,17 @@ Errors:         {stats['errors']}
         return username, password
 
     def scrapeGrokSavedMedia(self) -> dict:
-        """Log into Grok and scrape saved Imagine media URLs, then download to sourceDir."""
+        """Log into Grok and scrape saved Imagine media, downloading to ~/Downloads.
+
+        Uses Playwright network-response interception to capture every image and
+        video URL that the browser actually loads while scrolling
+        ``grok.com/imagine/saved``.  This is more reliable than querying DOM
+        ``src`` attributes because:
+
+        * It does not rely on knowing the CDN hostname(s) in advance.
+        * It captures lazily-loaded images as they are fetched by the browser.
+        * It works regardless of how the page's React tree represents the URLs.
+        """
         username, password = self._loadOrPromptGrokCredentials()
 
         try:
@@ -970,6 +993,19 @@ Errors:         {stats['errors']}
             browser = playwright.chromium.launch(headless=True)
             context = browser.new_context()
             page = context.new_page()
+
+            # ------------------------------------------------------------------
+            # Intercept network responses to capture the URLs of every media
+            # file the browser loads.  We register the listener before navigating
+            # to the saved-images page so that even the first batch of thumbnails
+            # is caught.
+            # ------------------------------------------------------------------
+            capturedUrls: set = set()
+
+            def _onResponse(response) -> None:
+                contentType = response.headers.get("content-type", "")
+                if self._isGrokMediaResponse(response.url, contentType):
+                    capturedUrls.add(response.url)
 
             page.goto("https://grok.com", wait_until="domcontentloaded")
 
@@ -991,14 +1027,31 @@ Errors:         {stats['errors']}
                 page.keyboard.press("Enter")
 
             page.wait_for_timeout(2500)
+
+            # Start intercepting responses before navigating to the saved-media
+            # page so that the initial grid load is included.
+            page.on("response", _onResponse)
             page.goto("https://grok.com/imagine/saved", wait_until="domcontentloaded")
             page.wait_for_timeout(2000)
 
-            for _ in range(6):
+            # Scroll the page to trigger lazy-loading of additional images.
+            # Stop early when two consecutive scroll passes load no new images.
+            previousCount = 0
+            stallCount = 0
+            for _ in range(20):
                 page.mouse.wheel(0, 2500)
-                page.wait_for_timeout(700)
+                page.wait_for_timeout(900)
+                currentCount = len(capturedUrls)
+                if currentCount == previousCount:
+                    stallCount += 1
+                    if stallCount >= 2:
+                        break
+                else:
+                    stallCount = 0
+                previousCount = currentCount
 
-            mediaUrls = self._extractMediaUrlsFromPage(page)
+            page.remove_listener("response", _onResponse)
+            mediaUrls = sorted(capturedUrls)
             logger.value("found Grok media URLs", len(mediaUrls))
             downloadStats = self._downloadMediaFiles(mediaUrls, playwrightContext=context)
             browser.close()
