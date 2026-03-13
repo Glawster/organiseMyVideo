@@ -9,21 +9,40 @@ TV Shows: /mnt/video<n>/TV/Show Name/Season NN/  or  /mnt/myVideo/TV/Show Name/S
 import os
 import sys
 import re
+import json
 import shutil
+import getpass
 import argparse
 import logging
 import datetime
+import urllib.parse
+import urllib.request
 
 from pathlib import Path
 from typing import List, Tuple, Optional
 
 from organiseMyProjects.logUtils import getLogger, drawBox # type: ignore
 
+# Playwright is an optional dependency used only by --grok.  We import it at
+# module level so tests can patch ``organiseMyVideo.sync_playwright``.
+try:
+    from playwright.sync_api import sync_playwright  # type: ignore
+except ImportError:
+    sync_playwright = None  # type: ignore
+
 # Module-level logger used by class methods; replaced with runtime-configured logger in main().
 logger = getLogger("organiseMyVideo")
 
 # Video file extensions to process
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".m4v", ".mpg", ".mpeg"}
+GROK_MEDIA_EXTENSIONS = {".mp4", ".mov", ".webm", ".png", ".jpg", ".jpeg", ".gif", ".webp"}
+GROK_USER_CONTENT_DOMAINS = {"imagine-public.x.ai", "images-public.x.ai"}
+GROK_CREDENTIALS_FILE = Path.home() / ".config" / "organiseMyVideo" / "grokCredentials.json"
+# Playwright storage-state file (cookies + localStorage) persisted after login.
+# When this file exists the browser starts already authenticated and no
+# username/password interaction is needed.  Delete this file to force a fresh
+# login (e.g. after a session expires or credentials change).
+GROK_SESSION_FILE = Path.home() / ".config" / "organiseMyVideo" / "grokSession.json"
 
 # Known torrent/index prefixes to strip from file and directory names
 PREFIX_PATTERNS = [
@@ -823,6 +842,375 @@ Errors:         {stats['errors']}
         drawBox(summary)
         logger.value("processing complete", stats)
 
+    def _extractMediaUrlsFromHtml(self, html: str) -> List[str]:
+        """Extract likely media URLs from Grok saved-image HTML."""
+        mediaUrls = set()
+        for match in re.findall(r'https?://[^\s"\']+', html, re.IGNORECASE):
+            parsed = urllib.parse.urlparse(match)
+            ext = Path(parsed.path).suffix.lower()
+            if ext in GROK_MEDIA_EXTENSIONS:
+                mediaUrls.add(match)
+        return sorted(mediaUrls)
+
+    def _extractMediaUrlsFromPage(self, page) -> List[str]:
+        """Extract the user's saved Imagine media URLs from a live Playwright page.
+
+        Uses DOM querying to read ``src`` attributes directly from ``<img>`` and
+        ``<video>``/``<source>`` elements rather than regex-scanning the full HTML.
+        Results are filtered to the known Grok user-content CDN domains so that
+        system UI icons, marketing images, and promotional videos embedded in the
+        page template are excluded.
+        """
+        rawUrls: List[str] = page.eval_on_selector_all(
+            "img[src], video[src], source[src]",
+            "els => els.map(el => el.src)",
+        )
+        mediaUrls = set()
+        for url in rawUrls:
+            if not url:
+                continue
+            parsed = urllib.parse.urlparse(url)
+            ext = Path(parsed.path).suffix.lower()
+            if ext not in GROK_MEDIA_EXTENSIONS:
+                continue
+            hostname = parsed.hostname or ""
+            if hostname in GROK_USER_CONTENT_DOMAINS:
+                mediaUrls.add(url)
+        return sorted(mediaUrls)
+
+    def _collectPostUrls(self, page) -> List[str]:
+        """Return all unique ``/imagine/post/{uuid}`` URLs found on the current page.
+
+        Queries the live DOM for anchor elements whose ``href`` contains
+        ``/imagine/post/`` and returns a deduplicated, sorted list of absolute
+        URLs.  Empty strings and duplicates are removed automatically.  Called
+        on the saved-gallery page so that the scraper can then visit each post
+        page individually to capture full-resolution media (including videos
+        that are not loaded as part of the thumbnail grid).
+        """
+        hrefs: List[str] = page.eval_on_selector_all(
+            "a[href*='/imagine/post/']",
+            "els => els.map(el => el.href)",
+        )
+        return sorted({h for h in hrefs if h})
+
+    def _isGrokMediaResponse(self, url: str, contentType: str) -> bool:
+        """Return True when a Playwright network response should be captured as user media.
+
+        Only responses from the known Grok user-content CDN domains
+        (:data:`GROK_USER_CONTENT_DOMAINS`) are considered user-generated media.
+        Everything else — the app's own domain, third-party CDNs hosting profile
+        pictures, analytics pixels, ad networks, etc. — is excluded.
+
+        A response qualifies when BOTH of the following are true:
+
+        * The hostname is in :data:`GROK_USER_CONTENT_DOMAINS`.
+        * The URL path has a recognised media extension **or** the
+          ``Content-Type`` header indicates an image or video.
+
+        This is used by the ``page.on("response", ...)`` listener inside
+        :meth:`scrapeGrokSavedMedia` and is extracted here so it can be tested
+        without a live Playwright session.
+        """
+        parsed = urllib.parse.urlparse(url)
+        hostname = parsed.hostname or ""
+        if not hostname or hostname not in GROK_USER_CONTENT_DOMAINS:
+            return False
+        ext = Path(parsed.path).suffix.lower()
+        return ext in GROK_MEDIA_EXTENSIONS or contentType.startswith(("image/", "video/"))
+
+    def _downloadMediaFiles(self, mediaUrls: List[str], playwrightContext=None) -> dict:
+        """Download URLs into ~/Downloads/Grok and return download stats.
+
+        Args:
+            mediaUrls: List of media URLs to download.
+            playwrightContext: An active Playwright ``BrowserContext``.  When
+                provided, downloads are made via the authenticated browser
+                session so that session cookies are included in each request,
+                avoiding 403 responses from CDN URLs that require authentication.
+                Falls back to ``urllib`` when *None*.
+        """
+        stats = {"downloaded": 0, "skipped": 0, "errors": 0}
+        destDir = Path.home() / "Downloads" / "Grok"
+        destDir.mkdir(parents=True, exist_ok=True)
+
+        for mediaUrl in mediaUrls:
+            parsed = urllib.parse.urlparse(mediaUrl)
+            filename = Path(parsed.path).name or f"grok_media_{stats['downloaded'] + stats['errors'] + 1}"
+            dest = destDir / filename
+
+            if dest.exists():
+                logger.value("grok media already exists, skipping", dest)
+                stats["skipped"] += 1
+                continue
+
+            if self.dryRun:
+                logger.action(f"would download grok media: {mediaUrl} -> {dest}")
+                stats["downloaded"] += 1
+                continue
+
+            try:
+                if playwrightContext is not None:
+                    response = playwrightContext.request.get(mediaUrl)
+                    if not response.ok:
+                        raise RuntimeError(f"HTTP {response.status}")
+                    dest.write_bytes(response.body())
+                else:
+                    with urllib.request.urlopen(mediaUrl, timeout=30) as response:
+                        dest.write_bytes(response.read())
+                logger.action(f"downloaded grok media: {dest}")
+                stats["downloaded"] += 1
+            except Exception as e:
+                logger.error(f"failed downloading {mediaUrl}: {e}")
+                stats["errors"] += 1
+
+        return stats
+
+    def _loadOrPromptGrokCredentials(
+        self, credentialsFile: Path = GROK_CREDENTIALS_FILE
+    ) -> tuple:
+        """
+        Load Grok credentials from a JSON file, prompting if not found.
+
+        If the file exists and contains both ``username`` and ``password``,
+        those values are returned directly.  Otherwise the user is prompted
+        interactively (password entry is hidden) and the credentials are saved
+        to the file for future use.
+
+        Args:
+            credentialsFile: Path to the JSON credentials file.
+
+        Returns:
+            Tuple of (username, password).
+        """
+        if credentialsFile.exists():
+            try:
+                data = json.loads(credentialsFile.read_text())
+                username = data.get("username", "")
+                password = data.get("password", "")
+                if username and password:
+                    logger.value("loaded grok credentials from", str(credentialsFile))
+                    return username, password
+            except Exception as e:
+                logger.error(f"failed to load credentials from {credentialsFile}: {e}")
+
+        logger.info("grok credentials not found - please enter your credentials")
+        username = input("Grok username (email): ").strip()
+        password = getpass.getpass("Grok password: ")
+
+        if not username or not password:
+            raise RuntimeError("username and password are required for --grok")
+
+        credentialsFile.parent.mkdir(parents=True, exist_ok=True)
+        credentialsFile.write_text(
+            json.dumps({"username": username, "password": password}, indent=2)
+        )
+        credentialsFile.chmod(0o600)
+        logger.value("saved grok credentials to", str(credentialsFile))
+        return username, password
+
+    def resetGrokConfig(
+        self,
+        sessionFile: Path = GROK_SESSION_FILE,
+        credentialsFile: Path = GROK_CREDENTIALS_FILE,
+    ) -> dict:
+        """Delete saved Grok session and credentials config files.
+
+        Removes *sessionFile* and *credentialsFile* if they exist so that the
+        next ``--grok`` run will prompt for a fresh manual login.
+
+        Args:
+            sessionFile: Path to the Playwright storage-state file.
+            credentialsFile: Path to the JSON credentials file.
+
+        Returns:
+            Dict with keys ``deleted`` (list of deleted paths) and
+            ``notFound`` (list of paths that did not exist).
+        """
+        deleted = []
+        notFound = []
+        for path in (sessionFile, credentialsFile):
+            if path.exists():
+                if not self.dryRun:
+                    path.unlink()
+                logger.action(f"deleted Grok config file: {path}")
+                deleted.append(str(path))
+            else:
+                logger.info(f"Grok config file not found (skipping): {path}")
+                notFound.append(str(path))
+        return {"deleted": deleted, "notFound": notFound}
+
+    def scrapeGrokSavedMedia(self, sessionFile: Path = GROK_SESSION_FILE) -> dict:
+        """Log into Grok and scrape saved Imagine media, downloading to ~/Downloads/Grok.
+
+        Authentication uses Playwright ``storage_state`` (cookies + localStorage)
+        persisted at *sessionFile* (default :data:`GROK_SESSION_FILE`).
+
+        * **If the session file exists** the browser starts already authenticated
+          and no username/password interaction is needed.
+
+        * **If the session file is absent** the stored credentials are used to
+          attempt automated form login, after which the resulting session is
+          saved so that subsequent runs are instant.
+
+        * To force a fresh login (e.g. after session expiry) delete the session
+          file and re-run.
+
+        After authentication the scrape runs in two phases:
+
+        1. **Gallery phase** — navigates to ``grok.com/imagine/saved`` and
+           scrolls to the bottom so that all post thumbnails are rendered.
+           Collects every ``/imagine/post/{uuid}`` link found in the DOM.
+
+        2. **Post phase** — visits each post page in turn and collects media
+           via two complementary strategies:
+
+           a. Network-response interception (fires for any resource the browser
+              actually fetches from :data:`GROK_USER_CONTENT_DOMAINS`).
+
+           b. DOM query (:meth:`_extractMediaUrlsFromPage`) reads ``<video
+              src>`` and ``<source src>`` attributes directly — essential
+              because video elements only fetch their media when they play, so
+              the response listener alone misses them.
+
+        All captured media URLs are then downloaded to ``~/Downloads/Grok``.
+        """
+        if sync_playwright is None:
+            raise RuntimeError(
+                "Playwright is required for --grok: "
+                "pip install playwright && playwright install chromium"
+            )
+
+        logger.doing("starting Grok scrape for saved Imagine media")
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+
+            # ------------------------------------------------------------------
+            # Authentication — prefer a saved session so that the full login
+            # flow (which may involve OAuth redirects, CAPTCHA, or 2FA) is only
+            # required once.
+            # ------------------------------------------------------------------
+            if sessionFile.exists():
+                try:
+                    logger.info("loading saved Grok session")
+                    context = browser.new_context(storage_state=str(sessionFile))
+                except Exception as e:
+                    logger.warning(f"saved session could not be loaded ({e}); falling back to fresh login")
+                    sessionFile.unlink(missing_ok=True)
+                    context = None
+            else:
+                context = None
+
+            if context is None:
+                # No valid session — relaunch as non-headless so the user can
+                # log in manually via the browser window.  X/Twitter's OAuth
+                # flow cannot be automated (CAPTCHA, 2FA, OAuth redirects), so
+                # we open a visible browser and wait for the user to finish.
+                browser.close()
+                browser = playwright.chromium.launch(headless=False)
+                context = browser.new_context()
+                page = context.new_page()
+                page.goto("https://grok.com", wait_until="domcontentloaded")
+                print(
+                    "\nA browser window has opened.\n"
+                    "Please log in to Grok/X and, once logged in, press Enter here to continue...",
+                    flush=True,
+                )
+                input()
+
+                # Persist session so the login form is never needed again.
+                sessionFile.parent.mkdir(parents=True, exist_ok=True)
+                context.storage_state(path=str(sessionFile))
+                if sessionFile.exists():
+                    sessionFile.chmod(0o600)
+                logger.value("saved Grok session to", str(sessionFile))
+            else:
+                page = context.new_page()
+
+            capturedUrls: set = set()
+
+            def _onResponse(response) -> None:
+                contentType = response.headers.get("content-type", "")
+                if self._isGrokMediaResponse(response.url, contentType):
+                    capturedUrls.add(response.url)
+
+            # ------------------------------------------------------------------
+            # Phase 1: Gallery — scroll /imagine/saved to render all post cards
+            # and collect their individual post-page links.
+            #
+            # Stall detection tracks the number of post links visible in the
+            # DOM (not capturedUrls) because gallery thumbnails may not come
+            # from GROK_USER_CONTENT_DOMAINS, so capturedUrls could stay at
+            # zero and cause the scroll to abort after just two passes.
+            # ------------------------------------------------------------------
+            page.on("response", _onResponse)
+            page.goto("https://grok.com/imagine/saved", wait_until="domcontentloaded")
+            page.wait_for_timeout(2000)
+
+            previousLinkCount = 0
+            stallCount = 0
+            for _ in range(20):
+                page.mouse.wheel(0, 2500)
+                page.wait_for_timeout(900)
+                currentLinkCount = len(self._collectPostUrls(page))
+                if currentLinkCount == previousLinkCount:
+                    stallCount += 1
+                    if stallCount >= 2:
+                        break
+                else:
+                    stallCount = 0
+                previousLinkCount = currentLinkCount
+
+            postUrls = self._collectPostUrls(page)
+            logger.value("found Grok post pages", len(postUrls))
+
+            # ------------------------------------------------------------------
+            # Phase 2: Post pages — visit each post and collect media via two
+            # complementary strategies:
+            #
+            # a) Network-response listener (_onResponse, already active) fires
+            #    for any resource that the browser fetches from
+            #    GROK_USER_CONTENT_DOMAINS while the page loads.
+            #
+            # b) DOM query (_extractMediaUrlsFromPage) reads <video src> and
+            #    <source src> attributes directly.  This is essential because
+            #    <video> elements do not start fetching their media until they
+            #    play, so the response listener alone misses them.
+            #
+            # We wait for "networkidle" (not just "domcontentloaded") so that
+            # the React app has time to finish its API call and render the
+            # video elements into the DOM before we query them.
+            # ------------------------------------------------------------------
+            for i, postUrl in enumerate(postUrls, 1):
+                logger.doing(f"scraping post {i}/{len(postUrls)}: {postUrl}")
+                page.goto(postUrl, wait_until="networkidle")
+                page.wait_for_timeout(1000)
+                for url in self._extractMediaUrlsFromPage(page):
+                    capturedUrls.add(url)
+
+            page.remove_listener("response", _onResponse)
+            mediaUrls = sorted(capturedUrls)
+            logger.value("found Grok media URLs", len(mediaUrls))
+
+            # Refresh the session on disk so it stays current.
+            context.storage_state(path=str(sessionFile))
+
+            if not postUrls:
+                logger.warning(
+                    "no posts found — check that you are logged in; "
+                    f"if the session has expired, delete {sessionFile} and re-run"
+                )
+
+            downloadStats = self._downloadMediaFiles(mediaUrls, playwrightContext=context)
+            browser.close()
+
+        logger.done("Grok scrape complete")
+        return {
+            "postsFound": len(postUrls),
+            "urlsFound": len(mediaUrls),
+            **downloadStats,
+        }
+
 
 def main():
     """Main entry point for the video organizer."""
@@ -850,6 +1238,16 @@ def main():
         dest="non_interactive",
         action="store_true",
         help="Run without user prompts (skip files that cannot be auto-detected)"
+    )
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="delete saved Grok session and credentials config files to force a fresh login on the next --grok run"
+    )
+    parser.add_argument(
+        "--grok",
+        action="store_true",
+        help="Log into Grok and download media from saved Imagine items into --source"
     )
     parser.add_argument(
         "--torrent",
@@ -882,14 +1280,39 @@ def main():
     logger.value("logging to", logFile)
     
     if dryRun:
-        logger.info("dry-run mode (no changes will be made) — use --confirm to execute")
+        logger.info("entering dry-run mode, use --confirm to execute")
     else:
-        logger.info("confirm mode — changes will be made")
+        logger.info("confirm mode, changes will be made")
     
     # Create organizer and run the requested mode
     organizer = VideoOrganizer(sourceDir=args.source, dryRun=dryRun)
 
-    if args.torrent:
+    if args.reset:
+        resetStats = organizer.resetGrokConfig()
+        deleted_list = "\n".join(f"  {p}" for p in resetStats["deleted"]) or "  (none)"
+        not_found_list = "\n".join(f"  {p}" for p in resetStats["notFound"]) or "  (none)"
+        summary = f"""RESET SUMMARY
+Deleted:
+{deleted_list}
+Not found:
+{not_found_list}
+"""
+        drawBox(summary)
+
+    elif args.grok:
+        grokStats = organizer.scrapeGrokSavedMedia()
+        summary = f"""GROK SUMMARY
+Posts found:     {grokStats['postsFound']}
+URLs found:      {grokStats['urlsFound']}
+Files handled:   {grokStats['downloaded']}
+Already present: {grokStats['skipped']}
+Errors:          {grokStats['errors']}
+Session file:    {GROK_SESSION_FILE}
+  (delete to force re-login)
+"""
+        drawBox(summary)
+
+    elif args.torrent:
         torrentDir = organizer.sourceDir.parent / "Downloads" if organizer.sourceDir else Path("/mnt/video2/Downloads")
         if args.clean:
             nameStats = organizer.cleanTorrentNames(torrentDir=torrentDir)
@@ -903,6 +1326,7 @@ Names skipped:    {nameStats['skipped']}
 Rename errors:    {nameStats['errors']}
 """
         drawBox(summary)
+
     elif args.clean:
         nameStats = organizer.cleanNames()
         cleanStats = organizer.cleanEmptyFolders()

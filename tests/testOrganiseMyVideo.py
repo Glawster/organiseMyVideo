@@ -1,8 +1,9 @@
 """Tests for organiseMyVideo.py"""
 
+import json
 import shutil
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -1101,3 +1102,377 @@ def testCleanTorrentNamesScansSubdirectories(tmp_path: Path):
     assert not torrentFile.exists()
     assert expectedFile.exists()
     assert stats["renamed"] == 1
+
+
+def testExtractMediaUrlsFromHtmlFindsSupportedExtensions(organizer: VideoOrganizer):
+    html = (
+        '<img src="https://example.com/image01.png">'
+        '<video src="https://example.com/clip01.mp4"></video>'
+        '<a href="https://example.com/readme.txt">ignore</a>'
+    )
+    urls = organizer._extractMediaUrlsFromHtml(html)
+    assert urls == ["https://example.com/clip01.mp4", "https://example.com/image01.png"]
+
+
+def testExtractMediaUrlsFromPageFiltersToUserContentDomains(organizer: VideoOrganizer):
+    """Only URLs from known Grok user-content CDN domains are returned."""
+    userImage = "https://imagine-public.x.ai/imagine-public/images/abc123.png"
+    userImageFromImagesPublic = "https://images-public.x.ai/xai-images-public/mj/images/def456.jpg"
+    systemImage = "https://x.ai/images/news/grok-4-1.webp"
+    promoVideo = "https://data.x.ai/grok-4-fast-side-by-side.mp4"
+    nonMedia = "https://imagine-public.x.ai/imagine-public/images/page.html"
+
+    fakePage = MagicMock()
+    fakePage.eval_on_selector_all.return_value = [
+        userImage,
+        userImageFromImagesPublic,
+        systemImage,
+        promoVideo,
+        nonMedia,
+        "",
+        None,
+    ]
+
+    urls = organizer._extractMediaUrlsFromPage(fakePage)
+
+    assert userImage in urls
+    assert userImageFromImagesPublic in urls
+    assert systemImage not in urls
+    assert promoVideo not in urls
+    assert nonMedia not in urls
+
+
+# ---------------------------------------------------------------------------
+# _collectPostUrls
+# ---------------------------------------------------------------------------
+
+
+def testCollectPostUrlsExtractsPostLinks(organizer: VideoOrganizer):
+    """Links matching /imagine/post/ are extracted from the page DOM."""
+    post1 = "https://grok.com/imagine/post/9a826579-a4c4-4b44-b29c-e2a20d316c92"
+    post2 = "https://grok.com/imagine/post/1b2c3d4e-0000-1111-2222-333344445555"
+
+    fakePage = MagicMock()
+    # The CSS selector a[href*='/imagine/post/'] already excludes non-post hrefs;
+    # the mock returns only what the selector would yield.
+    fakePage.eval_on_selector_all.return_value = [post1, post2, ""]
+
+    urls = organizer._collectPostUrls(fakePage)
+
+    assert post1 in urls
+    assert post2 in urls
+    assert "" not in urls
+    assert len(urls) == 2
+    fakePage.eval_on_selector_all.assert_called_once_with(
+        "a[href*='/imagine/post/']",
+        "els => els.map(el => el.href)",
+    )
+
+
+def testCollectPostUrlsDeduplicates(organizer: VideoOrganizer):
+    """Duplicate hrefs (same post linked twice on the gallery page) are collapsed."""
+    post = "https://grok.com/imagine/post/9a826579-a4c4-4b44-b29c-e2a20d316c92"
+
+    fakePage = MagicMock()
+    fakePage.eval_on_selector_all.return_value = [post, post, post]
+
+    urls = organizer._collectPostUrls(fakePage)
+
+    assert urls == [post]
+
+
+def testCollectPostUrlsReturnsEmptyWhenNoLinks(organizer: VideoOrganizer):
+    """An empty gallery page yields an empty list without raising."""
+    fakePage = MagicMock()
+    fakePage.eval_on_selector_all.return_value = []
+
+    assert organizer._collectPostUrls(fakePage) == []
+
+
+def testIsGrokMediaResponseMatchesByExtension(organizer: VideoOrganizer):
+    """Media extension in URL path is sufficient when the host is a known user-content CDN."""
+    for domain in ("imagine-public.x.ai", "images-public.x.ai"):
+        assert organizer._isGrokMediaResponse(f"https://{domain}/user/abc.png", "")
+        assert organizer._isGrokMediaResponse(f"https://{domain}/user/abc.jpg", "")
+        assert organizer._isGrokMediaResponse(f"https://{domain}/user/abc.mp4", "")
+        assert organizer._isGrokMediaResponse(f"https://{domain}/user/abc.webp", "")
+        assert not organizer._isGrokMediaResponse(f"https://{domain}/user/abc.js", "")
+        assert not organizer._isGrokMediaResponse(f"https://{domain}/user/abc.html", "")
+
+
+def testIsGrokMediaResponseMatchesByContentType(organizer: VideoOrganizer):
+    """image/* and video/* content-types are captured from known user-content CDN domains."""
+    for domain in ("imagine-public.x.ai", "images-public.x.ai"):
+        assert organizer._isGrokMediaResponse(f"https://{domain}/image", "image/png")
+        assert organizer._isGrokMediaResponse(f"https://{domain}/image", "image/jpeg")
+        assert organizer._isGrokMediaResponse(f"https://{domain}/video", "video/mp4")
+        assert organizer._isGrokMediaResponse(f"https://{domain}/video", "video/webm")
+        assert not organizer._isGrokMediaResponse(f"https://{domain}/api", "application/json")
+        assert not organizer._isGrokMediaResponse(f"https://{domain}/js", "text/javascript")
+
+
+def testIsGrokMediaResponseExcludesGrokComDomain(organizer: VideoOrganizer):
+    """Responses from grok.com itself are never captured — it is not a user-content CDN."""
+    assert not organizer._isGrokMediaResponse("https://grok.com/images/logo.png", "image/png")
+    assert not organizer._isGrokMediaResponse("https://www.grok.com/promo.jpg", "image/jpeg")
+    assert not organizer._isGrokMediaResponse("https://grok.com/clip.mp4", "video/mp4")
+
+
+def testIsGrokMediaResponseExcludesUnknownCdnDomains(organizer: VideoOrganizer):
+    """Images from third-party or unknown CDN domains are excluded by the allowlist."""
+    # Profile pictures, analytics pixels, ad networks, etc. must all be rejected.
+    assert not organizer._isGrokMediaResponse("https://cdn.example.ai/user/abc.png", "image/png")
+    assert not organizer._isGrokMediaResponse("https://pbs.twimg.com/profile_img/photo.jpg", "image/jpeg")
+    assert not organizer._isGrokMediaResponse("https://ads.tracker.com/pixel.gif", "image/gif")
+    # Only the known user-content CDN domain should pass through.
+    assert organizer._isGrokMediaResponse("https://imagine-public.x.ai/user/abc.png", "image/png")
+
+
+def testDownloadMediaFilesDryRunDoesNotWrite(organizer: VideoOrganizer, tmp_path: Path):
+    destDir = tmp_path / "Downloads" / "Grok"
+    with patch("organiseMyVideo.Path.home", return_value=tmp_path):
+        stats = organizer._downloadMediaFiles(["https://example.com/image01.png"])
+    assert stats == {"downloaded": 1, "skipped": 0, "errors": 0}
+    assert not (destDir / "image01.png").exists()
+
+
+def testDownloadMediaFilesSkipsExisting(confirmedOrganizer: VideoOrganizer, tmp_path: Path):
+    destDir = tmp_path / "Downloads" / "Grok"
+    destDir.mkdir(parents=True)
+    target = destDir / "image01.png"
+    target.write_bytes(b"exists")
+    with patch("organiseMyVideo.Path.home", return_value=tmp_path):
+        stats = confirmedOrganizer._downloadMediaFiles(["https://example.com/image01.png"])
+    assert stats == {"downloaded": 0, "skipped": 1, "errors": 0}
+
+
+def testDownloadMediaFilesUsesPlaywrightContext(confirmedOrganizer: VideoOrganizer, tmp_path: Path):
+    """When a playwright context is supplied the authenticated request path is used."""
+    fakeResponse = MagicMock()
+    fakeResponse.ok = True
+    fakeResponse.body.return_value = b"image-data"
+
+    fakeContext = MagicMock()
+    fakeContext.request.get.return_value = fakeResponse
+
+    with patch("organiseMyVideo.Path.home", return_value=tmp_path):
+        stats = confirmedOrganizer._downloadMediaFiles(
+            ["https://example.com/image01.png"], playwrightContext=fakeContext
+        )
+
+    assert stats == {"downloaded": 1, "skipped": 0, "errors": 0}
+    fakeContext.request.get.assert_called_once_with("https://example.com/image01.png")
+    assert (tmp_path / "Downloads" / "Grok" / "image01.png").read_bytes() == b"image-data"
+
+
+def testDownloadMediaFilesPlaywrightContextNonOkResponse(confirmedOrganizer: VideoOrganizer, tmp_path: Path):
+    """A non-OK playwright response is counted as an error."""
+    fakeResponse = MagicMock()
+    fakeResponse.ok = False
+    fakeResponse.status = 403
+
+    fakeContext = MagicMock()
+    fakeContext.request.get.return_value = fakeResponse
+
+    with patch("organiseMyVideo.Path.home", return_value=tmp_path):
+        stats = confirmedOrganizer._downloadMediaFiles(
+            ["https://example.com/image01.png"], playwrightContext=fakeContext
+        )
+
+    assert stats == {"downloaded": 0, "skipped": 0, "errors": 1}
+
+
+# ---------------------------------------------------------------------------
+# _loadOrPromptGrokCredentials
+# ---------------------------------------------------------------------------
+
+
+def testLoadOrPromptGrokCredentialsLoadsFromFile(organizer: VideoOrganizer, tmp_path: Path):
+    """Existing credentials file is read without prompting the user."""
+    credFile = tmp_path / "grokCredentials.json"
+    credFile.write_text(json.dumps({"username": "user@example.com", "password": "s3cr3t"}))
+
+    username, password = organizer._loadOrPromptGrokCredentials(credentialsFile=credFile)
+
+    assert username == "user@example.com"
+    assert password == "s3cr3t"
+
+
+def testLoadOrPromptGrokCredentialsPromptsAndSavesWhenFileMissing(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """When no credentials file exists, the user is prompted and the result is saved."""
+    credFile = tmp_path / "sub" / "grokCredentials.json"
+
+    with patch("builtins.input", return_value="user@example.com"), patch(
+        "getpass.getpass", return_value="s3cr3t"
+    ):
+        username, password = organizer._loadOrPromptGrokCredentials(credentialsFile=credFile)
+
+    assert username == "user@example.com"
+    assert password == "s3cr3t"
+    assert credFile.exists()
+    saved = json.loads(credFile.read_text())
+    assert saved["username"] == "user@example.com"
+    assert saved["password"] == "s3cr3t"
+
+
+def testLoadOrPromptGrokCredentialsPromptsWhenFileIncomplete(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """A credentials file missing the password triggers a fresh prompt."""
+    credFile = tmp_path / "grokCredentials.json"
+    credFile.write_text(json.dumps({"username": "user@example.com", "password": ""}))
+
+    with patch("builtins.input", return_value="user@example.com"), patch(
+        "getpass.getpass", return_value="newpass"
+    ):
+        username, password = organizer._loadOrPromptGrokCredentials(credentialsFile=credFile)
+
+    assert password == "newpass"
+    saved = json.loads(credFile.read_text())
+    assert saved["password"] == "newpass"
+
+
+# ---------------------------------------------------------------------------
+# scrapeGrokSavedMedia — session file behaviour
+# ---------------------------------------------------------------------------
+
+
+def testScrapeGrokSavedMediaUsesSessionFileWhenPresent(
+    confirmedOrganizer: VideoOrganizer, tmp_path: Path
+):
+    """When a session file exists the browser context is initialised from it
+    and the login form automation code is never reached."""
+    sessionFile = tmp_path / "grokSession.json"
+    sessionFile.write_text("{}")  # minimal valid storage-state
+
+    fakePage = MagicMock()
+    fakePage.eval_on_selector_all.return_value = []  # empty gallery → 0 posts
+
+    fakeContext = MagicMock()
+    fakeContext.new_page.return_value = fakePage
+    fakeContext.storage_state.return_value = None
+
+    fakeBrowser = MagicMock()
+    fakeBrowser.new_context.return_value = fakeContext
+
+    fakePW = MagicMock()
+    fakePW.chromium.launch.return_value = fakeBrowser
+
+    with patch("organiseMyVideo.sync_playwright") as mockPW:
+        mockPW.return_value.__enter__.return_value = fakePW
+        stats = confirmedOrganizer.scrapeGrokSavedMedia(sessionFile=sessionFile)
+
+    # new_context must have been called with storage_state, not with credentials
+    call_kwargs = fakeBrowser.new_context.call_args
+    assert call_kwargs is not None
+    assert "storage_state" in call_kwargs.kwargs
+    assert call_kwargs.kwargs["storage_state"] == str(sessionFile)
+    assert stats["postsFound"] == 0
+
+
+def testScrapeGrokSavedMediaSavesSessionAfterLogin(
+    confirmedOrganizer: VideoOrganizer, tmp_path: Path
+):
+    """When no session file exists the browser is relaunched non-headless so
+    the user can log in manually, then storage_state() persists the session."""
+    sessionFile = tmp_path / "new_session.json"
+    assert not sessionFile.exists()
+
+    fakePage = MagicMock()
+    fakePage.eval_on_selector_all.return_value = []
+
+    fakeContext = MagicMock()
+    fakeContext.new_page.return_value = fakePage
+    fakeContext.storage_state.return_value = None
+
+    fakeBrowser = MagicMock()
+    fakeBrowser.new_context.return_value = fakeContext
+
+    fakePW = MagicMock()
+    fakePW.chromium.launch.return_value = fakeBrowser
+
+    with (
+        patch("organiseMyVideo.sync_playwright") as mockPW,
+        patch("builtins.input", return_value=""),  # simulate user pressing Enter
+    ):
+        mockPW.return_value.__enter__.return_value = fakePW
+        confirmedOrganizer.scrapeGrokSavedMedia(sessionFile=sessionFile)
+
+    # The browser should have been relaunched non-headless for manual login
+    launch_calls = fakePW.chromium.launch.call_args_list
+    assert any(
+        c.kwargs.get("headless") is False for c in launch_calls
+    ), "expected at least one non-headless browser launch for manual login"
+
+    # storage_state should have been called (at least once) to save the session
+    assert fakeContext.storage_state.called
+    saved_paths = [
+        call.kwargs.get("path") or (call.args[0] if call.args else None)
+        for call in fakeContext.storage_state.call_args_list
+    ]
+    assert str(sessionFile) in saved_paths
+
+
+# ---------------------------------------------------------------------------
+# resetGrokConfig
+# ---------------------------------------------------------------------------
+
+
+def testResetGrokConfigDeletesBothFiles(confirmedOrganizer: VideoOrganizer, tmp_path: Path):
+    """Both session and credentials files are deleted when they exist."""
+    sessionFile = tmp_path / "grokSession.json"
+    credFile = tmp_path / "grokCredentials.json"
+    sessionFile.write_text("{}")
+    credFile.write_text(json.dumps({"username": "u", "password": "p"}))
+
+    result = confirmedOrganizer.resetGrokConfig(sessionFile=sessionFile, credentialsFile=credFile)
+
+    assert not sessionFile.exists()
+    assert not credFile.exists()
+    assert str(sessionFile) in result["deleted"]
+    assert str(credFile) in result["deleted"]
+    assert result["notFound"] == []
+
+
+def testResetGrokConfigReportsNotFoundWhenFilesAbsent(confirmedOrganizer: VideoOrganizer, tmp_path: Path):
+    """Files that don't exist are reported in notFound, nothing is deleted."""
+    sessionFile = tmp_path / "grokSession.json"
+    credFile = tmp_path / "grokCredentials.json"
+
+    result = confirmedOrganizer.resetGrokConfig(sessionFile=sessionFile, credentialsFile=credFile)
+
+    assert result["deleted"] == []
+    assert str(sessionFile) in result["notFound"]
+    assert str(credFile) in result["notFound"]
+
+
+def testResetGrokConfigDryRunDoesNotDelete(organizer: VideoOrganizer, tmp_path: Path):
+    """In dry-run mode the files are NOT deleted but are reported as deleted."""
+    sessionFile = tmp_path / "grokSession.json"
+    credFile = tmp_path / "grokCredentials.json"
+    sessionFile.write_text("{}")
+    credFile.write_text(json.dumps({"username": "u", "password": "p"}))
+
+    result = organizer.resetGrokConfig(sessionFile=sessionFile, credentialsFile=credFile)
+
+    # Files must still exist in dry-run mode
+    assert sessionFile.exists()
+    assert credFile.exists()
+    # But they are still reported in the deleted list (dry-run shows what would happen)
+    assert str(sessionFile) in result["deleted"]
+    assert str(credFile) in result["deleted"]
+
+
+def testResetGrokConfigDeletesOnlyExistingFiles(confirmedOrganizer: VideoOrganizer, tmp_path: Path):
+    """Only the session file exists — only it is deleted; credentials go to notFound."""
+    sessionFile = tmp_path / "grokSession.json"
+    credFile = tmp_path / "grokCredentials.json"
+    sessionFile.write_text("{}")
+
+    result = confirmedOrganizer.resetGrokConfig(sessionFile=sessionFile, credentialsFile=credFile)
+
+    assert not sessionFile.exists()
+    assert str(sessionFile) in result["deleted"]
+    assert str(credFile) in result["notFound"]
