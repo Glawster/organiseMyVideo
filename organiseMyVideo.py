@@ -1009,6 +1009,37 @@ Errors:         {stats['errors']}
         logger.value("saved grok credentials to", str(credentialsFile))
         return username, password
 
+    def resetGrokConfig(
+        self,
+        sessionFile: Path = GROK_SESSION_FILE,
+        credentialsFile: Path = GROK_CREDENTIALS_FILE,
+    ) -> dict:
+        """Delete saved Grok session and credentials config files.
+
+        Removes *sessionFile* and *credentialsFile* if they exist so that the
+        next ``--grok`` run will prompt for a fresh manual login.
+
+        Args:
+            sessionFile: Path to the Playwright storage-state file.
+            credentialsFile: Path to the JSON credentials file.
+
+        Returns:
+            Dict with keys ``deleted`` (list of deleted paths) and
+            ``notFound`` (list of paths that did not exist).
+        """
+        deleted = []
+        notFound = []
+        for path in (sessionFile, credentialsFile):
+            if path.exists():
+                if not self.dryRun:
+                    path.unlink()
+                logger.action(f"deleted Grok config file: {path}")
+                deleted.append(str(path))
+            else:
+                logger.info(f"Grok config file not found (skipping): {path}")
+                notFound.append(str(path))
+        return {"deleted": deleted, "notFound": notFound}
+
     def scrapeGrokSavedMedia(self, sessionFile: Path = GROK_SESSION_FILE) -> dict:
         """Log into Grok and scrape saved Imagine media, downloading to ~/Downloads/Grok.
 
@@ -1209,6 +1240,11 @@ def main():
         help="Run without user prompts (skip files that cannot be auto-detected)"
     )
     parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="delete saved Grok session and credentials config files to force a fresh login on the next --grok run"
+    )
+    parser.add_argument(
         "--grok",
         action="store_true",
         help="Log into Grok and download media from saved Imagine items into --source"
@@ -1251,7 +1287,19 @@ def main():
     # Create organizer and run the requested mode
     organizer = VideoOrganizer(sourceDir=args.source, dryRun=dryRun)
 
-    if args.grok:
+    if args.reset:
+        resetStats = organizer.resetGrokConfig()
+        deleted_list = "\n".join(f"  {p}" for p in resetStats["deleted"]) or "  (none)"
+        not_found_list = "\n".join(f"  {p}" for p in resetStats["notFound"]) or "  (none)"
+        summary = f"""RESET SUMMARY
+Deleted:
+{deleted_list}
+Not found:
+{not_found_list}
+"""
+        drawBox(summary)
+
+    elif args.grok:
         grokStats = organizer.scrapeGrokSavedMedia()
         summary = f"""GROK SUMMARY
 Posts found:     {grokStats['postsFound']}

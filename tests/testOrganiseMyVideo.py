@@ -1413,3 +1413,66 @@ def testScrapeGrokSavedMediaSavesSessionAfterLogin(
         for call in fakeContext.storage_state.call_args_list
     ]
     assert str(sessionFile) in saved_paths
+
+
+# ---------------------------------------------------------------------------
+# resetGrokConfig
+# ---------------------------------------------------------------------------
+
+
+def testResetGrokConfigDeletesBothFiles(confirmedOrganizer: VideoOrganizer, tmp_path: Path):
+    """Both session and credentials files are deleted when they exist."""
+    sessionFile = tmp_path / "grok_session.json"
+    credFile = tmp_path / "grok_credentials.json"
+    sessionFile.write_text("{}")
+    credFile.write_text(json.dumps({"username": "u", "password": "p"}))
+
+    result = confirmedOrganizer.resetGrokConfig(sessionFile=sessionFile, credentialsFile=credFile)
+
+    assert not sessionFile.exists()
+    assert not credFile.exists()
+    assert str(sessionFile) in result["deleted"]
+    assert str(credFile) in result["deleted"]
+    assert result["notFound"] == []
+
+
+def testResetGrokConfigReportsNotFoundWhenFilesAbsent(confirmedOrganizer: VideoOrganizer, tmp_path: Path):
+    """Files that don't exist are reported in notFound, nothing is deleted."""
+    sessionFile = tmp_path / "grok_session.json"
+    credFile = tmp_path / "grok_credentials.json"
+
+    result = confirmedOrganizer.resetGrokConfig(sessionFile=sessionFile, credentialsFile=credFile)
+
+    assert result["deleted"] == []
+    assert str(sessionFile) in result["notFound"]
+    assert str(credFile) in result["notFound"]
+
+
+def testResetGrokConfigDryRunDoesNotDelete(organizer: VideoOrganizer, tmp_path: Path):
+    """In dry-run mode the files are NOT deleted but are reported as deleted."""
+    sessionFile = tmp_path / "grok_session.json"
+    credFile = tmp_path / "grok_credentials.json"
+    sessionFile.write_text("{}")
+    credFile.write_text(json.dumps({"username": "u", "password": "p"}))
+
+    result = organizer.resetGrokConfig(sessionFile=sessionFile, credentialsFile=credFile)
+
+    # Files must still exist in dry-run mode
+    assert sessionFile.exists()
+    assert credFile.exists()
+    # But they are still reported in the deleted list (dry-run shows what would happen)
+    assert str(sessionFile) in result["deleted"]
+    assert str(credFile) in result["deleted"]
+
+
+def testResetGrokConfigDeletesOnlyExistingFiles(confirmedOrganizer: VideoOrganizer, tmp_path: Path):
+    """Only the session file exists — only it is deleted; credentials go to notFound."""
+    sessionFile = tmp_path / "grok_session.json"
+    credFile = tmp_path / "grok_credentials.json"
+    sessionFile.write_text("{}")
+
+    result = confirmedOrganizer.resetGrokConfig(sessionFile=sessionFile, credentialsFile=credFile)
+
+    assert not sessionFile.exists()
+    assert str(sessionFile) in result["deleted"]
+    assert str(credFile) in result["notFound"]
