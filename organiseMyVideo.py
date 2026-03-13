@@ -865,9 +865,7 @@ def main():
     if args.torrent:
         torrentDir = organizer.sourceDir.parent / "Downloads" if organizer.sourceDir else Path("/mnt/video2/Downloads")
         if args.clean:
-            logger.info(f"torrent mode: scanning {torrentDir} for .torrent files to rename")
             nameStats = organizer.cleanTorrentNames(torrentDir=torrentDir)
-        logger.info(f"torrent mode: scanning {torrentDir} for .torrent files to remove")
         removeStats = organizer.removeTorrentsInLibrary(torrentDir=torrentDir)
         summary = f"""TORRENT SUMMARY
 Torrents deleted: {removeStats['deleted']}
