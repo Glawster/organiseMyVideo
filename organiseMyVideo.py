@@ -29,6 +29,7 @@ logger = getLogger("organiseMyVideo")
 # Video file extensions to process
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".m4v", ".mpg", ".mpeg"}
 GROK_MEDIA_EXTENSIONS = {".mp4", ".mov", ".webm", ".png", ".jpg", ".jpeg", ".gif", ".webp"}
+GROK_USER_CONTENT_DOMAINS = {"imagine-public.x.ai", "images-public.x.ai"}
 GROK_CREDENTIALS_FILE = Path.home() / ".config" / "organiseMyVideo" / "grok_credentials.json"
 
 # Known torrent/index prefixes to strip from file and directory names
@@ -839,6 +840,32 @@ Errors:         {stats['errors']}
                 mediaUrls.add(match)
         return sorted(mediaUrls)
 
+    def _extractMediaUrlsFromPage(self, page) -> List[str]:
+        """Extract the user's saved Imagine media URLs from a live Playwright page.
+
+        Uses DOM querying to read ``src`` attributes directly from ``<img>`` and
+        ``<video>``/``<source>`` elements rather than regex-scanning the full HTML.
+        Results are filtered to the known Grok user-content CDN domains so that
+        system UI icons, marketing images, and promotional videos embedded in the
+        page template are excluded.
+        """
+        rawUrls: List[str] = page.eval_on_selector_all(
+            "img[src], video[src], source[src]",
+            "els => els.map(el => el.src)",
+        )
+        mediaUrls = set()
+        for url in rawUrls:
+            if not url:
+                continue
+            parsed = urllib.parse.urlparse(url)
+            ext = Path(parsed.path).suffix.lower()
+            if ext not in GROK_MEDIA_EXTENSIONS:
+                continue
+            hostname = parsed.hostname or ""
+            if hostname in GROK_USER_CONTENT_DOMAINS:
+                mediaUrls.add(url)
+        return sorted(mediaUrls)
+
     def _downloadMediaFiles(self, mediaUrls: List[str], playwrightContext=None) -> dict:
         """Download URLs into ~/Downloads and return download stats.
 
@@ -971,7 +998,7 @@ Errors:         {stats['errors']}
                 page.mouse.wheel(0, 2500)
                 page.wait_for_timeout(700)
 
-            mediaUrls = self._extractMediaUrlsFromHtml(page.content())
+            mediaUrls = self._extractMediaUrlsFromPage(page)
             logger.value("found Grok media URLs", len(mediaUrls))
             downloadStats = self._downloadMediaFiles(mediaUrls, playwrightContext=context)
             browser.close()

@@ -1114,6 +1114,34 @@ def testExtractMediaUrlsFromHtmlFindsSupportedExtensions(organizer: VideoOrganiz
     assert urls == ["https://example.com/clip01.mp4", "https://example.com/image01.png"]
 
 
+def testExtractMediaUrlsFromPageFiltersToUserContentDomains(organizer: VideoOrganizer):
+    """Only URLs from known Grok user-content CDN domains are returned."""
+    userImage = "https://imagine-public.x.ai/imagine-public/images/abc123.png"
+    userImageFromImagesPublic = "https://images-public.x.ai/xai-images-public/mj/images/def456.jpg"
+    systemImage = "https://x.ai/images/news/grok-4-1.webp"
+    promoVideo = "https://data.x.ai/grok-4-fast-side-by-side.mp4"
+    nonMedia = "https://imagine-public.x.ai/imagine-public/images/page.html"
+
+    fakePage = MagicMock()
+    fakePage.eval_on_selector_all.return_value = [
+        userImage,
+        userImageFromImagesPublic,
+        systemImage,
+        promoVideo,
+        nonMedia,
+        "",
+        None,
+    ]
+
+    urls = organizer._extractMediaUrlsFromPage(fakePage)
+
+    assert userImage in urls
+    assert userImageFromImagesPublic in urls
+    assert systemImage not in urls
+    assert promoVideo not in urls
+    assert nonMedia not in urls
+
+
 def testDownloadMediaFilesDryRunDoesNotWrite(organizer: VideoOrganizer, tmp_path: Path):
     downloadsDir = tmp_path / "Downloads"
     with patch("organiseMyVideo.Path.home", return_value=tmp_path):
