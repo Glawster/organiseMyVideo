@@ -839,8 +839,17 @@ Errors:         {stats['errors']}
                 mediaUrls.add(match)
         return sorted(mediaUrls)
 
-    def _downloadMediaFiles(self, mediaUrls: List[str]) -> dict:
-        """Download URLs into ~/Downloads and return download stats."""
+    def _downloadMediaFiles(self, mediaUrls: List[str], playwrightContext=None) -> dict:
+        """Download URLs into ~/Downloads and return download stats.
+
+        Args:
+            mediaUrls: List of media URLs to download.
+            playwrightContext: An active Playwright ``BrowserContext``.  When
+                provided, downloads are made via the authenticated browser
+                session so that session cookies are included in each request,
+                avoiding 403 responses from CDN URLs that require authentication.
+                Falls back to ``urllib`` when *None*.
+        """
         stats = {"downloaded": 0, "skipped": 0, "errors": 0}
         destDir = Path.home() / "Downloads"
         destDir.mkdir(parents=True, exist_ok=True)
@@ -861,8 +870,14 @@ Errors:         {stats['errors']}
                 continue
 
             try:
-                with urllib.request.urlopen(mediaUrl, timeout=30) as response:
-                    dest.write_bytes(response.read())
+                if playwrightContext is not None:
+                    response = playwrightContext.request.get(mediaUrl)
+                    if not response.ok:
+                        raise RuntimeError(f"HTTP {response.status}")
+                    dest.write_bytes(response.body())
+                else:
+                    with urllib.request.urlopen(mediaUrl, timeout=30) as response:
+                        dest.write_bytes(response.read())
                 logger.action(f"downloaded grok media: {dest}")
                 stats["downloaded"] += 1
             except Exception as e:
@@ -957,10 +972,10 @@ Errors:         {stats['errors']}
                 page.wait_for_timeout(700)
 
             mediaUrls = self._extractMediaUrlsFromHtml(page.content())
+            logger.value("found Grok media URLs", len(mediaUrls))
+            downloadStats = self._downloadMediaFiles(mediaUrls, playwrightContext=context)
             browser.close()
 
-        logger.value("found Grok media URLs", len(mediaUrls))
-        downloadStats = self._downloadMediaFiles(mediaUrls)
         logger.done("Grok scrape complete")
         return {
             "urlsFound": len(mediaUrls),

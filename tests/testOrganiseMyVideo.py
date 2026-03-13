@@ -3,7 +3,7 @@
 import json
 import shutil
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -1130,6 +1130,42 @@ def testDownloadMediaFilesSkipsExisting(confirmedOrganizer: VideoOrganizer, tmp_
     with patch("organiseMyVideo.Path.home", return_value=tmp_path):
         stats = confirmedOrganizer._downloadMediaFiles(["https://example.com/image01.png"])
     assert stats == {"downloaded": 0, "skipped": 1, "errors": 0}
+
+
+def testDownloadMediaFilesUsesPlaywrightContext(confirmedOrganizer: VideoOrganizer, tmp_path: Path):
+    """When a playwright context is supplied the authenticated request path is used."""
+    fakeResponse = MagicMock()
+    fakeResponse.ok = True
+    fakeResponse.body.return_value = b"image-data"
+
+    fakeContext = MagicMock()
+    fakeContext.request.get.return_value = fakeResponse
+
+    with patch("organiseMyVideo.Path.home", return_value=tmp_path):
+        stats = confirmedOrganizer._downloadMediaFiles(
+            ["https://example.com/image01.png"], playwrightContext=fakeContext
+        )
+
+    assert stats == {"downloaded": 1, "skipped": 0, "errors": 0}
+    fakeContext.request.get.assert_called_once_with("https://example.com/image01.png")
+    assert (tmp_path / "Downloads" / "image01.png").read_bytes() == b"image-data"
+
+
+def testDownloadMediaFilesPlaywrightContextNonOkResponse(confirmedOrganizer: VideoOrganizer, tmp_path: Path):
+    """A non-OK playwright response is counted as an error."""
+    fakeResponse = MagicMock()
+    fakeResponse.ok = False
+    fakeResponse.status = 403
+
+    fakeContext = MagicMock()
+    fakeContext.request.get.return_value = fakeResponse
+
+    with patch("organiseMyVideo.Path.home", return_value=tmp_path):
+        stats = confirmedOrganizer._downloadMediaFiles(
+            ["https://example.com/image01.png"], playwrightContext=fakeContext
+        )
+
+    assert stats == {"downloaded": 0, "skipped": 0, "errors": 1}
 
 
 # ---------------------------------------------------------------------------
