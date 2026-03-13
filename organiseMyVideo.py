@@ -803,7 +803,16 @@ def main():
     # Create organizer and run the requested mode
     organizer = VideoOrganizer(sourceDir=args.source, dryRun=dryRun)
 
-    if args.clean:
+    if args.torrent:
+        torrentDir = organizer.sourceDir.parent / "Downloads" if organizer.sourceDir else Path("/mnt/video2/Downloads")
+        torrentStats = organizer.cleanTorrents(torrentDir=str(torrentDir))
+        summary = f"""TORRENT SUMMARY
+Torrents deleted: {torrentStats['deleted']}
+Torrents kept:    {torrentStats['skipped']}
+Errors:           {torrentStats['errors']}
+"""
+        drawBox(summary)
+    elif args.clean:
         nameStats = organizer.cleanNames()
         cleanStats = organizer.cleanEmptyFolders()
         summary = f"""CLEAN SUMMARY
@@ -812,15 +821,6 @@ Name errors:     {nameStats['errors']}
 Folders removed: {cleanStats['removed']}
 Folders kept:    {cleanStats['skipped']}
 Folder errors:   {cleanStats['errors']}
-"""
-        drawBox(summary)
-    elif args.torrent:
-        torrentDir = organizer.sourceDir.parent / "Downloads" if organizer.sourceDir else Path("/mnt/video2/Downloads")
-        torrentStats = organizer.cleanTorrents(torrentDir=str(torrentDir))
-        summary = f"""TORRENT SUMMARY
-Torrents deleted: {torrentStats['deleted']}
-Torrents kept:    {torrentStats['skipped']}
-Errors:           {torrentStats['errors']}
 """
         drawBox(summary)
     else:
