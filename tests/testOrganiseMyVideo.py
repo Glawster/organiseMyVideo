@@ -1375,16 +1375,12 @@ def testScrapeGrokSavedMediaUsesSessionFileWhenPresent(
 def testScrapeGrokSavedMediaSavesSessionAfterLogin(
     confirmedOrganizer: VideoOrganizer, tmp_path: Path
 ):
-    """When no session file exists the context is created without one, and
-    storage_state() is called to persist the session afterwards."""
+    """When no session file exists the browser is relaunched non-headless so
+    the user can log in manually, then storage_state() persists the session."""
     sessionFile = tmp_path / "new_session.json"
     assert not sessionFile.exists()
 
-    credFile = tmp_path / "grok_credentials.json"
-    credFile.write_text(json.dumps({"username": "u@example.com", "password": "pw"}))
-
     fakePage = MagicMock()
-    fakePage.locator.return_value.count.return_value = 0
     fakePage.eval_on_selector_all.return_value = []
 
     fakeContext = MagicMock()
@@ -1399,11 +1395,16 @@ def testScrapeGrokSavedMediaSavesSessionAfterLogin(
 
     with (
         patch("organiseMyVideo.sync_playwright") as mockPW,
-        patch.object(confirmedOrganizer, "_loadOrPromptGrokCredentials",
-                     return_value=("u@example.com", "pw")),
+        patch("builtins.input", return_value=""),  # simulate user pressing Enter
     ):
         mockPW.return_value.__enter__.return_value = fakePW
         confirmedOrganizer.scrapeGrokSavedMedia(sessionFile=sessionFile)
+
+    # The browser should have been relaunched non-headless for manual login
+    launch_calls = fakePW.chromium.launch.call_args_list
+    assert any(
+        c.kwargs.get("headless") is False for c in launch_calls
+    ), "expected at least one non-headless browser launch for manual login"
 
     # storage_state should have been called (at least once) to save the session
     assert fakeContext.storage_state.called

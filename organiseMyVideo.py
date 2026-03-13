@@ -1071,30 +1071,21 @@ Errors:         {stats['errors']}
                 context = None
 
             if context is None:
-                username, password = self._loadOrPromptGrokCredentials()
+                # No valid session — relaunch as non-headless so the user can
+                # log in manually via the browser window.  X/Twitter's OAuth
+                # flow cannot be automated (CAPTCHA, 2FA, OAuth redirects), so
+                # we open a visible browser and wait for the user to finish.
+                browser.close()
+                browser = playwright.chromium.launch(headless=False)
                 context = browser.new_context()
                 page = context.new_page()
-
                 page.goto("https://grok.com", wait_until="domcontentloaded")
-
-                # Attempt to fill login forms across common variants.
-                if page.locator("input[name='text']").count() > 0:
-                    page.fill("input[name='text']", username)
-                    page.keyboard.press("Enter")
-                elif page.locator("input[type='email']").count() > 0:
-                    page.fill("input[type='email']", username)
-                    page.keyboard.press("Enter")
-
-                page.wait_for_timeout(1200)
-
-                if page.locator("input[name='password']").count() > 0:
-                    page.fill("input[name='password']", password)
-                    page.keyboard.press("Enter")
-                elif page.locator("input[type='password']").count() > 0:
-                    page.fill("input[type='password']", password)
-                    page.keyboard.press("Enter")
-
-                page.wait_for_timeout(2500)
+                print(
+                    "\nA browser window has opened.\n"
+                    "Please log in to Grok/X and, once logged in, press Enter here to continue...",
+                    flush=True,
+                )
+                input()
 
                 # Persist session so the login form is never needed again.
                 sessionFile.parent.mkdir(parents=True, exist_ok=True)
