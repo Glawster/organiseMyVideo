@@ -31,6 +31,9 @@ PREFIX_PATTERNS = [
     r"^\s*www\.Torrenting\.com\s*-\s*",
 ]
 
+# Compiled regex combining all known prefixes (built once at module load)
+_PREFIX_REGEX = re.compile("|".join(PREFIX_PATTERNS), re.IGNORECASE)
+
 class VideoOrganizer:
     """Main class for organizing video files into structured directories."""
     
@@ -463,14 +466,12 @@ class VideoOrganizer:
             logger.error(f"source directory does not exist: {self.sourceDir}")
             return stats
 
-        combinedRegex = re.compile("|".join(PREFIX_PATTERNS), re.IGNORECASE)
-
         for entry in sorted(self.sourceDir.iterdir()):
             oldName = entry.name
-            if not combinedRegex.match(oldName):
+            if not _PREFIX_REGEX.match(oldName):
                 continue
 
-            newName = combinedRegex.sub("", oldName, count=1).strip()
+            newName = _PREFIX_REGEX.sub("", oldName, count=1).strip()
 
             if not newName or newName == oldName:
                 logger.value("skipped (no change)", oldName)
@@ -544,7 +545,7 @@ class VideoOrganizer:
         logger.done(f"clean complete")
         return stats
 
-    def cleanTorrents(self, torrentDir: str = "/mnt/video2/Downloads") -> dict:
+    def removeTorrentsInLibrary(self, torrentDir: str = "/mnt/video2/Downloads") -> dict:
         """
         Scan the download directory for .torrent files and delete those
         belonging to movies or TV shows already present in the library.
@@ -574,8 +575,7 @@ class VideoOrganizer:
             # or may not (e.g. "Movie.2010"). Append ".mkv" as a neutral fallback so
             # that the TV/movie parsers (which require an extension suffix) can still match.
             # Strip known torrent-site prefixes (e.g. "www.Torrenting.com - ") before parsing.
-            combinedRegex = re.compile("|".join(PREFIX_PATTERNS), re.IGNORECASE)
-            stem = combinedRegex.sub("", entry.stem, count=1).strip()
+            stem = _PREFIX_REGEX.sub("", entry.stem, count=1).strip()
             fallback = stem + ".mkv"
             tvInfo = self.parseTvFilename(stem) or self.parseTvFilename(fallback)
             movieInfo = self.parseMovieFilename(stem) or self.parseMovieFilename(fallback)
@@ -610,7 +610,66 @@ class VideoOrganizer:
                 logger.value("keeping torrent (not in library)", entry.name)
                 stats["skipped"] += 1
 
-        logger.done("torrent clean complete")
+        logger.done("remove torrents in library complete")
+        return stats
+
+    def cleanTorrentNames(self, torrentDir: str = "/mnt/video2/Downloads") -> dict:
+        """
+        Scan the download directory for .torrent files and rename those whose
+        file names contain known torrent-site prefixes (e.g. "www.Torrenting.com - ").
+
+        Args:
+            torrentDir: Directory to scan for .torrent files (default: /mnt/video2/Downloads)
+
+        Returns:
+            Dictionary with counts: {'renamed': int, 'skipped': int, 'errors': int}
+        """
+        logger.doing(f"cleaning torrent file names in {torrentDir}")
+
+        stats = {"renamed": 0, "skipped": 0, "errors": 0}
+
+        downloadPath = Path(torrentDir)
+        if not downloadPath.exists():
+            logger.error(f"torrent directory does not exist: {torrentDir}")
+            return stats
+
+        for entry in sorted(downloadPath.rglob("*.torrent")):
+            if not entry.is_file():
+                continue
+
+            oldName = entry.name
+            if not _PREFIX_REGEX.match(oldName):
+                continue
+
+            newName = _PREFIX_REGEX.sub("", oldName, count=1).strip()
+
+            if not newName or newName == oldName:
+                logger.value("skipped (no change)", oldName)
+                stats["skipped"] += 1
+                continue
+
+            newPath = entry.parent / newName
+
+            if self.dryRun:
+                logger.action(f"would rename torrent: {oldName} → {newName}")
+                stats["renamed"] += 1
+                continue
+
+            try:
+                entry.rename(newPath)
+                logger.action(f"renamed torrent: {oldName} → {newName}")
+                stats["renamed"] += 1
+            except FileExistsError:
+                logger.error(f"target already exists, skipping: {newName}")
+                stats["errors"] += 1
+            except PermissionError:
+                logger.error(f"permission denied renaming: {oldName}")
+                stats["errors"] += 1
+            except Exception as e:
+                logger.error(f"error renaming {oldName}: {e}")
+                stats["errors"] += 1
+
+        logger.done("clean torrent names complete")
         return stats
 
     def processFiles(self, interactive: bool = True):
@@ -805,11 +864,16 @@ def main():
 
     if args.torrent and args.clean:
         torrentDir = organizer.sourceDir.parent / "Downloads" if organizer.sourceDir else Path("/mnt/video2/Downloads")
-        torrentStats = organizer.cleanTorrents(torrentDir=str(torrentDir))
+        torrentDirStr = str(torrentDir)
+        removeStats = organizer.removeTorrentsInLibrary(torrentDir=torrentDirStr)
+        nameStats = organizer.cleanTorrentNames(torrentDir=torrentDirStr)
         summary = f"""TORRENT SUMMARY
-Torrents deleted: {torrentStats['deleted']}
-Torrents kept:    {torrentStats['skipped']}
-Errors:           {torrentStats['errors']}
+Torrents deleted: {removeStats['deleted']}
+Torrents kept:    {removeStats['skipped']}
+Delete errors:    {removeStats['errors']}
+Names renamed:    {nameStats['renamed']}
+Names skipped:    {nameStats['skipped']}
+Rename errors:    {nameStats['errors']}
 """
         drawBox(summary)
     elif args.clean:
