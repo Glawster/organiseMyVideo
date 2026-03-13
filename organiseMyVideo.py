@@ -813,7 +813,8 @@ Folder errors:   {cleanStats['errors']}
 """
         drawBox(summary)
     elif args.torrent:
-        torrentStats = organizer.cleanTorrents()
+        torrentDir = organizer.sourceDir.parent / "Downloads" if organizer.sourceDir else Path("/mnt/video2/Downloads")
+        torrentStats = organizer.cleanTorrents(torrentDir=str(torrentDir))
         summary = f"""TORRENT SUMMARY
 Torrents deleted: {torrentStats['deleted']}
 Torrents kept:    {torrentStats['skipped']}
