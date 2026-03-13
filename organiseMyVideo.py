@@ -862,11 +862,13 @@ def main():
     # Create organizer and run the requested mode
     organizer = VideoOrganizer(sourceDir=args.source, dryRun=dryRun)
 
-    if args.torrent and args.clean:
+    if args.torrent:
         torrentDir = organizer.sourceDir.parent / "Downloads" if organizer.sourceDir else Path("/mnt/video2/Downloads")
-        torrentDirStr = str(torrentDir)
-        removeStats = organizer.removeTorrentsInLibrary(torrentDir=torrentDirStr)
-        nameStats = organizer.cleanTorrentNames(torrentDir=torrentDirStr)
+        if args.clean:
+            logger.info(f"torrent mode: scanning {torrentDir} for .torrent files to rename")
+            nameStats = organizer.cleanTorrentNames(torrentDir=torrentDir)
+        logger.info(f"torrent mode: scanning {torrentDir} for .torrent files to remove")
+        removeStats = organizer.removeTorrentsInLibrary(torrentDir=torrentDir)
         summary = f"""TORRENT SUMMARY
 Torrents deleted: {removeStats['deleted']}
 Torrents kept:    {removeStats['skipped']}
