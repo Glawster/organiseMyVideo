@@ -843,3 +843,22 @@ def testCleanTorrentsScansSubdirectories(tmp_path: Path):
 
     assert not torrentFile.exists()
     assert stats["deleted"] == 1
+
+
+def testCleanTorrentsStripsKnownPrefixBeforeMatching(tmp_path: Path):
+    """Torrents with a known site prefix are matched after the prefix is stripped."""
+    downloadDir = tmp_path / "Download"
+    downloadDir.mkdir()
+    torrentFile = downloadDir / "www.Torrenting.com - Inception.2010.mkv.torrent"
+    torrentFile.write_bytes(b"torrent data")
+
+    movieRoot = tmp_path / "movie1"
+    (movieRoot / "Inception (2010)").mkdir(parents=True)
+
+    org = VideoOrganizer(sourceDir=str(tmp_path / "source"), dryRun=False)
+    with patch.object(org, "scanStorageLocations", return_value=([movieRoot], [])):
+        stats = org.cleanTorrents(torrentDir=str(downloadDir))
+
+    assert not torrentFile.exists(), "prefixed torrent should be deleted when matched after prefix strip"
+    assert stats["deleted"] == 1
+    assert stats["errors"] == 0
