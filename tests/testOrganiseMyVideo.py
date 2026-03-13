@@ -1143,7 +1143,7 @@ def testExtractMediaUrlsFromPageFiltersToUserContentDomains(organizer: VideoOrga
 
 
 def testIsGrokMediaResponseMatchesByExtension(organizer: VideoOrganizer):
-    """Media extension in URL path is enough to capture the response."""
+    """Media extension in URL path is enough to capture the response (non-grok.com host)."""
     assert organizer._isGrokMediaResponse("https://cdn.example.ai/user/abc.png", "")
     assert organizer._isGrokMediaResponse("https://cdn.example.ai/user/abc.jpg", "")
     assert organizer._isGrokMediaResponse("https://cdn.example.ai/user/abc.mp4", "")
@@ -1160,6 +1160,26 @@ def testIsGrokMediaResponseMatchesByContentType(organizer: VideoOrganizer):
     assert organizer._isGrokMediaResponse("https://cdn.example.ai/video", "video/webm")
     assert not organizer._isGrokMediaResponse("https://cdn.example.ai/api", "application/json")
     assert not organizer._isGrokMediaResponse("https://cdn.example.ai/js", "text/javascript")
+
+
+def testIsGrokMediaResponseExcludesGrokComDomain(organizer: VideoOrganizer):
+    """Responses from grok.com itself (UI assets) are never captured as user media."""
+    # App icons, logos and promo images served from the app domain must be excluded.
+    assert not organizer._isGrokMediaResponse("https://grok.com/images/logo.png", "image/png")
+    assert not organizer._isGrokMediaResponse("https://www.grok.com/favicon.ico", "image/x-icon")
+    assert not organizer._isGrokMediaResponse("https://grok.com/promo.jpg", "image/jpeg")
+    assert not organizer._isGrokMediaResponse("https://grok.com/clip.mp4", "video/mp4")
+
+
+def testIsGrokMediaResponseExcludesUiContentTypes(organizer: VideoOrganizer):
+    """SVG sprites and browser icons are excluded even when hosted on a CDN domain."""
+    assert not organizer._isGrokMediaResponse("https://cdn.example.ai/sprite.svg", "image/svg+xml")
+    assert not organizer._isGrokMediaResponse("https://cdn.example.ai/favicon.ico", "image/x-icon")
+    assert not organizer._isGrokMediaResponse(
+        "https://cdn.example.ai/favicon.ico", "image/vnd.microsoft.icon"
+    )
+    # A real user-generated PNG from the same CDN must still pass.
+    assert organizer._isGrokMediaResponse("https://cdn.example.ai/user/abc.png", "image/png")
 
 
 def testDownloadMediaFilesDryRunDoesNotWrite(organizer: VideoOrganizer, tmp_path: Path):

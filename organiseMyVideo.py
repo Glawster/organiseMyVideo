@@ -30,6 +30,11 @@ logger = getLogger("organiseMyVideo")
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".m4v", ".mpg", ".mpeg"}
 GROK_MEDIA_EXTENSIONS = {".mp4", ".mov", ".webm", ".png", ".jpg", ".jpeg", ".gif", ".webp"}
 GROK_USER_CONTENT_DOMAINS = {"imagine-public.x.ai", "images-public.x.ai"}
+# Hostnames that serve the Grok web app itself (UI icons, logos, promo images).
+# Responses from these domains are NEVER user-generated content and must be excluded.
+GROK_APP_DOMAINS = {"grok.com", "www.grok.com"}
+# Content-types that are exclusively used for UI assets (SVG sprites, favicons).
+GROK_UI_CONTENT_TYPES = {"image/svg+xml", "image/x-icon", "image/vnd.microsoft.icon"}
 GROK_CREDENTIALS_FILE = Path.home() / ".config" / "organiseMyVideo" / "grok_credentials.json"
 
 # Known torrent/index prefixes to strip from file and directory names
@@ -869,13 +874,27 @@ Errors:         {stats['errors']}
     def _isGrokMediaResponse(self, url: str, contentType: str) -> bool:
         """Return True when a Playwright network response should be captured as user media.
 
-        A response is considered media when its URL path has a recognised media
-        extension **or** when the ``Content-Type`` header indicates an image or
-        video.  This is used by the ``page.on("response", ...)`` listener inside
+        User-generated Imagine content is served from an external CDN (never from
+        the app's own domain).  The app domain delivers UI assets — icons, logos,
+        SVG sprites, promotional images — which must be excluded.
+
+        A response qualifies when ALL of the following are true:
+
+        * The hostname is **not** in :data:`GROK_APP_DOMAINS`.
+        * The ``Content-Type`` is **not** in :data:`GROK_UI_CONTENT_TYPES`.
+        * The URL path has a recognised media extension **or** the
+          ``Content-Type`` header indicates an image or video.
+
+        This is used by the ``page.on("response", ...)`` listener inside
         :meth:`scrapeGrokSavedMedia` and is extracted here so it can be tested
         without a live Playwright session.
         """
         parsed = urllib.parse.urlparse(url)
+        hostname = parsed.hostname or ""
+        if hostname in GROK_APP_DOMAINS:
+            return False
+        if contentType in GROK_UI_CONTENT_TYPES:
+            return False
         ext = Path(parsed.path).suffix.lower()
         return ext in GROK_MEDIA_EXTENSIONS or contentType.startswith(("image/", "video/"))
 
