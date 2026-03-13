@@ -1143,57 +1143,56 @@ def testExtractMediaUrlsFromPageFiltersToUserContentDomains(organizer: VideoOrga
 
 
 def testIsGrokMediaResponseMatchesByExtension(organizer: VideoOrganizer):
-    """Media extension in URL path is enough to capture the response (non-grok.com host)."""
-    assert organizer._isGrokMediaResponse("https://cdn.example.ai/user/abc.png", "")
-    assert organizer._isGrokMediaResponse("https://cdn.example.ai/user/abc.jpg", "")
-    assert organizer._isGrokMediaResponse("https://cdn.example.ai/user/abc.mp4", "")
-    assert organizer._isGrokMediaResponse("https://cdn.example.ai/user/abc.webp", "")
-    assert not organizer._isGrokMediaResponse("https://cdn.example.ai/user/abc.js", "")
-    assert not organizer._isGrokMediaResponse("https://cdn.example.ai/user/abc.html", "")
+    """Media extension in URL path is sufficient when the host is a known user-content CDN."""
+    for domain in ("imagine-public.x.ai", "images-public.x.ai"):
+        assert organizer._isGrokMediaResponse(f"https://{domain}/user/abc.png", "")
+        assert organizer._isGrokMediaResponse(f"https://{domain}/user/abc.jpg", "")
+        assert organizer._isGrokMediaResponse(f"https://{domain}/user/abc.mp4", "")
+        assert organizer._isGrokMediaResponse(f"https://{domain}/user/abc.webp", "")
+        assert not organizer._isGrokMediaResponse(f"https://{domain}/user/abc.js", "")
+        assert not organizer._isGrokMediaResponse(f"https://{domain}/user/abc.html", "")
 
 
 def testIsGrokMediaResponseMatchesByContentType(organizer: VideoOrganizer):
-    """image/* and video/* content-types are captured regardless of URL extension."""
-    assert organizer._isGrokMediaResponse("https://cdn.example.ai/image", "image/png")
-    assert organizer._isGrokMediaResponse("https://cdn.example.ai/image", "image/jpeg")
-    assert organizer._isGrokMediaResponse("https://cdn.example.ai/video", "video/mp4")
-    assert organizer._isGrokMediaResponse("https://cdn.example.ai/video", "video/webm")
-    assert not organizer._isGrokMediaResponse("https://cdn.example.ai/api", "application/json")
-    assert not organizer._isGrokMediaResponse("https://cdn.example.ai/js", "text/javascript")
+    """image/* and video/* content-types are captured from known user-content CDN domains."""
+    for domain in ("imagine-public.x.ai", "images-public.x.ai"):
+        assert organizer._isGrokMediaResponse(f"https://{domain}/image", "image/png")
+        assert organizer._isGrokMediaResponse(f"https://{domain}/image", "image/jpeg")
+        assert organizer._isGrokMediaResponse(f"https://{domain}/video", "video/mp4")
+        assert organizer._isGrokMediaResponse(f"https://{domain}/video", "video/webm")
+        assert not organizer._isGrokMediaResponse(f"https://{domain}/api", "application/json")
+        assert not organizer._isGrokMediaResponse(f"https://{domain}/js", "text/javascript")
 
 
 def testIsGrokMediaResponseExcludesGrokComDomain(organizer: VideoOrganizer):
-    """Responses from grok.com itself (UI assets) are never captured as user media."""
-    # App icons, logos and promo images served from the app domain must be excluded.
+    """Responses from grok.com itself are never captured — it is not a user-content CDN."""
     assert not organizer._isGrokMediaResponse("https://grok.com/images/logo.png", "image/png")
-    assert not organizer._isGrokMediaResponse("https://www.grok.com/favicon.ico", "image/x-icon")
-    assert not organizer._isGrokMediaResponse("https://grok.com/promo.jpg", "image/jpeg")
+    assert not organizer._isGrokMediaResponse("https://www.grok.com/promo.jpg", "image/jpeg")
     assert not organizer._isGrokMediaResponse("https://grok.com/clip.mp4", "video/mp4")
 
 
-def testIsGrokMediaResponseExcludesUiContentTypes(organizer: VideoOrganizer):
-    """SVG sprites and browser icons are excluded even when hosted on a CDN domain."""
-    assert not organizer._isGrokMediaResponse("https://cdn.example.ai/sprite.svg", "image/svg+xml")
-    assert not organizer._isGrokMediaResponse("https://cdn.example.ai/favicon.ico", "image/x-icon")
-    assert not organizer._isGrokMediaResponse(
-        "https://cdn.example.ai/favicon.ico", "image/vnd.microsoft.icon"
-    )
-    # A real user-generated PNG from the same CDN must still pass.
-    assert organizer._isGrokMediaResponse("https://cdn.example.ai/user/abc.png", "image/png")
+def testIsGrokMediaResponseExcludesUnknownCdnDomains(organizer: VideoOrganizer):
+    """Images from third-party or unknown CDN domains are excluded by the allowlist."""
+    # Profile pictures, analytics pixels, ad networks, etc. must all be rejected.
+    assert not organizer._isGrokMediaResponse("https://cdn.example.ai/user/abc.png", "image/png")
+    assert not organizer._isGrokMediaResponse("https://pbs.twimg.com/profile_img/photo.jpg", "image/jpeg")
+    assert not organizer._isGrokMediaResponse("https://ads.tracker.com/pixel.gif", "image/gif")
+    # Only the known user-content CDN domain should pass through.
+    assert organizer._isGrokMediaResponse("https://imagine-public.x.ai/user/abc.png", "image/png")
 
 
 def testDownloadMediaFilesDryRunDoesNotWrite(organizer: VideoOrganizer, tmp_path: Path):
-    downloadsDir = tmp_path / "Downloads"
+    destDir = tmp_path / "Downloads" / "Grok"
     with patch("organiseMyVideo.Path.home", return_value=tmp_path):
         stats = organizer._downloadMediaFiles(["https://example.com/image01.png"])
     assert stats == {"downloaded": 1, "skipped": 0, "errors": 0}
-    assert not (downloadsDir / "image01.png").exists()
+    assert not (destDir / "image01.png").exists()
 
 
 def testDownloadMediaFilesSkipsExisting(confirmedOrganizer: VideoOrganizer, tmp_path: Path):
-    downloadsDir = tmp_path / "Downloads"
-    downloadsDir.mkdir(parents=True)
-    target = downloadsDir / "image01.png"
+    destDir = tmp_path / "Downloads" / "Grok"
+    destDir.mkdir(parents=True)
+    target = destDir / "image01.png"
     target.write_bytes(b"exists")
     with patch("organiseMyVideo.Path.home", return_value=tmp_path):
         stats = confirmedOrganizer._downloadMediaFiles(["https://example.com/image01.png"])
@@ -1216,7 +1215,7 @@ def testDownloadMediaFilesUsesPlaywrightContext(confirmedOrganizer: VideoOrganiz
 
     assert stats == {"downloaded": 1, "skipped": 0, "errors": 0}
     fakeContext.request.get.assert_called_once_with("https://example.com/image01.png")
-    assert (tmp_path / "Downloads" / "image01.png").read_bytes() == b"image-data"
+    assert (tmp_path / "Downloads" / "Grok" / "image01.png").read_bytes() == b"image-data"
 
 
 def testDownloadMediaFilesPlaywrightContextNonOkResponse(confirmedOrganizer: VideoOrganizer, tmp_path: Path):
