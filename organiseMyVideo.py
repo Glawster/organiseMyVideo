@@ -573,7 +573,9 @@ class VideoOrganizer:
             # The stem may already contain an inner extension (e.g. "Movie.2010.mkv")
             # or may not (e.g. "Movie.2010"). Append ".mkv" as a neutral fallback so
             # that the TV/movie parsers (which require an extension suffix) can still match.
-            stem = entry.stem
+            # Strip known torrent-site prefixes (e.g. "www.Torrenting.com - ") before parsing.
+            combinedRegex = re.compile("|".join(PREFIX_PATTERNS), re.IGNORECASE)
+            stem = combinedRegex.sub("", entry.stem, count=1).strip()
             fallback = stem + ".mkv"
             tvInfo = self.parseTvFilename(stem) or self.parseTvFilename(fallback)
             movieInfo = self.parseMovieFilename(stem) or self.parseMovieFilename(fallback)
