@@ -803,7 +803,7 @@ def main():
     # Create organizer and run the requested mode
     organizer = VideoOrganizer(sourceDir=args.source, dryRun=dryRun)
 
-    if args.torrent:
+    if args.torrent and args.clean:
         torrentDir = organizer.sourceDir.parent / "Downloads" if organizer.sourceDir else Path("/mnt/video2/Downloads")
         torrentStats = organizer.cleanTorrents(torrentDir=str(torrentDir))
         summary = f"""TORRENT SUMMARY
