@@ -31,6 +31,9 @@ PREFIX_PATTERNS = [
     r"^\s*www\.Torrenting\.com\s*-\s*",
 ]
 
+# Compiled regex combining all known prefixes (built once at module load)
+_PREFIX_REGEX = re.compile("|".join(PREFIX_PATTERNS), re.IGNORECASE)
+
 class VideoOrganizer:
     """Main class for organizing video files into structured directories."""
     
@@ -463,14 +466,12 @@ class VideoOrganizer:
             logger.error(f"source directory does not exist: {self.sourceDir}")
             return stats
 
-        combinedRegex = re.compile("|".join(PREFIX_PATTERNS), re.IGNORECASE)
-
         for entry in sorted(self.sourceDir.iterdir()):
             oldName = entry.name
-            if not combinedRegex.match(oldName):
+            if not _PREFIX_REGEX.match(oldName):
                 continue
 
-            newName = combinedRegex.sub("", oldName, count=1).strip()
+            newName = _PREFIX_REGEX.sub("", oldName, count=1).strip()
 
             if not newName or newName == oldName:
                 logger.value("skipped (no change)", oldName)
@@ -542,6 +543,154 @@ class VideoOrganizer:
                 stats["errors"] += 1
 
         logger.done(f"clean complete")
+        return stats
+
+    def removeTorrentsInLibrary(self, torrentDir: str = "/mnt/video2/Downloads") -> dict:
+        """
+        Scan the download directory for .torrent files and delete those
+        belonging to movies or TV shows already present in the library.
+
+        When a matching .torrent file lives inside a sub-directory of the
+        download directory, the whole containing folder is removed. This keeps
+        in-progress download folders together instead of deleting only the
+        .torrent file and leaving the partial download behind.
+
+        Args:
+            torrentDir: Directory to scan for .torrent files (default: /mnt/video2/Downloads)
+
+        Returns:
+            Dictionary with counts: {'deleted': int, 'skipped': int, 'errors': int}
+        """
+        logger.doing(f"scanning for obsolete torrent files in {torrentDir}")
+
+        stats = {"deleted": 0, "skipped": 0, "errors": 0}
+
+        downloadPath = Path(torrentDir)
+        if not downloadPath.exists():
+            logger.error(f"torrent directory does not exist: {torrentDir}")
+            return stats
+
+        movieDirs, videoDirs = self.scanStorageLocations()
+
+        # Track removed download sub-directories so nested torrent files from an
+        # already-deleted folder are not processed again later in the scan.
+        removedDirs = set()
+
+        for entry in sorted(downloadPath.rglob("*.torrent")):
+            if not entry.is_file():
+                continue
+            if any(parent in removedDirs for parent in entry.parents):
+                continue
+
+            # The stem may already contain an inner extension (e.g. "Movie.2010.mkv")
+            # or may not (e.g. "Movie.2010"). Append ".mkv" as a neutral fallback so
+            # that the TV/movie parsers (which require an extension suffix) can still match.
+            # Strip known torrent-site prefixes (e.g. "www.Torrenting.com - ") before parsing.
+            stem = _PREFIX_REGEX.sub("", entry.stem, count=1).strip()
+            fallback = stem + ".mkv"
+            tvInfo = self.parseTvFilename(stem) or self.parseTvFilename(fallback)
+            movieInfo = self.parseMovieFilename(stem) or self.parseMovieFilename(fallback)
+
+            inLibrary = False
+
+            if tvInfo and videoDirs:
+                existingDir = self.findExistingTvShowDir(tvInfo["showName"], videoDirs)
+                if existingDir:
+                    inLibrary = True
+                    logger.value("torrent matches library tv show", f"{entry.name} → {existingDir}")
+
+            if not inLibrary and movieInfo and movieDirs:
+                existingDir = self.findExistingMovieDir(movieInfo["title"], movieInfo["year"], movieDirs)
+                if existingDir:
+                    inLibrary = True
+                    logger.value("torrent matches library movie", f"{entry.name} → {existingDir}")
+
+            if inLibrary:
+                downloadSubDir = entry.parent if entry.parent != downloadPath else None
+                if self.dryRun:
+                    if downloadSubDir is not None:
+                        logger.action(f"would delete folder: {downloadSubDir.name}")
+                        removedDirs.add(downloadSubDir)
+                    else:
+                        logger.action(f"would delete torrent: {entry.name}")
+                    stats["deleted"] += 1
+                else:
+                    try:
+                        if downloadSubDir is not None:
+                            shutil.rmtree(downloadSubDir)
+                            logger.action(f"deleted folder: {downloadSubDir.name}")
+                            removedDirs.add(downloadSubDir)
+                        else:
+                            entry.unlink()
+                            logger.action(f"deleted torrent: {entry.name}")
+                        stats["deleted"] += 1
+                    except Exception as e:
+                        logger.error(f"failed to delete {entry.name}: {e}")
+                        stats["errors"] += 1
+            else:
+                logger.value("keeping torrent (not in library)", entry.name)
+                stats["skipped"] += 1
+
+        logger.done("remove torrents in library complete")
+        return stats
+
+    def cleanTorrentNames(self, torrentDir: str = "/mnt/video2/Downloads") -> dict:
+        """
+        Scan the download directory for .torrent files and rename those whose
+        file names contain known torrent-site prefixes (e.g. "www.Torrenting.com - ").
+
+        Args:
+            torrentDir: Directory to scan for .torrent files (default: /mnt/video2/Downloads)
+
+        Returns:
+            Dictionary with counts: {'renamed': int, 'skipped': int, 'errors': int}
+        """
+        logger.doing(f"cleaning torrent file names in {torrentDir}")
+
+        stats = {"renamed": 0, "skipped": 0, "errors": 0}
+
+        downloadPath = Path(torrentDir)
+        if not downloadPath.exists():
+            logger.error(f"torrent directory does not exist: {torrentDir}")
+            return stats
+
+        for entry in sorted(downloadPath.rglob("*.torrent")):
+            if not entry.is_file():
+                continue
+
+            oldName = entry.name
+            if not _PREFIX_REGEX.match(oldName):
+                continue
+
+            newName = _PREFIX_REGEX.sub("", oldName, count=1).strip()
+
+            if not newName or newName == oldName:
+                logger.value("skipped (no change)", oldName)
+                stats["skipped"] += 1
+                continue
+
+            newPath = entry.parent / newName
+
+            if self.dryRun:
+                logger.action(f"would rename torrent: {oldName} → {newName}")
+                stats["renamed"] += 1
+                continue
+
+            try:
+                entry.rename(newPath)
+                logger.action(f"renamed torrent: {oldName} → {newName}")
+                stats["renamed"] += 1
+            except FileExistsError:
+                logger.error(f"target already exists, skipping: {newName}")
+                stats["errors"] += 1
+            except PermissionError:
+                logger.error(f"permission denied renaming: {oldName}")
+                stats["errors"] += 1
+            except Exception as e:
+                logger.error(f"error renaming {oldName}: {e}")
+                stats["errors"] += 1
+
+        logger.done("clean torrent names complete")
         return stats
 
     def processFiles(self, interactive: bool = True):
@@ -696,7 +845,11 @@ def main():
         action="store_true",
         help="Run without user prompts (skip files that cannot be auto-detected)"
     )
-    
+    parser.add_argument(
+        "--torrent",
+        action="store_true",
+        help="scan the torrent download directory for .torrent files and delete those already in the library (dry-run by default; use --confirm to delete)"
+    )
     args = parser.parse_args()
     
     dryRun = True if not args.confirm else False
@@ -730,7 +883,21 @@ def main():
     # Create organizer and run the requested mode
     organizer = VideoOrganizer(sourceDir=args.source, dryRun=dryRun)
 
-    if args.clean:
+    if args.torrent:
+        torrentDir = organizer.sourceDir.parent / "Downloads" if organizer.sourceDir else Path("/mnt/video2/Downloads")
+        if args.clean:
+            nameStats = organizer.cleanTorrentNames(torrentDir=torrentDir)
+        removeStats = organizer.removeTorrentsInLibrary(torrentDir=torrentDir)
+        summary = f"""TORRENT SUMMARY
+Torrents deleted: {removeStats['deleted']}
+Torrents kept:    {removeStats['skipped']}
+Delete errors:    {removeStats['errors']}
+Names renamed:    {nameStats['renamed']}
+Names skipped:    {nameStats['skipped']}
+Rename errors:    {nameStats['errors']}
+"""
+        drawBox(summary)
+    elif args.clean:
         nameStats = organizer.cleanNames()
         cleanStats = organizer.cleanEmptyFolders()
         summary = f"""CLEAN SUMMARY

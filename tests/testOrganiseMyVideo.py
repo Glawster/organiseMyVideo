@@ -674,3 +674,327 @@ def testCleanNamesSkippedCounterWhenResultIsEmpty(sourceDir: Path, confirmedOrga
     assert prefixOnly.exists(), "prefix-only folder must not be removed"
     assert stats["skipped"] == 1
     assert stats["renamed"] == 0
+
+
+# ---------------------------------------------------------------------------
+# removeTorrentsInLibrary — dry-run mode
+# ---------------------------------------------------------------------------
+
+
+def testRemoveTorrentsInLibraryMissingDirReturnsZeroStats(organizer: VideoOrganizer, tmp_path: Path):
+    """Non-existent torrent directory returns zero counts."""
+    stats = organizer.removeTorrentsInLibrary(torrentDir=str(tmp_path / "nonexistent"))
+    assert stats == {"deleted": 0, "skipped": 0, "errors": 0}
+
+
+def testRemoveTorrentsInLibraryDryRunDeletesMovieTorrent(tmp_path: Path):
+    """Dry-run: torrent matching a library movie is counted but file is not removed."""
+    downloadDir = tmp_path / "Download"
+    downloadDir.mkdir()
+    torrentFile = downloadDir / "Inception.2010.mkv.torrent"
+    torrentFile.write_bytes(b"torrent data")
+
+    # Fake library: movie storage with matching directory
+    movieRoot = tmp_path / "movie1"
+    (movieRoot / "Inception (2010)").mkdir(parents=True)
+
+    org = VideoOrganizer(sourceDir=str(tmp_path / "source"), dryRun=True)
+    with patch.object(org, "scanStorageLocations", return_value=([movieRoot], [])):
+        stats = org.removeTorrentsInLibrary(torrentDir=str(downloadDir))
+
+    assert torrentFile.exists(), "dry-run must not delete the file"
+    assert stats["deleted"] == 1
+    assert stats["skipped"] == 0
+    assert stats["errors"] == 0
+
+
+def testRemoveTorrentsInLibraryDryRunDeletesTvTorrent(tmp_path: Path):
+    """Dry-run: torrent matching a library TV show is counted but file is not removed."""
+    downloadDir = tmp_path / "Download"
+    downloadDir.mkdir()
+    torrentFile = downloadDir / "Breaking.Bad.S01E01.Pilot.mkv.torrent"
+    torrentFile.write_bytes(b"torrent data")
+
+    tvRoot = tmp_path / "TV"
+    (tvRoot / "Breaking Bad").mkdir(parents=True)
+
+    org = VideoOrganizer(sourceDir=str(tmp_path / "source"), dryRun=True)
+    with patch.object(org, "scanStorageLocations", return_value=([], [tvRoot])):
+        stats = org.removeTorrentsInLibrary(torrentDir=str(downloadDir))
+
+    assert torrentFile.exists(), "dry-run must not delete the file"
+    assert stats["deleted"] == 1
+    assert stats["skipped"] == 0
+
+
+def testRemoveTorrentsInLibraryDryRunKeepsUnknownTorrent(tmp_path: Path):
+    """Dry-run: torrent with no library match is kept and counted as skipped."""
+    downloadDir = tmp_path / "Download"
+    downloadDir.mkdir()
+    torrentFile = downloadDir / "Unknown.Movie.2099.mkv.torrent"
+    torrentFile.write_bytes(b"torrent data")
+
+    movieRoot = tmp_path / "movie1"
+    movieRoot.mkdir()
+
+    org = VideoOrganizer(sourceDir=str(tmp_path / "source"), dryRun=True)
+    with patch.object(org, "scanStorageLocations", return_value=([movieRoot], [])):
+        stats = org.removeTorrentsInLibrary(torrentDir=str(downloadDir))
+
+    assert torrentFile.exists()
+    assert stats["skipped"] == 1
+    assert stats["deleted"] == 0
+
+
+# ---------------------------------------------------------------------------
+# removeTorrentsInLibrary — confirm mode (actual deletion)
+# ---------------------------------------------------------------------------
+
+
+def testRemoveTorrentsInLibraryConfirmDeletesMovieTorrent(tmp_path: Path):
+    """Confirm mode: torrent matching a library movie is deleted."""
+    downloadDir = tmp_path / "Download"
+    downloadDir.mkdir()
+    torrentFile = downloadDir / "The.Matrix.1999.mkv.torrent"
+    torrentFile.write_bytes(b"torrent data")
+
+    movieRoot = tmp_path / "movie1"
+    (movieRoot / "The Matrix (1999)").mkdir(parents=True)
+
+    org = VideoOrganizer(sourceDir=str(tmp_path / "source"), dryRun=False)
+    with patch.object(org, "scanStorageLocations", return_value=([movieRoot], [])):
+        stats = org.removeTorrentsInLibrary(torrentDir=str(downloadDir))
+
+    assert not torrentFile.exists(), "torrent file should be deleted in confirm mode"
+    assert stats["deleted"] == 1
+    assert stats["errors"] == 0
+
+
+def testRemoveTorrentsInLibraryConfirmDeletesTvTorrent(tmp_path: Path):
+    """Confirm mode: torrent matching a library TV show is deleted."""
+    downloadDir = tmp_path / "Download"
+    downloadDir.mkdir()
+    torrentFile = downloadDir / "The.Office.S03E07.Branch.Closing.mkv.torrent"
+    torrentFile.write_bytes(b"torrent data")
+
+    tvRoot = tmp_path / "TV"
+    (tvRoot / "The Office").mkdir(parents=True)
+
+    org = VideoOrganizer(sourceDir=str(tmp_path / "source"), dryRun=False)
+    with patch.object(org, "scanStorageLocations", return_value=([], [tvRoot])):
+        stats = org.removeTorrentsInLibrary(torrentDir=str(downloadDir))
+
+    assert not torrentFile.exists()
+    assert stats["deleted"] == 1
+    assert stats["errors"] == 0
+
+
+def testRemoveTorrentsInLibraryConfirmKeepsUnknownTorrent(tmp_path: Path):
+    """Confirm mode: torrent with no library match is not deleted."""
+    downloadDir = tmp_path / "Download"
+    downloadDir.mkdir()
+    torrentFile = downloadDir / "Unreleased.Movie.2030.mkv.torrent"
+    torrentFile.write_bytes(b"torrent data")
+
+    movieRoot = tmp_path / "movie1"
+    movieRoot.mkdir()
+
+    org = VideoOrganizer(sourceDir=str(tmp_path / "source"), dryRun=False)
+    with patch.object(org, "scanStorageLocations", return_value=([movieRoot], [])):
+        stats = org.removeTorrentsInLibrary(torrentDir=str(downloadDir))
+
+    assert torrentFile.exists()
+    assert stats["skipped"] == 1
+    assert stats["deleted"] == 0
+
+
+def testRemoveTorrentsInLibraryHandlesTorrentWithoutInnerExtension(tmp_path: Path):
+    """Torrent named without inner video extension (e.g. Movie.2010.torrent) is still matched."""
+    downloadDir = tmp_path / "Download"
+    downloadDir.mkdir()
+    torrentFile = downloadDir / "Inception.2010.torrent"
+    torrentFile.write_bytes(b"torrent data")
+
+    movieRoot = tmp_path / "movie1"
+    (movieRoot / "Inception (2010)").mkdir(parents=True)
+
+    org = VideoOrganizer(sourceDir=str(tmp_path / "source"), dryRun=False)
+    with patch.object(org, "scanStorageLocations", return_value=([movieRoot], [])):
+        stats = org.removeTorrentsInLibrary(torrentDir=str(downloadDir))
+
+    assert not torrentFile.exists()
+    assert stats["deleted"] == 1
+
+
+def testRemoveTorrentsInLibraryScansSubdirectories(tmp_path: Path):
+    """Torrents nested in sub-directories cause the containing folder to be removed."""
+    downloadDir = tmp_path / "Download"
+    subDir = downloadDir / "movies"
+    subDir.mkdir(parents=True)
+    torrentFile = subDir / "Interstellar.2014.mkv.torrent"
+    torrentFile.write_bytes(b"torrent data")
+
+    movieRoot = tmp_path / "movie1"
+    (movieRoot / "Interstellar (2014)").mkdir(parents=True)
+
+    org = VideoOrganizer(sourceDir=str(tmp_path / "source"), dryRun=False)
+    with patch.object(org, "scanStorageLocations", return_value=([movieRoot], [])):
+        stats = org.removeTorrentsInLibrary(torrentDir=str(downloadDir))
+
+    assert not subDir.exists()
+    assert stats["deleted"] == 1
+
+
+def testRemoveTorrentsInLibraryStripsKnownPrefixBeforeMatching(tmp_path: Path):
+    """Torrents with a known site prefix are matched after the prefix is stripped."""
+    downloadDir = tmp_path / "Download"
+    downloadDir.mkdir()
+    torrentFile = downloadDir / "www.Torrenting.com - Inception.2010.mkv.torrent"
+    torrentFile.write_bytes(b"torrent data")
+
+    movieRoot = tmp_path / "movie1"
+    (movieRoot / "Inception (2010)").mkdir(parents=True)
+
+    org = VideoOrganizer(sourceDir=str(tmp_path / "source"), dryRun=False)
+    with patch.object(org, "scanStorageLocations", return_value=([movieRoot], [])):
+        stats = org.removeTorrentsInLibrary(torrentDir=str(downloadDir))
+
+    assert not torrentFile.exists(), "prefixed torrent should be deleted when matched after prefix strip"
+    assert stats["deleted"] == 1
+    assert stats["errors"] == 0
+
+
+# ---------------------------------------------------------------------------
+# cleanTorrentNames — rename .torrent files by stripping site prefixes
+# ---------------------------------------------------------------------------
+
+
+def testCleanTorrentNamesMissingDirReturnsZeroStats(organizer: VideoOrganizer, tmp_path: Path):
+    """Non-existent torrent directory returns zero counts."""
+    stats = organizer.cleanTorrentNames(torrentDir=str(tmp_path / "nonexistent"))
+    assert stats == {"renamed": 0, "skipped": 0, "errors": 0}
+
+
+def testCleanTorrentNamesDryRunRenamesPrefixedTorrent(tmp_path: Path):
+    """Dry-run: prefixed torrent is counted as renamed but file is not actually renamed."""
+    downloadDir = tmp_path / "Download"
+    downloadDir.mkdir()
+    torrentFile = downloadDir / "www.Torrenting.com - Inception.2010.mkv.torrent"
+    torrentFile.write_bytes(b"torrent data")
+
+    org = VideoOrganizer(sourceDir=str(tmp_path / "source"), dryRun=True)
+    stats = org.cleanTorrentNames(torrentDir=str(downloadDir))
+
+    assert torrentFile.exists(), "dry-run must not rename the file"
+    assert stats["renamed"] == 1
+    assert stats["skipped"] == 0
+    assert stats["errors"] == 0
+
+
+def testCleanTorrentNamesConfirmRenamesPrefixedTorrent(tmp_path: Path):
+    """Confirm mode: prefixed torrent is renamed to its clean name."""
+    downloadDir = tmp_path / "Download"
+    downloadDir.mkdir()
+    torrentFile = downloadDir / "www.Torrenting.com - Inception.2010.mkv.torrent"
+    torrentFile.write_bytes(b"torrent data")
+    expectedFile = downloadDir / "Inception.2010.mkv.torrent"
+
+    org = VideoOrganizer(sourceDir=str(tmp_path / "source"), dryRun=False)
+    stats = org.cleanTorrentNames(torrentDir=str(downloadDir))
+
+    assert not torrentFile.exists(), "original prefixed file should be gone"
+    assert expectedFile.exists(), "renamed file should exist"
+    assert stats["renamed"] == 1
+    assert stats["errors"] == 0
+
+
+def testCleanTorrentNamesSkipsUnprefixedTorrent(tmp_path: Path):
+    """Torrent without a known prefix is not counted."""
+    downloadDir = tmp_path / "Download"
+    downloadDir.mkdir()
+    torrentFile = downloadDir / "Inception.2010.mkv.torrent"
+    torrentFile.write_bytes(b"torrent data")
+
+    org = VideoOrganizer(sourceDir=str(tmp_path / "source"), dryRun=False)
+    stats = org.cleanTorrentNames(torrentDir=str(downloadDir))
+
+    assert torrentFile.exists()
+    assert stats["renamed"] == 0
+    assert stats["skipped"] == 0
+    assert stats["errors"] == 0
+
+
+def testCleanTorrentNamesHandlesUIndexPrefix(tmp_path: Path):
+    """Confirm mode: UIndex-prefixed torrent is renamed correctly."""
+    downloadDir = tmp_path / "Download"
+    downloadDir.mkdir()
+    torrentFile = downloadDir / "www.UIndex.org - Breaking.Bad.S01E01.mkv.torrent"
+    torrentFile.write_bytes(b"torrent data")
+    expectedFile = downloadDir / "Breaking.Bad.S01E01.mkv.torrent"
+
+    org = VideoOrganizer(sourceDir=str(tmp_path / "source"), dryRun=False)
+    stats = org.cleanTorrentNames(torrentDir=str(downloadDir))
+
+    assert not torrentFile.exists()
+    assert expectedFile.exists()
+    assert stats["renamed"] == 1
+    assert stats["errors"] == 0
+
+
+def testRemoveTorrentsInLibraryDryRunCountsMatchingDownloadFolder(tmp_path: Path):
+    """Dry-run: a matching download folder is counted but not actually removed."""
+    downloadDir = tmp_path / "Download"
+    prefixedDir = downloadDir / "www.Torrenting.com - Silent.Witness.S28E09.720p.x265-TiPEX"
+    prefixedDir.mkdir(parents=True)
+    torrentFile = prefixedDir / "www.Torrenting.com - Silent.Witness.S28E09.720p.x265-TiPEX.torrent"
+    torrentFile.write_bytes(b"torrent data")
+
+    tvRoot = tmp_path / "TV"
+    (tvRoot / "Silent Witness").mkdir(parents=True)
+
+    org = VideoOrganizer(sourceDir=str(tmp_path / "source"), dryRun=True)
+    with patch.object(org, "scanStorageLocations", return_value=([], [tvRoot])):
+        stats = org.removeTorrentsInLibrary(torrentDir=str(downloadDir))
+
+    assert prefixedDir.exists(), "dry-run must not delete the folder"
+    assert torrentFile.exists(), "dry-run must not delete files inside the folder"
+    assert stats["deleted"] == 1
+    assert stats["errors"] == 0
+
+
+def testRemoveTorrentsInLibraryDeletesMatchingDownloadFolderWithPrefixedTorrent(tmp_path: Path):
+    """Confirm mode: a matching download folder is removed when it contains a prefixed torrent."""
+    downloadDir = tmp_path / "Download"
+    prefixedDir = downloadDir / "www.UIndex.org    -    FBI Most Wanted S06E13 Greek Tragedy 1080p"
+    prefixedDir.mkdir(parents=True)
+    torrentFile = prefixedDir / "www.UIndex.org    -    FBI.Most.Wanted.S06E04.MULTi.1080p.WEB.x264-AMB3R.torrent"
+    torrentFile.write_bytes(b"torrent data")
+
+    tvRoot = tmp_path / "TV"
+    (tvRoot / "FBI Most Wanted").mkdir(parents=True)
+
+    org = VideoOrganizer(sourceDir=str(tmp_path / "source"), dryRun=False)
+    with patch.object(org, "scanStorageLocations", return_value=([], [tvRoot])):
+        stats = org.removeTorrentsInLibrary(torrentDir=str(downloadDir))
+
+    assert not prefixedDir.exists(), "matching download folder should be removed"
+    assert not torrentFile.exists()
+    assert stats["deleted"] == 1
+    assert stats["errors"] == 0
+
+
+def testCleanTorrentNamesScansSubdirectories(tmp_path: Path):
+    """Torrents nested in sub-directories are also renamed."""
+    downloadDir = tmp_path / "Download"
+    subDir = downloadDir / "tv"
+    subDir.mkdir(parents=True)
+    torrentFile = subDir / "www.Torrenting.com - The.Office.S03E07.mkv.torrent"
+    torrentFile.write_bytes(b"torrent data")
+    expectedFile = subDir / "The.Office.S03E07.mkv.torrent"
+
+    org = VideoOrganizer(sourceDir=str(tmp_path / "source"), dryRun=False)
+    stats = org.cleanTorrentNames(torrentDir=str(downloadDir))
+
+    assert not torrentFile.exists()
+    assert expectedFile.exists()
+    assert stats["renamed"] == 1
