@@ -9,7 +9,9 @@ TV Shows: /mnt/video<n>/TV/Show Name/Season NN/  or  /mnt/myVideo/TV/Show Name/S
 import os
 import sys
 import re
+import json
 import shutil
+import getpass
 import argparse
 import logging
 import datetime
@@ -27,6 +29,7 @@ logger = getLogger("organiseMyVideo")
 # Video file extensions to process
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".m4v", ".mpg", ".mpeg"}
 GROK_MEDIA_EXTENSIONS = {".mp4", ".mov", ".webm", ".png", ".jpg", ".jpeg", ".gif", ".webp"}
+GROK_CREDENTIALS_FILE = Path.home() / ".config" / "organiseMyVideo" / "grok_credentials.json"
 
 # Known torrent/index prefixes to strip from file and directory names
 PREFIX_PATTERNS = [
@@ -867,16 +870,52 @@ Errors:         {stats['errors']}
 
         return stats
 
-    def scrapeGrokSavedMedia(self) -> dict:
+    def _loadOrPromptGrokCredentials(
+        self, credentialsFile: Path = GROK_CREDENTIALS_FILE
+    ) -> tuple:
         """
-        Log into Grok and scrape saved Imagine media URLs, then download to sourceDir.
+        Load Grok credentials from a JSON file, prompting if not found.
 
-        Requires environment variables GROK_USERNAME and GROK_PASSWORD.
+        If the file exists and contains both ``username`` and ``password``,
+        those values are returned directly.  Otherwise the user is prompted
+        interactively (password entry is hidden) and the credentials are saved
+        to the file for future use.
+
+        Args:
+            credentialsFile: Path to the JSON credentials file.
+
+        Returns:
+            Tuple of (username, password).
         """
-        username = os.getenv("GROK_USERNAME")
-        password = os.getenv("GROK_PASSWORD")
+        if credentialsFile.exists():
+            try:
+                data = json.loads(credentialsFile.read_text())
+                username = data.get("username", "")
+                password = data.get("password", "")
+                if username and password:
+                    logger.value("loaded grok credentials from", str(credentialsFile))
+                    return username, password
+            except Exception as e:
+                logger.error(f"failed to load credentials from {credentialsFile}: {e}")
+
+        logger.info("grok credentials not found - please enter your credentials")
+        username = input("Grok username (email): ").strip()
+        password = getpass.getpass("Grok password: ")
+
         if not username or not password:
-            raise RuntimeError("GROK_USERNAME and GROK_PASSWORD must be set for --grok")
+            raise RuntimeError("username and password are required for --grok")
+
+        credentialsFile.parent.mkdir(parents=True, exist_ok=True)
+        credentialsFile.write_text(
+            json.dumps({"username": username, "password": password}, indent=2)
+        )
+        credentialsFile.chmod(0o600)
+        logger.value("saved grok credentials to", str(credentialsFile))
+        return username, password
+
+    def scrapeGrokSavedMedia(self) -> dict:
+        """Log into Grok and scrape saved Imagine media URLs, then download to sourceDir."""
+        username, password = self._loadOrPromptGrokCredentials()
 
         try:
             from playwright.sync_api import sync_playwright  # type: ignore

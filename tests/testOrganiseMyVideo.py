@@ -1,5 +1,6 @@
 """Tests for organiseMyVideo.py"""
 
+import json
 import shutil
 from pathlib import Path
 from unittest.mock import patch
@@ -1125,3 +1126,55 @@ def testDownloadMediaFilesSkipsExisting(confirmedOrganizer: VideoOrganizer):
     target.write_bytes(b"exists")
     stats = confirmedOrganizer._downloadMediaFiles(["https://example.com/image01.png"])
     assert stats == {"downloaded": 0, "skipped": 1, "errors": 0}
+
+
+# ---------------------------------------------------------------------------
+# _loadOrPromptGrokCredentials
+# ---------------------------------------------------------------------------
+
+
+def testLoadOrPromptGrokCredentialsLoadsFromFile(organizer: VideoOrganizer, tmp_path: Path):
+    """Existing credentials file is read without prompting the user."""
+    credFile = tmp_path / "grok_credentials.json"
+    credFile.write_text(json.dumps({"username": "user@example.com", "password": "s3cr3t"}))
+
+    username, password = organizer._loadOrPromptGrokCredentials(credentialsFile=credFile)
+
+    assert username == "user@example.com"
+    assert password == "s3cr3t"
+
+
+def testLoadOrPromptGrokCredentialsPromptsAndSavesWhenFileMissing(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """When no credentials file exists, the user is prompted and the result is saved."""
+    credFile = tmp_path / "sub" / "grok_credentials.json"
+
+    with patch("builtins.input", return_value="user@example.com"), patch(
+        "getpass.getpass", return_value="s3cr3t"
+    ):
+        username, password = organizer._loadOrPromptGrokCredentials(credentialsFile=credFile)
+
+    assert username == "user@example.com"
+    assert password == "s3cr3t"
+    assert credFile.exists()
+    saved = json.loads(credFile.read_text())
+    assert saved["username"] == "user@example.com"
+    assert saved["password"] == "s3cr3t"
+
+
+def testLoadOrPromptGrokCredentialsPromptsWhenFileIncomplete(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """A credentials file missing the password triggers a fresh prompt."""
+    credFile = tmp_path / "grok_credentials.json"
+    credFile.write_text(json.dumps({"username": "user@example.com", "password": ""}))
+
+    with patch("builtins.input", return_value="user@example.com"), patch(
+        "getpass.getpass", return_value="newpass"
+    ):
+        username, password = organizer._loadOrPromptGrokCredentials(credentialsFile=credFile)
+
+    assert password == "newpass"
+    saved = json.loads(credFile.read_text())
+    assert saved["password"] == "newpass"
