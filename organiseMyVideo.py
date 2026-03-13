@@ -23,6 +23,13 @@ from typing import List, Tuple, Optional
 
 from organiseMyProjects.logUtils import getLogger, drawBox # type: ignore
 
+# Playwright is an optional dependency used only by --grok.  We import it at
+# module level so tests can patch ``organiseMyVideo.sync_playwright``.
+try:
+    from playwright.sync_api import sync_playwright  # type: ignore
+except ImportError:
+    sync_playwright = None  # type: ignore
+
 # Module-level logger used by class methods; replaced with runtime-configured logger in main().
 logger = getLogger("organiseMyVideo")
 
@@ -31,6 +38,11 @@ VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".m4v", ".mp
 GROK_MEDIA_EXTENSIONS = {".mp4", ".mov", ".webm", ".png", ".jpg", ".jpeg", ".gif", ".webp"}
 GROK_USER_CONTENT_DOMAINS = {"imagine-public.x.ai", "images-public.x.ai"}
 GROK_CREDENTIALS_FILE = Path.home() / ".config" / "organiseMyVideo" / "grok_credentials.json"
+# Playwright storage-state file (cookies + localStorage) persisted after login.
+# When this file exists the browser starts already authenticated and no
+# username/password interaction is needed.  Delete this file to force a fresh
+# login (e.g. after a session expires or credentials change).
+GROK_SESSION_FILE = Path.home() / ".config" / "organiseMyVideo" / "grok_session.json"
 
 # Known torrent/index prefixes to strip from file and directory names
 PREFIX_PATTERNS = [
@@ -997,34 +1009,101 @@ Errors:         {stats['errors']}
         logger.value("saved grok credentials to", str(credentialsFile))
         return username, password
 
-    def scrapeGrokSavedMedia(self) -> dict:
+    def scrapeGrokSavedMedia(self, sessionFile: Path = GROK_SESSION_FILE) -> dict:
         """Log into Grok and scrape saved Imagine media, downloading to ~/Downloads/Grok.
 
-        Uses a two-phase Playwright strategy:
+        Authentication uses Playwright ``storage_state`` (cookies + localStorage)
+        persisted at *sessionFile* (default :data:`GROK_SESSION_FILE`).
+
+        * **If the session file exists** the browser starts already authenticated
+          and no username/password interaction is needed.
+
+        * **If the session file is absent** the stored credentials are used to
+          attempt automated form login, after which the resulting session is
+          saved so that subsequent runs are instant.
+
+        * To force a fresh login (e.g. after session expiry) delete the session
+          file and re-run.
+
+        After authentication the scrape runs in two phases:
 
         1. **Gallery phase** — navigates to ``grok.com/imagine/saved`` and
            scrolls to the bottom so that all post thumbnails are rendered.
            Collects every ``/imagine/post/{uuid}`` link found in the DOM.
 
-        2. **Post phase** — visits each post page in turn.  Full-resolution
-           images and videos are loaded by the browser as each post page
-           opens.  Network-response interception captures any URL whose
-           hostname is in :data:`GROK_USER_CONTENT_DOMAINS`.
+        2. **Post phase** — visits each post page in turn and collects media
+           via two complementary strategies:
+
+           a. Network-response interception (fires for any resource the browser
+              actually fetches from :data:`GROK_USER_CONTENT_DOMAINS`).
+
+           b. DOM query (:meth:`_extractMediaUrlsFromPage`) reads ``<video
+              src>`` and ``<source src>`` attributes directly — essential
+              because video elements only fetch their media when they play, so
+              the response listener alone misses them.
 
         All captured media URLs are then downloaded to ``~/Downloads/Grok``.
         """
-        username, password = self._loadOrPromptGrokCredentials()
-
-        try:
-            from playwright.sync_api import sync_playwright  # type: ignore
-        except Exception as e:
-            raise RuntimeError(f"Playwright is required for --grok: {e}") from e
+        if sync_playwright is None:
+            raise RuntimeError(
+                "Playwright is required for --grok: "
+                "pip install playwright && playwright install chromium"
+            )
 
         logger.doing("starting Grok scrape for saved Imagine media")
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
-            context = browser.new_context()
-            page = context.new_page()
+
+            # ------------------------------------------------------------------
+            # Authentication — prefer a saved session so that the full login
+            # flow (which may involve OAuth redirects, CAPTCHA, or 2FA) is only
+            # required once.
+            # ------------------------------------------------------------------
+            if sessionFile.exists():
+                try:
+                    logger.info("loading saved Grok session")
+                    context = browser.new_context(storage_state=str(sessionFile))
+                except Exception as e:
+                    logger.warning(f"saved session could not be loaded ({e}); falling back to fresh login")
+                    sessionFile.unlink(missing_ok=True)
+                    context = None
+            else:
+                context = None
+
+            if context is None:
+                username, password = self._loadOrPromptGrokCredentials()
+                context = browser.new_context()
+                page = context.new_page()
+
+                page.goto("https://grok.com", wait_until="domcontentloaded")
+
+                # Attempt to fill login forms across common variants.
+                if page.locator("input[name='text']").count() > 0:
+                    page.fill("input[name='text']", username)
+                    page.keyboard.press("Enter")
+                elif page.locator("input[type='email']").count() > 0:
+                    page.fill("input[type='email']", username)
+                    page.keyboard.press("Enter")
+
+                page.wait_for_timeout(1200)
+
+                if page.locator("input[name='password']").count() > 0:
+                    page.fill("input[name='password']", password)
+                    page.keyboard.press("Enter")
+                elif page.locator("input[type='password']").count() > 0:
+                    page.fill("input[type='password']", password)
+                    page.keyboard.press("Enter")
+
+                page.wait_for_timeout(2500)
+
+                # Persist session so the login form is never needed again.
+                sessionFile.parent.mkdir(parents=True, exist_ok=True)
+                context.storage_state(path=str(sessionFile))
+                if sessionFile.exists():
+                    sessionFile.chmod(0o600)
+                logger.value("saved Grok session to", str(sessionFile))
+            else:
+                page = context.new_page()
 
             capturedUrls: set = set()
 
@@ -1033,64 +1112,73 @@ Errors:         {stats['errors']}
                 if self._isGrokMediaResponse(response.url, contentType):
                     capturedUrls.add(response.url)
 
-            page.goto("https://grok.com", wait_until="domcontentloaded")
-
-            # Attempt to fill login forms across common variants.
-            if page.locator("input[name='text']").count() > 0:
-                page.fill("input[name='text']", username)
-                page.keyboard.press("Enter")
-            elif page.locator("input[type='email']").count() > 0:
-                page.fill("input[type='email']", username)
-                page.keyboard.press("Enter")
-
-            page.wait_for_timeout(1200)
-
-            if page.locator("input[name='password']").count() > 0:
-                page.fill("input[name='password']", password)
-                page.keyboard.press("Enter")
-            elif page.locator("input[type='password']").count() > 0:
-                page.fill("input[type='password']", password)
-                page.keyboard.press("Enter")
-
-            page.wait_for_timeout(2500)
-
             # ------------------------------------------------------------------
             # Phase 1: Gallery — scroll /imagine/saved to render all post cards
             # and collect their individual post-page links.
+            #
+            # Stall detection tracks the number of post links visible in the
+            # DOM (not capturedUrls) because gallery thumbnails may not come
+            # from GROK_USER_CONTENT_DOMAINS, so capturedUrls could stay at
+            # zero and cause the scroll to abort after just two passes.
             # ------------------------------------------------------------------
             page.on("response", _onResponse)
             page.goto("https://grok.com/imagine/saved", wait_until="domcontentloaded")
             page.wait_for_timeout(2000)
 
-            previousCount = 0
+            previousLinkCount = 0
             stallCount = 0
             for _ in range(20):
                 page.mouse.wheel(0, 2500)
                 page.wait_for_timeout(900)
-                currentCount = len(capturedUrls)
-                if currentCount == previousCount:
+                currentLinkCount = len(self._collectPostUrls(page))
+                if currentLinkCount == previousLinkCount:
                     stallCount += 1
                     if stallCount >= 2:
                         break
                 else:
                     stallCount = 0
-                previousCount = currentCount
+                previousLinkCount = currentLinkCount
 
             postUrls = self._collectPostUrls(page)
             logger.value("found Grok post pages", len(postUrls))
 
             # ------------------------------------------------------------------
-            # Phase 2: Post pages — visit each post so that full-resolution
-            # media (including videos) is loaded and intercepted.
+            # Phase 2: Post pages — visit each post and collect media via two
+            # complementary strategies:
+            #
+            # a) Network-response listener (_onResponse, already active) fires
+            #    for any resource that the browser fetches from
+            #    GROK_USER_CONTENT_DOMAINS while the page loads.
+            #
+            # b) DOM query (_extractMediaUrlsFromPage) reads <video src> and
+            #    <source src> attributes directly.  This is essential because
+            #    <video> elements do not start fetching their media until they
+            #    play, so the response listener alone misses them.
+            #
+            # We wait for "networkidle" (not just "domcontentloaded") so that
+            # the React app has time to finish its API call and render the
+            # video elements into the DOM before we query them.
             # ------------------------------------------------------------------
             for i, postUrl in enumerate(postUrls, 1):
                 logger.doing(f"scraping post {i}/{len(postUrls)}: {postUrl}")
-                page.goto(postUrl, wait_until="domcontentloaded")
-                page.wait_for_timeout(1500)
+                page.goto(postUrl, wait_until="networkidle")
+                page.wait_for_timeout(1000)
+                for url in self._extractMediaUrlsFromPage(page):
+                    capturedUrls.add(url)
 
             page.remove_listener("response", _onResponse)
             mediaUrls = sorted(capturedUrls)
             logger.value("found Grok media URLs", len(mediaUrls))
+
+            # Refresh the session on disk so it stays current.
+            context.storage_state(path=str(sessionFile))
+
+            if not postUrls:
+                logger.warning(
+                    "no posts found — check that you are logged in; "
+                    f"if the session has expired, delete {sessionFile} and re-run"
+                )
+
             downloadStats = self._downloadMediaFiles(mediaUrls, playwrightContext=context)
             browser.close()
 
@@ -1180,6 +1268,8 @@ URLs found:      {grokStats['urlsFound']}
 Files handled:   {grokStats['downloaded']}
 Already present: {grokStats['skipped']}
 Errors:          {grokStats['errors']}
+Session file:    {GROK_SESSION_FILE}
+  (delete to force re-login)
 """
         drawBox(summary)
 

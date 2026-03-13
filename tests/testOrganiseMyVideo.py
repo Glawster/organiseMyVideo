@@ -1332,3 +1332,83 @@ def testLoadOrPromptGrokCredentialsPromptsWhenFileIncomplete(
     assert password == "newpass"
     saved = json.loads(credFile.read_text())
     assert saved["password"] == "newpass"
+
+
+# ---------------------------------------------------------------------------
+# scrapeGrokSavedMedia — session file behaviour
+# ---------------------------------------------------------------------------
+
+
+def testScrapeGrokSavedMediaUsesSessionFileWhenPresent(
+    confirmedOrganizer: VideoOrganizer, tmp_path: Path
+):
+    """When a session file exists the browser context is initialised from it
+    and the login form automation code is never reached."""
+    sessionFile = tmp_path / "grok_session.json"
+    sessionFile.write_text("{}")  # minimal valid storage-state
+
+    fakePage = MagicMock()
+    fakePage.eval_on_selector_all.return_value = []  # empty gallery → 0 posts
+
+    fakeContext = MagicMock()
+    fakeContext.new_page.return_value = fakePage
+    fakeContext.storage_state.return_value = None
+
+    fakeBrowser = MagicMock()
+    fakeBrowser.new_context.return_value = fakeContext
+
+    fakePW = MagicMock()
+    fakePW.chromium.launch.return_value = fakeBrowser
+
+    with patch("organiseMyVideo.sync_playwright") as mockPW:
+        mockPW.return_value.__enter__.return_value = fakePW
+        stats = confirmedOrganizer.scrapeGrokSavedMedia(sessionFile=sessionFile)
+
+    # new_context must have been called with storage_state, not with credentials
+    call_kwargs = fakeBrowser.new_context.call_args
+    assert call_kwargs is not None
+    assert "storage_state" in call_kwargs.kwargs
+    assert call_kwargs.kwargs["storage_state"] == str(sessionFile)
+    assert stats["postsFound"] == 0
+
+
+def testScrapeGrokSavedMediaSavesSessionAfterLogin(
+    confirmedOrganizer: VideoOrganizer, tmp_path: Path
+):
+    """When no session file exists the context is created without one, and
+    storage_state() is called to persist the session afterwards."""
+    sessionFile = tmp_path / "new_session.json"
+    assert not sessionFile.exists()
+
+    credFile = tmp_path / "grok_credentials.json"
+    credFile.write_text(json.dumps({"username": "u@example.com", "password": "pw"}))
+
+    fakePage = MagicMock()
+    fakePage.locator.return_value.count.return_value = 0
+    fakePage.eval_on_selector_all.return_value = []
+
+    fakeContext = MagicMock()
+    fakeContext.new_page.return_value = fakePage
+    fakeContext.storage_state.return_value = None
+
+    fakeBrowser = MagicMock()
+    fakeBrowser.new_context.return_value = fakeContext
+
+    fakePW = MagicMock()
+    fakePW.chromium.launch.return_value = fakeBrowser
+
+    with (
+        patch("organiseMyVideo.sync_playwright") as mockPW,
+        patch.object(confirmedOrganizer, "_loadOrPromptGrokCredentials",
+                     return_value=("u@example.com", "pw")),
+    ):
+        mockPW.return_value.__enter__.return_value = fakePW
+        confirmedOrganizer.scrapeGrokSavedMedia(sessionFile=sessionFile)
+
+    # storage_state should have been called (at least once) to save the session
+    assert fakeContext.storage_state.called
+    saved_paths = [
+        call.kwargs.get("path") or (call.args[0] if call.args else None)
+        for call in fakeContext.storage_state.call_args_list
+    ]
+    assert str(sessionFile) in saved_paths
