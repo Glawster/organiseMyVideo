@@ -1007,9 +1007,11 @@ Already present: {grokStats['skipped']}
 Errors:          {grokStats['errors']}
 """
         drawBox(summary)
+
     elif args.torrent:
         torrentDir = organizer.sourceDir.parent / "Downloads" if organizer.sourceDir else Path("/mnt/video2/Downloads")
-        nameStats = organizer.cleanTorrentNames(torrentDir=torrentDir) if args.clean else {"renamed": 0, "skipped": 0, "errors": 0}
+        if args.clean:
+            nameStats = organizer.cleanTorrentNames(torrentDir=torrentDir)
         removeStats = organizer.removeTorrentsInLibrary(torrentDir=torrentDir)
         summary = f"""TORRENT SUMMARY
 Torrents deleted: {removeStats['deleted']}
@@ -1020,6 +1022,7 @@ Names skipped:    {nameStats['skipped']}
 Rename errors:    {nameStats['errors']}
 """
         drawBox(summary)
+
     elif args.clean:
         nameStats = organizer.cleanNames()
         cleanStats = organizer.cleanEmptyFolders()
