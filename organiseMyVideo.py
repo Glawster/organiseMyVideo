@@ -544,6 +544,73 @@ class VideoOrganizer:
         logger.done(f"clean complete")
         return stats
 
+    def cleanTorrents(self, torrentDir: str = "/mnt/video2/Download") -> dict:
+        """
+        Scan the download directory for .torrent files and delete those
+        belonging to movies or TV shows already present in the library.
+
+        Args:
+            torrentDir: Directory to scan for .torrent files (default: /mnt/video2/Download)
+
+        Returns:
+            Dictionary with counts: {'deleted': int, 'skipped': int, 'errors': int}
+        """
+        logger.doing(f"scanning for obsolete torrent files in {torrentDir}")
+
+        stats = {"deleted": 0, "skipped": 0, "errors": 0}
+
+        downloadPath = Path(torrentDir)
+        if not downloadPath.exists():
+            logger.error(f"torrent directory does not exist: {torrentDir}")
+            return stats
+
+        movieDirs, videoDirs = self.scanStorageLocations()
+
+        for entry in sorted(downloadPath.rglob("*.torrent")):
+            if not entry.is_file():
+                continue
+
+            # The stem may already contain an inner extension (e.g. "Movie.2010.mkv")
+            # or may not (e.g. "Movie.2010"). Append ".mkv" as a neutral fallback so
+            # that the TV/movie parsers (which require an extension suffix) can still match.
+            stem = entry.stem
+            fallback = stem + ".mkv"
+            tvInfo = self.parseTvFilename(stem) or self.parseTvFilename(fallback)
+            movieInfo = self.parseMovieFilename(stem) or self.parseMovieFilename(fallback)
+
+            inLibrary = False
+
+            if tvInfo and videoDirs:
+                existingDir = self.findExistingTvShowDir(tvInfo["showName"], videoDirs)
+                if existingDir:
+                    inLibrary = True
+                    logger.value("torrent matches library tv show", f"{entry.name} → {existingDir}")
+
+            if not inLibrary and movieInfo and movieDirs:
+                existingDir = self.findExistingMovieDir(movieInfo["title"], movieInfo["year"], movieDirs)
+                if existingDir:
+                    inLibrary = True
+                    logger.value("torrent matches library movie", f"{entry.name} → {existingDir}")
+
+            if inLibrary:
+                if self.dryRun:
+                    logger.action(f"would delete torrent: {entry.name}")
+                    stats["deleted"] += 1
+                else:
+                    try:
+                        entry.unlink()
+                        logger.action(f"deleted torrent: {entry.name}")
+                        stats["deleted"] += 1
+                    except Exception as e:
+                        logger.error(f"failed to delete {entry.name}: {e}")
+                        stats["errors"] += 1
+            else:
+                logger.value("keeping torrent (not in library)", entry.name)
+                stats["skipped"] += 1
+
+        logger.done("torrent clean complete")
+        return stats
+
     def processFiles(self, interactive: bool = True):
         """
         Process all video files in the source directory.
@@ -696,7 +763,18 @@ def main():
         action="store_true",
         help="Run without user prompts (skip files that cannot be auto-detected)"
     )
-    
+    parser.add_argument(
+        "--torrent",
+        action="store_true",
+        help="scan the torrent download directory for .torrent files and delete those already in the library (dry-run by default; use --confirm to delete)"
+    )
+    parser.add_argument(
+        "--torrent-dir",
+        dest="torrent_dir",
+        default="/mnt/video2/Download",
+        help="directory to scan for .torrent files (default: /mnt/video2/Download)"
+    )
+
     args = parser.parse_args()
     
     dryRun = True if not args.confirm else False
@@ -739,6 +817,14 @@ Name errors:     {nameStats['errors']}
 Folders removed: {cleanStats['removed']}
 Folders kept:    {cleanStats['skipped']}
 Folder errors:   {cleanStats['errors']}
+"""
+        drawBox(summary)
+    elif args.torrent:
+        torrentStats = organizer.cleanTorrents(torrentDir=args.torrent_dir)
+        summary = f"""TORRENT SUMMARY
+Torrents deleted: {torrentStats['deleted']}
+Torrents kept:    {torrentStats['skipped']}
+Errors:           {torrentStats['errors']}
 """
         drawBox(summary)
     else:
