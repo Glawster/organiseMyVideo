@@ -1130,3 +1130,32 @@ def testDownloadMediaFilesSkipsExisting(confirmedOrganizer: VideoOrganizer):
     target.write_bytes(b"exists")
     stats = confirmedOrganizer._downloadMediaFiles(["https://example.com/image01.png"], limit=None)
     assert stats == {"downloaded": 0, "skipped": 1, "errors": 0}
+
+
+# ---------------------------------------------------------------------------
+# Grok helpers
+# ---------------------------------------------------------------------------
+
+
+def testExtractMediaUrlsFromHtmlFindsSupportedExtensions(organizer: VideoOrganizer):
+    html = (
+        '<img src="https://example.com/image01.png">'
+        '<video src="https://example.com/clip01.mp4"></video>'
+        '<a href="https://example.com/readme.txt">ignore</a>'
+    )
+    urls = organizer._extractMediaUrlsFromHtml(html)
+    assert urls == ["https://example.com/clip01.mp4", "https://example.com/image01.png"]
+
+
+def testDownloadMediaFilesDryRunDoesNotWrite(organizer: VideoOrganizer):
+    stats = organizer._downloadMediaFiles(["https://example.com/image01.png"], limit=None)
+    assert stats == {"downloaded": 1, "skipped": 0, "errors": 0}
+    assert not (organizer.sourceDir / "image01.png").exists()
+
+
+def testDownloadMediaFilesSkipsExisting(confirmedOrganizer: VideoOrganizer):
+    target = confirmedOrganizer.sourceDir / "image01.png"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"exists")
+    stats = confirmedOrganizer._downloadMediaFiles(["https://example.com/image01.png"], limit=None)
+    assert stats == {"downloaded": 0, "skipped": 1, "errors": 0}
