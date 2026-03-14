@@ -1599,6 +1599,34 @@ def testImportFirefoxSessionWritesStorageState(
         assert cookie["sameSite"] in {"None", "Lax", "Strict"}
 
 
+def testImportFirefoxSessionMapsZeroExpiryToMinusOne(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """Firefox session cookies use expiry=0; Playwright requires -1 (not 0)."""
+    profileDir = tmp_path / "profile"
+    profileDir.mkdir()
+    _make_firefox_cookies_db(
+        profileDir,
+        [
+            # expiry=0 → session cookie (Firefox representation)
+            ("session_cookie", "val1", "grok.com", "/", 0, 1, 1, 1),
+            # expiry>0 → persistent cookie, must be preserved as-is
+            ("persistent_cookie", "val2", "grok.com", "/", 9999999999, 1, 0, 0),
+        ],
+    )
+    sessionFile = tmp_path / "session.json"
+
+    result = organizer.importFirefoxSession(sessionFile=sessionFile, profilePath=profileDir)
+
+    assert result is True
+    state = json.loads(sessionFile.read_text())
+    cookies = {c["name"]: c for c in state["cookies"]}
+    # Session cookie: expiry=0 must be mapped to -1
+    assert cookies["session_cookie"]["expires"] == -1
+    # Persistent cookie: positive expiry must pass through unchanged
+    assert cookies["persistent_cookie"]["expires"] == 9999999999
+
+
 def testImportFirefoxSessionReturnsFalseWhenNoCookiesDbFile(
     organizer: VideoOrganizer, tmp_path: Path
 ):

@@ -463,7 +463,9 @@ class GrokMixin:
                 "value": value,
                 "domain": host,
                 "path": path,
-                "expires": expiry,
+                # Firefox stores session cookies (no expiry) with expiry=0.
+                # Playwright requires -1 for "no expiry"; 0 is rejected.
+                "expires": expiry if expiry > 0 else -1,
                 "httpOnly": bool(isHttpOnly),
                 "secure": bool(isSecure),
                 "sameSite": _SAMESITE.get(sameSite, "None"),
