@@ -38,6 +38,23 @@ VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".m4v", ".mp
 GROK_MEDIA_EXTENSIONS = {".mp4", ".mov", ".webm", ".png", ".jpg", ".jpeg", ".gif", ".webp"}
 GROK_USER_CONTENT_DOMAINS = {"imagine-public.x.ai", "images-public.x.ai"}
 GROK_CREDENTIALS_FILE = Path.home() / ".config" / "organiseMyVideo" / "grokCredentials.json"
+# Browser launch arguments that suppress Playwright's automation fingerprint.
+# Without these, X.ai's sign-in page detects the automated browser and returns
+# 403 on background API calls before the user can log in.
+_PLAYWRIGHT_BROWSER_ARGS = ["--disable-blink-features=AutomationControlled"]
+# Realistic Chrome user-agent used for all Playwright contexts.  Playwright's
+# default headless UA contains "HeadlessChrome" which bot-detection heuristics
+# flag immediately.
+_PLAYWRIGHT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/122.0.0.0 Safari/537.36"
+)
+# JavaScript snippet injected into every page of every context to remove the
+# navigator.webdriver property that Playwright exposes by default.
+_PLAYWRIGHT_INIT_SCRIPT = (
+    "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+)
 # Playwright storage-state file (cookies + localStorage) persisted after login.
 # When this file exists the browser starts already authenticated and no
 # username/password interaction is needed.  Delete this file to force a fresh
@@ -1088,7 +1105,7 @@ Errors:         {stats['errors']}
 
         logger.doing("starting Grok scrape for saved Imagine media")
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(headless=True, args=_PLAYWRIGHT_BROWSER_ARGS)
 
             # ------------------------------------------------------------------
             # Authentication — prefer a saved session so that the full login
@@ -1098,7 +1115,11 @@ Errors:         {stats['errors']}
             if sessionFile.exists():
                 try:
                     logger.info("loading saved Grok session")
-                    context = browser.new_context(storage_state=str(sessionFile))
+                    context = browser.new_context(
+                        storage_state=str(sessionFile),
+                        user_agent=_PLAYWRIGHT_USER_AGENT,
+                    )
+                    context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
                 except Exception as e:
                     logger.warning(f"saved session could not be loaded ({e}); falling back to fresh login")
                     sessionFile.unlink(missing_ok=True)
@@ -1112,8 +1133,9 @@ Errors:         {stats['errors']}
                 # flow cannot be automated (CAPTCHA, 2FA, OAuth redirects), so
                 # we open a visible browser and wait for the user to finish.
                 browser.close()
-                browser = playwright.chromium.launch(headless=False)
-                context = browser.new_context()
+                browser = playwright.chromium.launch(headless=False, args=_PLAYWRIGHT_BROWSER_ARGS)
+                context = browser.new_context(user_agent=_PLAYWRIGHT_USER_AGENT)
+                context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
                 page = context.new_page()
                 page.goto("https://grok.com", wait_until="domcontentloaded")
                 print(
@@ -1168,8 +1190,9 @@ Errors:         {stats['errors']}
                 context.close()
                 browser.close()
                 sessionFile.unlink(missing_ok=True)
-                browser = playwright.chromium.launch(headless=False)
-                context = browser.new_context()
+                browser = playwright.chromium.launch(headless=False, args=_PLAYWRIGHT_BROWSER_ARGS)
+                context = browser.new_context(user_agent=_PLAYWRIGHT_USER_AGENT)
+                context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
                 page = context.new_page()
                 page.goto("https://grok.com", wait_until="domcontentloaded")
                 print(
