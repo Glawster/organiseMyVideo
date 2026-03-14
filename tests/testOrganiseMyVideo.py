@@ -1341,17 +1341,18 @@ def testLoadOrPromptGrokCredentialsPromptsWhenFileIncomplete(
 # ---------------------------------------------------------------------------
 
 
-def testAutofillLoginPageFillsEmailAndPassword(organizer: VideoOrganizer):
-    """Email and password are filled into the two-step sign-in form."""
+def testAutofillLoginPageFillsEmailOnly(organizer: VideoOrganizer):
+    """Only the email field is filled — Next click and password are left for the user
+    so that Cloudflare Turnstile sees a real human interaction."""
     fakePage = MagicMock()
-    organizer._autofillLoginPage(fakePage, "user@example.com", "s3cr3t")
+    organizer._autofillLoginPage(fakePage, "user@example.com")
 
     # page.fill(selector, value) — check the value argument (index 1) of each call
     filled_values = [call.args[1] for call in fakePage.fill.call_args_list]
     assert "user@example.com" in filled_values, "email not filled"
-    assert "s3cr3t" in filled_values, "password not filled"
-    # The Next/submit button should have been clicked to advance to the password step
-    assert fakePage.click.called
+    assert "s3cr3t" not in filled_values, "password must not be filled automatically"
+    # Next/submit button must NOT be clicked automatically
+    fakePage.click.assert_not_called()
 
 
 def testAutofillLoginPageFallsBackGracefullyOnError(organizer: VideoOrganizer):
@@ -1359,7 +1360,7 @@ def testAutofillLoginPageFallsBackGracefullyOnError(organizer: VideoOrganizer):
     fakePage = MagicMock()
     fakePage.wait_for_selector.side_effect = Exception("timeout waiting for selector")
     # Should not raise
-    organizer._autofillLoginPage(fakePage, "u@e.com", "pass")
+    organizer._autofillLoginPage(fakePage, "u@e.com")
 
 
 # ---------------------------------------------------------------------------
@@ -1405,7 +1406,7 @@ def testScrapeGrokSavedMediaSavesSessionAfterLogin(
     confirmedOrganizer: VideoOrganizer, tmp_path: Path
 ):
     """When no session file exists the browser is relaunched non-headless,
-    credentials are pre-filled via _autofillLoginPage, and storage_state()
+    the email is pre-filled via _autofillLoginPage, and storage_state()
     persists the session."""
     sessionFile = tmp_path / "new_session.json"
     credFile = tmp_path / "grokCredentials.json"
@@ -1441,10 +1442,10 @@ def testScrapeGrokSavedMediaSavesSessionAfterLogin(
         c.kwargs.get("headless") is False for c in launch_calls
     ), "expected at least one non-headless browser launch for manual login"
 
-    # Credentials should have been pre-filled into the page
+    # Only email should have been pre-filled; password is left for the user
     filled_values = [call.args[1] for call in fakePage.fill.call_args_list]
     assert "user@example.com" in filled_values, "email not filled"
-    assert "s3cr3t" in filled_values, "password not filled"
+    assert "s3cr3t" not in filled_values, "password must not be filled automatically"
 
     # storage_state should have been called (at least once) to save the session
     assert fakeContext.storage_state.called
