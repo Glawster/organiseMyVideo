@@ -47,6 +47,7 @@ class VideoOrganizer:
         """
         self.sourceDir = Path(sourceDir)
         self.dryRun = dryRun
+        self._promptHelpDisplayed = False
         
     def scanStorageLocations(self) -> Tuple[List[Path], List[Path]]:
         """
@@ -239,6 +240,13 @@ class VideoOrganizer:
             dict with 'name' and 'type' keys, or None to skip this item.
             'type' may differ from fileType when the user switches category.
         """
+        if not self._promptHelpDisplayed:
+            print(
+                "  y/enter = confirm  |  n = rename  |  "
+                "t = treat as TV show  |  m = treat as movie  |  q = quit"
+            )
+            self._promptHelpDisplayed = True
+
         if fileType == "tv":
             prompt = f"\nTV Show detected: '{defaultName}'\nIs this correct?  (y/n/q/t/m or enter new name): "
         else:
