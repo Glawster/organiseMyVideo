@@ -118,7 +118,7 @@ def testScanStorageLocationsFindsMovieDirs(tmp_path: Path, organizer: VideoOrgan
     mnt = tmp_path / "mnt"
     (mnt / "movie1").mkdir(parents=True)
     (mnt / "movie2").mkdir(parents=True)
-    with patch("organiseMyVideo.Path") as mockPath:
+    with patch("organiseMyVideo.video.Path") as mockPath:
         mockPath.return_value = mnt
         movieDirs, videoDirs = organizer.scanStorageLocations()
     assert len(movieDirs) == 2
@@ -129,7 +129,7 @@ def testScanStorageLocationsFindsMyPicturesAsMovieStorage(tmp_path: Path, organi
     """/mnt/myPictures root is used as movie storage when no Movies subdir exists."""
     mnt = tmp_path / "mnt"
     (mnt / "myPictures").mkdir(parents=True)
-    with patch("organiseMyVideo.Path") as mockPath:
+    with patch("organiseMyVideo.video.Path") as mockPath:
         mockPath.return_value = mnt
         movieDirs, videoDirs = organizer.scanStorageLocations()
     assert any(d.name == "myPictures" for d in movieDirs)
@@ -140,7 +140,7 @@ def testScanStorageLocationsUsesMyPicturesMoviesSubdir(tmp_path: Path, organizer
     """/mnt/myPictures/Movies is used as movie storage when the Movies subdir exists."""
     mnt = tmp_path / "mnt"
     (mnt / "myPictures" / "Movies").mkdir(parents=True)
-    with patch("organiseMyVideo.Path") as mockPath:
+    with patch("organiseMyVideo.video.Path") as mockPath:
         mockPath.return_value = mnt
         movieDirs, videoDirs = organizer.scanStorageLocations()
     assert any(d.name == "Movies" for d in movieDirs)
@@ -152,7 +152,7 @@ def testScanStorageLocationsFindsMyVideoAsTvStorage(tmp_path: Path, organizer: V
     mnt = tmp_path / "mnt"
     tvDir = mnt / "myVideo" / "TV"
     tvDir.mkdir(parents=True)
-    with patch("organiseMyVideo.Path") as mockPath:
+    with patch("organiseMyVideo.video.Path") as mockPath:
         mockPath.return_value = mnt
         movieDirs, videoDirs = organizer.scanStorageLocations()
     assert len(movieDirs) == 0
@@ -166,7 +166,7 @@ def testScanStorageLocationsFindsAllLocationTypes(tmp_path: Path, organizer: Vid
     (mnt / "myPictures").mkdir(parents=True)
     (mnt / "video1" / "TV").mkdir(parents=True)
     (mnt / "myVideo" / "TV").mkdir(parents=True)
-    with patch("organiseMyVideo.Path") as mockPath:
+    with patch("organiseMyVideo.video.Path") as mockPath:
         mockPath.return_value = mnt
         movieDirs, videoDirs = organizer.scanStorageLocations()
     assert len(movieDirs) == 2
@@ -432,7 +432,7 @@ def testMoveMovieDryRunReturnsTrueWithoutMoving(tmp_path: Path, organizer: Video
 
     movieInfo = {"title": "Inception", "year": "2010", "extension": ".mp4", "type": "movie"}
 
-    with patch("organiseMyVideo.shutil.move") as mockMove:
+    with patch("organiseMyVideo.video.shutil.move") as mockMove:
         result = organizer.moveMovie(srcFile, movieInfo, [movieStorage], interactive=False)
 
     assert result is True
@@ -501,7 +501,7 @@ def testMoveTvShowDryRunReturnsTrueWithoutMoving(tmp_path: Path, organizer: Vide
     tvInfo = {"showName": "Breaking Bad", "season": 1, "episode": 1,
               "extension": ".mkv", "type": "tv"}
 
-    with patch("organiseMyVideo.shutil.move") as mockMove:
+    with patch("organiseMyVideo.video.shutil.move") as mockMove:
         result = organizer.moveTvShow(srcFile, tvInfo, [tvStorage], interactive=False)
 
     assert result is True
@@ -1565,7 +1565,7 @@ def testScrapeGrokSavedMediaUsesFirefoxSessionWhenAvailable(
         return True
 
     with (
-        patch("organiseMyVideo.sync_playwright") as mockPW,
+        patch("organiseMyVideo.grok.sync_playwright") as mockPW,
         patch.object(confirmedOrganizer, "importFirefoxSession", side_effect=_fake_import),
     ):
         mockPW.return_value.__enter__.return_value = fakePW
@@ -1606,7 +1606,7 @@ def testScrapeGrokSavedMediaUsesSessionFileWhenPresent(
     fakePW = MagicMock()
     fakePW.chromium.launch.return_value = fakeBrowser
 
-    with patch("organiseMyVideo.sync_playwright") as mockPW:
+    with patch("organiseMyVideo.grok.sync_playwright") as mockPW:
         mockPW.return_value.__enter__.return_value = fakePW
         stats = confirmedOrganizer.scrapeGrokSavedMedia(sessionFile=sessionFile)
 
@@ -1644,7 +1644,7 @@ def testScrapeGrokSavedMediaSavesSessionAfterLogin(
     fakePW.chromium.launch.return_value = fakeBrowser
 
     with (
-        patch("organiseMyVideo.sync_playwright") as mockPW,
+        patch("organiseMyVideo.grok.sync_playwright") as mockPW,
         patch("builtins.input", return_value=""),  # simulate user pressing Enter
     ):
         mockPW.return_value.__enter__.return_value = fakePW
