@@ -609,6 +609,32 @@ def testPromptUserConfirmationMDefaultsToCurrentName(organizer: VideoOrganizer):
     assert result == {"name": "Breaking Bad", "type": "movie"}
 
 
+def testPromptUserConfirmationPrintsLegendOnFirstCall(organizer: VideoOrganizer):
+    """Key legend is printed exactly once, on the first call."""
+    with patch("builtins.input", return_value="y"), \
+         patch("builtins.print") as mockPrint:
+        result = organizer.promptUserConfirmation("file.mkv", "My Show", "tv")
+    assert result == {"name": "My Show", "type": "tv"}
+    assert mockPrint.call_count == 1
+    printed = mockPrint.call_args[0][0]
+    assert "y" in printed
+    assert "n" in printed
+    assert "t" in printed
+    assert "m" in printed
+    assert "q" in printed
+
+
+def testPromptUserConfirmationLegendNotPrintedOnSecondCall(organizer: VideoOrganizer):
+    """Key legend is suppressed after the first prompt has been shown."""
+    with patch("builtins.input", return_value="y"), \
+         patch("builtins.print") as mockPrint:
+        organizer.promptUserConfirmation("file.mkv", "Show One", "tv")
+        mockPrint.reset_mock()
+        result = organizer.promptUserConfirmation("file.mkv", "Show Two", "tv")
+    assert result == {"name": "Show Two", "type": "tv"}
+    mockPrint.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # moveMovie — skip and type-switch via promptUserConfirmation
 # ---------------------------------------------------------------------------
