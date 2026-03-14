@@ -1853,6 +1853,64 @@ def testManualLoginExitsCleanlyIfBrowserWindowClosed(
     assert not fakeContext.storage_state.called
 
 
+def testManualLoginExitsCleanlyIfEnterPressedWithoutLoggingIn(
+    confirmedOrganizer: VideoOrganizer, tmp_path: Path
+):
+    """If the user presses Enter without completing login (browser still open but
+    URL is not /imagine/saved), the process should exit with SystemExit(1) and
+    must NOT save an unauthenticated session to disk."""
+    sessionFile = tmp_path / "new_session.json"
+    credFile = tmp_path / "grokCredentials.json"
+    credFile.write_text(json.dumps({"username": "user@example.com", "password": "s3cr3t"}))
+
+    # Saved-session page that appears expired (redirects away from /imagine/saved)
+    fakeExpiredPage = MagicMock()
+    fakeExpiredPage.url = "https://grok.com/imagine"  # expired → not /imagine/saved
+    fakeExpiredPage.eval_on_selector_all.return_value = []
+    fakeExpiredPage.is_closed.return_value = False
+
+    # Login page that stays on grok.com after the user presses Enter without logging in
+    fakeLoginPage = MagicMock()
+    fakeLoginPage.url = "https://grok.com/sign-in"  # not /imagine/saved — login incomplete
+    fakeLoginPage.eval_on_selector_all.return_value = []
+    fakeLoginPage.is_closed.return_value = False
+
+    fakeExpiredContext = MagicMock()
+    fakeExpiredContext.new_page.return_value = fakeExpiredPage
+
+    fakeLoginContext = MagicMock()
+    fakeLoginContext.new_page.return_value = fakeLoginPage
+
+    fakeHeadlessBrowser = MagicMock()
+    fakeHeadlessBrowser.new_context.return_value = fakeExpiredContext
+
+    fakeHeadfulBrowser = MagicMock()
+    fakeHeadfulBrowser.new_context.return_value = fakeLoginContext
+
+    def _launch(headless=True, **kwargs):
+        return fakeHeadlessBrowser if headless else fakeHeadfulBrowser
+
+    fakePW = MagicMock()
+    fakePW.chromium.launch.side_effect = _launch
+
+    sessionFile.write_text("{}")  # existing (expired) session file
+
+    with (
+        patch("organiseMyVideo.grok.sync_playwright") as mockPW,
+        patch("builtins.input", return_value=""),  # simulate user pressing Enter
+        patch.object(confirmedOrganizer, "importFirefoxSession", return_value=False),
+    ):
+        mockPW.return_value.__enter__.return_value = fakePW
+        with pytest.raises(SystemExit) as exc_info:
+            confirmedOrganizer.scrapeGrokSavedMedia(
+                sessionFile=sessionFile, credentialsFile=credFile
+            )
+
+    assert exc_info.value.code == 1
+    # Session must NOT have been saved for the incomplete login
+    assert not fakeLoginContext.storage_state.called
+
+
 # ---------------------------------------------------------------------------
 # resetGrokConfig
 # ---------------------------------------------------------------------------

@@ -731,12 +731,18 @@ class GrokMixin:
                         flush=True,
                     )
                     self._awaitManualLoginInput(page)
+                    _navigateToSaved(page)
+                    if urllib.parse.urlparse(page.url).path != "/imagine/saved":
+                        logger.warning(
+                            f"login did not complete — still redirected to {page.url!r}; "
+                            "please restart --grok and complete the login before pressing Enter"
+                        )
+                        raise SystemExit(1)
                     sessionFile.parent.mkdir(parents=True, exist_ok=True)
                     context.storage_state(path=str(sessionFile))
                     if sessionFile.exists():
                         sessionFile.chmod(0o600)
                     logger.value("saved Grok session to", str(sessionFile))
-                    _navigateToSaved(page)
 
             previousLinkCount = 0
             stallCount = 0
