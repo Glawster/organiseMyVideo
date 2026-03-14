@@ -239,6 +239,21 @@ class GrokMixin:
             # manual entry so the user is never blocked.
             logger.warning(f"auto-fill of login form failed ({e}); please log in manually")
 
+    def _awaitManualLoginInput(self, page) -> None:
+        """Wait for the user to press Enter after completing manual login.
+
+        If the browser window is closed before the user presses Enter,
+        raises ``SystemExit(1)`` so the process exits cleanly instead of
+        crashing with a Playwright error on the next page operation.
+
+        Args:
+            page: Playwright Page instance shown to the user.
+        """
+        input()
+        if page.is_closed():
+            logger.warning("browser window closed before login completed; aborting")
+            raise SystemExit(1)
+
     @staticmethod
     def _firefoxBaseCandidates(system: str) -> List[Path]:
         """Return candidate Firefox base directories for the given OS, in priority order.
@@ -622,7 +637,7 @@ class GrokMixin:
                     "then press Enter here to continue...",
                     flush=True,
                 )
-                input()
+                self._awaitManualLoginInput(page)
 
                 # Persist session so the login form is never needed again.
                 sessionFile.parent.mkdir(parents=True, exist_ok=True)
@@ -715,7 +730,7 @@ class GrokMixin:
                         "then press Enter here to continue...",
                         flush=True,
                     )
-                    input()
+                    self._awaitManualLoginInput(page)
                     sessionFile.parent.mkdir(parents=True, exist_ok=True)
                     context.storage_state(path=str(sessionFile))
                     if sessionFile.exists():

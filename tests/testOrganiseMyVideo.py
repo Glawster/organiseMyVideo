@@ -1772,6 +1772,7 @@ def testScrapeGrokSavedMediaSavesSessionAfterLogin(
     fakePage = MagicMock()
     fakePage.url = "https://grok.com/imagine/saved"  # successful login → stays on saved page
     fakePage.eval_on_selector_all.return_value = []
+    fakePage.is_closed.return_value = False  # browser stays open after user presses Enter
 
     fakeContext = MagicMock()
     fakeContext.new_page.return_value = fakePage
@@ -1810,6 +1811,46 @@ def testScrapeGrokSavedMediaSavesSessionAfterLogin(
         for call in fakeContext.storage_state.call_args_list
     ]
     assert str(sessionFile) in saved_paths
+
+
+def testManualLoginExitsCleanlyIfBrowserWindowClosed(
+    confirmedOrganizer: VideoOrganizer, tmp_path: Path
+):
+    """If the user closes the browser window during manual login, the process
+    should exit with SystemExit(1) instead of crashing with a Playwright error."""
+    sessionFile = tmp_path / "new_session.json"
+    credFile = tmp_path / "grokCredentials.json"
+    credFile.write_text(json.dumps({"username": "user@example.com", "password": "s3cr3t"}))
+
+    fakePage = MagicMock()
+    fakePage.url = "https://grok.com/imagine/saved"
+    fakePage.eval_on_selector_all.return_value = []
+    # Simulate the user closing the browser window — page.is_closed() returns True
+    fakePage.is_closed.return_value = True
+
+    fakeContext = MagicMock()
+    fakeContext.new_page.return_value = fakePage
+
+    fakeBrowser = MagicMock()
+    fakeBrowser.new_context.return_value = fakeContext
+
+    fakePW = MagicMock()
+    fakePW.chromium.launch.return_value = fakeBrowser
+
+    with (
+        patch("organiseMyVideo.grok.sync_playwright") as mockPW,
+        patch("builtins.input", return_value=""),  # simulate user pressing Enter
+    ):
+        mockPW.return_value.__enter__.return_value = fakePW
+        with pytest.raises(SystemExit) as exc_info:
+            confirmedOrganizer.scrapeGrokSavedMedia(
+                sessionFile=sessionFile, credentialsFile=credFile
+            )
+
+    assert exc_info.value.code == 1
+    # storage_state must NOT have been called — the session should not be saved
+    # when the browser was closed without completing login
+    assert not fakeContext.storage_state.called
 
 
 # ---------------------------------------------------------------------------
