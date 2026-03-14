@@ -1029,6 +1029,40 @@ Errors:         {stats['errors']}
         logger.value("saved grok credentials to", str(credentialsFile))
         return username, password
 
+    def _autofillLoginPage(self, page, username: str, password: str) -> None:
+        """Pre-fill the X.ai sign-in form with saved credentials.
+
+        Handles the two-step email → Next → password flow on
+        ``accounts.x.ai``.  The final Login button is intentionally left
+        unpressed so the user can handle any Cloudflare Turnstile or similar
+        challenge interactively.
+
+        Silently degrades to a warning log if the expected form elements are
+        not found within the timeout so the user can still log in manually.
+
+        Args:
+            page: Playwright Page instance on the X.ai sign-in page.
+            username: Email address to enter.
+            password: Password to enter.
+        """
+        EMAIL_SELECTOR = "input[type='email'], input[autocomplete='username'], input[name='email']"
+        PASSWORD_SELECTOR = "input[type='password']"
+        SUBMIT_SELECTOR = "button[type='submit']"
+        SELECTOR_TIMEOUT = 10_000
+        try:
+            page.wait_for_selector(EMAIL_SELECTOR, timeout=SELECTOR_TIMEOUT)
+            page.fill(EMAIL_SELECTOR, username)
+            page.click(SUBMIT_SELECTOR)
+            page.wait_for_selector(PASSWORD_SELECTOR, timeout=SELECTOR_TIMEOUT)
+            page.fill(PASSWORD_SELECTOR, password)
+            logger.info("credentials pre-filled — please click Login to continue")
+        except Exception as e:
+            # Broad catch is intentional: Playwright raises various exception
+            # types depending on the failure (timeout, missing element, navigation
+            # error).  The helper is best-effort; any failure falls back to fully
+            # manual entry so the user is never blocked.
+            logger.warning(f"auto-fill of login form failed ({e}); please log in manually")
+
     def resetGrokConfig(
         self,
         sessionFile: Path = GROK_SESSION_FILE,
@@ -1060,7 +1094,11 @@ Errors:         {stats['errors']}
                 notFound.append(str(path))
         return {"deleted": deleted, "notFound": notFound}
 
-    def scrapeGrokSavedMedia(self, sessionFile: Path = GROK_SESSION_FILE) -> dict:
+    def scrapeGrokSavedMedia(
+        self,
+        sessionFile: Path = GROK_SESSION_FILE,
+        credentialsFile: Path = GROK_CREDENTIALS_FILE,
+    ) -> dict:
         """Log into Grok and scrape saved Imagine media, downloading to ~/Downloads/Grok.
 
         Authentication uses Playwright ``storage_state`` (cookies + localStorage)
@@ -1069,14 +1107,16 @@ Errors:         {stats['errors']}
         * **If the session file exists** the browser starts already authenticated
           and no username/password interaction is needed.
 
-        * **If the session file is absent** a visible browser window opens so the
-          user can log in manually; the resulting session is then saved so that
+        * **If the session file is absent** a visible browser window opens, saved
+          credentials from *credentialsFile* are pre-filled into the sign-in form,
+          and the user just needs to complete the login (e.g. click Login and
+          solve any Cloudflare challenge).  The resulting session is saved so
           subsequent runs are instant.
 
         * **If the saved session has expired** (detected when Grok redirects the
           browser away from ``/imagine/saved`` rather than loading the page), the
-          stale session file is deleted automatically and the user is prompted to
-          log in again via a visible browser window.
+          stale session file is deleted automatically, credentials are pre-filled,
+          and the user is prompted to log in again via a visible browser window.
 
         After authentication the scrape runs in two phases:
 
@@ -1128,19 +1168,23 @@ Errors:         {stats['errors']}
                 context = None
 
             if context is None:
-                # No valid session — relaunch as non-headless so the user can
-                # log in manually via the browser window.  X/Twitter's OAuth
-                # flow cannot be automated (CAPTCHA, 2FA, OAuth redirects), so
-                # we open a visible browser and wait for the user to finish.
+                # No valid session — load credentials, relaunch as non-headless,
+                # pre-fill the sign-in form, and wait for the user to complete login
+                # (e.g. solve any Cloudflare Turnstile challenge and click Login).
+                username, password = self._loadOrPromptGrokCredentials(
+                    credentialsFile=credentialsFile
+                )
                 browser.close()
                 browser = playwright.chromium.launch(headless=False, args=_PLAYWRIGHT_BROWSER_ARGS)
                 context = browser.new_context(user_agent=_PLAYWRIGHT_USER_AGENT)
                 context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
                 page = context.new_page()
                 page.goto("https://grok.com", wait_until="domcontentloaded")
+                self._autofillLoginPage(page, username, password)
                 print(
-                    "\nA browser window has opened.\n"
-                    "Please log in to Grok/X and, once logged in, press Enter here to continue...",
+                    "\nA browser window has opened and your credentials have been pre-filled.\n"
+                    "Please complete the login (click Login / solve any verification), "
+                    "then press Enter here to continue...",
                     flush=True,
                 )
                 input()
@@ -1181,7 +1225,8 @@ Errors:         {stats['errors']}
             # Detect session expiry: an expired (or invalid) session causes
             # Grok to redirect the browser to the login page instead of loading
             # /imagine/saved.  When that happens, wipe the stale session file,
-            # relaunch the browser as visible, and let the user log in again.
+            # relaunch the browser as visible, pre-fill credentials, and let
+            # the user complete login.
             if urllib.parse.urlparse(page.url).path != "/imagine/saved":
                 logger.warning(
                     f"session appears expired (redirected to {page.url!r}); "
@@ -1190,16 +1235,20 @@ Errors:         {stats['errors']}
                 context.close()
                 browser.close()
                 sessionFile.unlink(missing_ok=True)
+                username, password = self._loadOrPromptGrokCredentials(
+                    credentialsFile=credentialsFile
+                )
                 browser = playwright.chromium.launch(headless=False, args=_PLAYWRIGHT_BROWSER_ARGS)
                 context = browser.new_context(user_agent=_PLAYWRIGHT_USER_AGENT)
                 context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
                 page = context.new_page()
                 page.goto("https://grok.com", wait_until="domcontentloaded")
+                self._autofillLoginPage(page, username, password)
                 print(
                     "\nA browser window has opened.\n"
-                    "Your previous Grok session has expired.\n"
-                    "Please log in to Grok/X and, once logged in, "
-                    "press Enter here to continue...",
+                    "Your previous Grok session has expired and your credentials have been pre-filled.\n"
+                    "Please complete the login (click Login / solve any verification), "
+                    "then press Enter here to continue...",
                     flush=True,
                 )
                 input()

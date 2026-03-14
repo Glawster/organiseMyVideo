@@ -1337,6 +1337,32 @@ def testLoadOrPromptGrokCredentialsPromptsWhenFileIncomplete(
 
 
 # ---------------------------------------------------------------------------
+# _autofillLoginPage
+# ---------------------------------------------------------------------------
+
+
+def testAutofillLoginPageFillsEmailAndPassword(organizer: VideoOrganizer):
+    """Email and password are filled into the two-step sign-in form."""
+    fakePage = MagicMock()
+    organizer._autofillLoginPage(fakePage, "user@example.com", "s3cr3t")
+
+    # page.fill(selector, value) — check the value argument (index 1) of each call
+    filled_values = [call.args[1] for call in fakePage.fill.call_args_list]
+    assert "user@example.com" in filled_values, "email not filled"
+    assert "s3cr3t" in filled_values, "password not filled"
+    # The Next/submit button should have been clicked to advance to the password step
+    assert fakePage.click.called
+
+
+def testAutofillLoginPageFallsBackGracefullyOnError(organizer: VideoOrganizer):
+    """A timeout or missing selector is caught and does not propagate."""
+    fakePage = MagicMock()
+    fakePage.wait_for_selector.side_effect = Exception("timeout waiting for selector")
+    # Should not raise
+    organizer._autofillLoginPage(fakePage, "u@e.com", "pass")
+
+
+# ---------------------------------------------------------------------------
 # scrapeGrokSavedMedia — session file behaviour
 # ---------------------------------------------------------------------------
 
@@ -1378,9 +1404,12 @@ def testScrapeGrokSavedMediaUsesSessionFileWhenPresent(
 def testScrapeGrokSavedMediaSavesSessionAfterLogin(
     confirmedOrganizer: VideoOrganizer, tmp_path: Path
 ):
-    """When no session file exists the browser is relaunched non-headless so
-    the user can log in manually, then storage_state() persists the session."""
+    """When no session file exists the browser is relaunched non-headless,
+    credentials are pre-filled via _autofillLoginPage, and storage_state()
+    persists the session."""
     sessionFile = tmp_path / "new_session.json"
+    credFile = tmp_path / "grokCredentials.json"
+    credFile.write_text(json.dumps({"username": "user@example.com", "password": "s3cr3t"}))
     assert not sessionFile.exists()
 
     fakePage = MagicMock()
@@ -1402,13 +1431,20 @@ def testScrapeGrokSavedMediaSavesSessionAfterLogin(
         patch("builtins.input", return_value=""),  # simulate user pressing Enter
     ):
         mockPW.return_value.__enter__.return_value = fakePW
-        confirmedOrganizer.scrapeGrokSavedMedia(sessionFile=sessionFile)
+        confirmedOrganizer.scrapeGrokSavedMedia(
+            sessionFile=sessionFile, credentialsFile=credFile
+        )
 
     # The browser should have been relaunched non-headless for manual login
     launch_calls = fakePW.chromium.launch.call_args_list
     assert any(
         c.kwargs.get("headless") is False for c in launch_calls
     ), "expected at least one non-headless browser launch for manual login"
+
+    # Credentials should have been pre-filled into the page
+    filled_values = [call.args[1] for call in fakePage.fill.call_args_list]
+    assert "user@example.com" in filled_values, "email not filled"
+    assert "s3cr3t" in filled_values, "password not filled"
 
     # storage_state should have been called (at least once) to save the session
     assert fakeContext.storage_state.called
