@@ -28,6 +28,7 @@ from .constants import (
     GROK_USER_CONTENT_DOMAINS,
     GROK_CREDENTIALS_FILE,
     GROK_SESSION_FILE,
+    _GROK_SAVED_URL,
     _PLAYWRIGHT_BROWSER_ARGS,
     _PLAYWRIGHT_USER_AGENT,
     _PLAYWRIGHT_INIT_SCRIPT,
@@ -639,6 +640,16 @@ class GrokMixin:
                 )
                 self._awaitManualLoginInput(page)
 
+                # Verify login completed before saving the session.
+                page.goto(_GROK_SAVED_URL, wait_until="domcontentloaded")
+                page.wait_for_timeout(1000)
+                if urllib.parse.urlparse(page.url).path != "/imagine/saved":
+                    logger.warning(
+                        f"login did not complete — still redirected to {page.url!r}; "
+                        "please restart --grok and complete the login before pressing Enter"
+                    )
+                    raise SystemExit(1)
+
                 # Persist session so the login form is never needed again.
                 sessionFile.parent.mkdir(parents=True, exist_ok=True)
                 context.storage_state(path=str(sessionFile))
@@ -658,7 +669,7 @@ class GrokMixin:
             def _navigateToSaved(pg) -> None:
                 """Attach the response listener and navigate to /imagine/saved."""
                 pg.on("response", _onResponse)
-                pg.goto("https://grok.com/imagine/saved", wait_until="domcontentloaded")
+                pg.goto(_GROK_SAVED_URL, wait_until="domcontentloaded")
                 pg.wait_for_timeout(2000)
 
             # ------------------------------------------------------------------

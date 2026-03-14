@@ -31,6 +31,9 @@ _PLAYWRIGHT_INIT_SCRIPT = (
 # username/password interaction is needed.  Delete this file to force a fresh
 # login (e.g. after a session expires or credentials change).
 GROK_SESSION_FILE = Path.home() / ".config" / "organiseMyVideo" / "grokSession.json"
+# URL of the Grok saved-images gallery — used both for navigation and as the
+# post-login verification URL.
+_GROK_SAVED_URL = "https://grok.com/imagine/saved"
 
 # Known torrent/index prefixes to strip from file and directory names
 PREFIX_PATTERNS = [

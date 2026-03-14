@@ -1911,6 +1911,49 @@ def testManualLoginExitsCleanlyIfEnterPressedWithoutLoggingIn(
     assert not fakeLoginContext.storage_state.called
 
 
+def testFreshLoginExitsCleanlyIfVerificationFails(
+    confirmedOrganizer: VideoOrganizer, tmp_path: Path
+):
+    """When there is no existing session and the user presses Enter while the
+    browser is still on the verification/login page (e.g. Cloudflare Turnstile
+    failed), the process must exit with SystemExit(1) and must NOT save an
+    unauthenticated session."""
+    sessionFile = tmp_path / "new_session.json"
+    credFile = tmp_path / "grokCredentials.json"
+    credFile.write_text(json.dumps({"username": "user@example.com", "password": "s3cr3t"}))
+    assert not sessionFile.exists()
+
+    # Login page where verification failed — stays on accounts.x.ai, not /imagine/saved
+    fakePage = MagicMock()
+    fakePage.url = "https://accounts.x.ai/sign-in?redirect=grok-com&email=true"
+    fakePage.eval_on_selector_all.return_value = []
+    fakePage.is_closed.return_value = False
+
+    fakeContext = MagicMock()
+    fakeContext.new_page.return_value = fakePage
+
+    fakeBrowser = MagicMock()
+    fakeBrowser.new_context.return_value = fakeContext
+
+    fakePW = MagicMock()
+    fakePW.chromium.launch.return_value = fakeBrowser
+
+    with (
+        patch("organiseMyVideo.grok.sync_playwright") as mockPW,
+        patch("builtins.input", return_value=""),  # simulate user pressing Enter
+    ):
+        mockPW.return_value.__enter__.return_value = fakePW
+        with pytest.raises(SystemExit) as exc_info:
+            confirmedOrganizer.scrapeGrokSavedMedia(
+                sessionFile=sessionFile, credentialsFile=credFile
+            )
+
+    assert exc_info.value.code == 1
+    # Session file must NOT have been written
+    assert not sessionFile.exists()
+    assert not fakeContext.storage_state.called
+
+
 # ---------------------------------------------------------------------------
 # resetGrokConfig
 # ---------------------------------------------------------------------------
