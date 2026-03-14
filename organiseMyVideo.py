@@ -15,6 +15,10 @@ import getpass
 import argparse
 import logging
 import datetime
+import platform
+import sqlite3
+import tempfile
+import configparser
 import urllib.parse
 import urllib.request
 
@@ -1059,6 +1063,158 @@ Errors:         {stats['errors']}
             # manual entry so the user is never blocked.
             logger.warning(f"auto-fill of login form failed ({e}); please log in manually")
 
+    def _findFirefoxProfile(self, _firefoxBase: Optional[Path] = None) -> Optional[Path]:
+        """Locate the default Firefox profile directory on the current OS.
+
+        Reads ``profiles.ini`` from the platform-specific Firefox configuration
+        directory and returns the path to the profile flagged as the default, or
+        the first ``Profile`` section found if none is explicitly defaulted.
+
+        Args:
+            _firefoxBase: Override the platform-derived Firefox base directory.
+                          Intended for unit tests only.
+
+        Returns:
+            Path to the profile directory, or None if no Firefox install is found.
+        """
+        if _firefoxBase is None:
+            system = platform.system()
+            if system == "Windows":
+                _firefoxBase = Path(os.environ.get("APPDATA", "")) / "Mozilla" / "Firefox"
+            elif system == "Darwin":
+                _firefoxBase = Path.home() / "Library" / "Application Support" / "Firefox"
+            else:
+                _firefoxBase = Path.home() / ".mozilla" / "firefox"
+
+        profilesIni = _firefoxBase / "profiles.ini"
+        if not profilesIni.exists():
+            return None
+
+        config = configparser.ConfigParser()
+        config.read(str(profilesIni))
+
+        def _resolve(section: str) -> Optional[Path]:
+            path = config.get(section, "Path", fallback=None)
+            if not path:
+                return None
+            if config.get(section, "IsRelative", fallback="0") == "1":
+                return _firefoxBase / path
+            return Path(path)
+
+        # Prefer the profile explicitly marked as the default.
+        for section in config.sections():
+            if config.get(section, "Default", fallback="0") == "1":
+                resolved = _resolve(section)
+                if resolved:
+                    return resolved
+
+        # Fall back to the first Profile section.
+        for section in config.sections():
+            if section.startswith("Profile"):
+                resolved = _resolve(section)
+                if resolved:
+                    return resolved
+
+        return None
+
+    def importFirefoxSession(
+        self,
+        sessionFile: Path = GROK_SESSION_FILE,
+        profilePath: Optional[Path] = None,
+    ) -> bool:
+        """Import Grok cookies from the user's Firefox profile.
+
+        Reads the cookies for ``grok.com`` and ``x.ai`` from Firefox's
+        ``cookies.sqlite`` database and writes them as a Playwright
+        ``storage_state`` JSON file at *sessionFile*.
+
+        This lets you authenticate the scraper by simply logging into
+        ``grok.com`` in your regular Firefox browser — no Playwright login
+        flow (and no Cloudflare Turnstile challenge) is needed.
+
+        The Firefox ``cookies.sqlite`` database is copied to a temporary file
+        before being read so that the operation is safe even when Firefox is
+        currently open.
+
+        Args:
+            sessionFile: Destination path for the Playwright storage-state JSON.
+            profilePath: Firefox profile directory.  Auto-detected from the
+                         default Firefox profile when omitted.
+
+        Returns:
+            True if cookies were found and written successfully; False otherwise.
+        """
+        if profilePath is None:
+            profilePath = self._findFirefoxProfile()
+        if profilePath is None:
+            logger.warning(
+                "could not locate a Firefox profile; skipping Firefox session import"
+            )
+            return False
+
+        cookiesDb = profilePath / "cookies.sqlite"
+        if not cookiesDb.exists():
+            logger.warning(f"Firefox cookies database not found at {cookiesDb}")
+            return False
+
+        # Copy to a temp file to avoid "database is locked" errors when Firefox
+        # is currently open and holding a write lock on cookies.sqlite.
+        tmpPath = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False) as tmp:
+                tmpPath = Path(tmp.name)
+            shutil.copy2(str(cookiesDb), str(tmpPath))
+
+            conn = sqlite3.connect(str(tmpPath))
+            cursor = conn.cursor()
+            # Match exact host 'grok.com' / 'x.ai' plus any subdomain
+            # (e.g. '.grok.com', 'accounts.x.ai').  The LIKE patterns use a
+            # leading dot/% pair so they cannot match unrelated suffixes such
+            # as 'fakegrok.com'.
+            cursor.execute(
+                """
+                SELECT name, value, host, path, expiry, isSecure, isHttpOnly, sameSite
+                FROM moz_cookies
+                WHERE host = 'grok.com'  OR host LIKE '%.grok.com'
+                   OR host = 'x.ai'      OR host LIKE '%.x.ai'
+                """
+            )
+            rows = cursor.fetchall()
+            conn.close()
+        finally:
+            if tmpPath is not None:
+                tmpPath.unlink(missing_ok=True)
+
+        if not rows:
+            logger.warning(
+                "no Grok/X.ai cookies found in Firefox profile; "
+                "please log into grok.com in Firefox first"
+            )
+            return False
+
+        # Firefox sameSite integers → Playwright string values
+        _SAMESITE = {0: "None", 1: "Lax", 2: "Strict"}
+        cookies = [
+            {
+                "name": name,
+                "value": value,
+                "domain": host,
+                "path": path,
+                "expires": expiry,
+                "httpOnly": bool(isHttpOnly),
+                "secure": bool(isSecure),
+                "sameSite": _SAMESITE.get(sameSite, "None"),
+            }
+            for name, value, host, path, expiry, isSecure, isHttpOnly, sameSite in rows
+        ]
+
+        storageState = {"cookies": cookies, "origins": []}
+        sessionFile.parent.mkdir(parents=True, exist_ok=True)
+        sessionFile.write_text(json.dumps(storageState, indent=2))
+        sessionFile.chmod(0o600)
+        logger.value(f"imported {len(cookies)} cookies from Firefox to", str(sessionFile))
+        return True
+
     def resetGrokConfig(
         self,
         sessionFile: Path = GROK_SESSION_FILE,
@@ -1164,9 +1320,27 @@ Errors:         {stats['errors']}
                 context = None
 
             if context is None:
-                # No valid session — load credentials, relaunch as non-headless,
-                # pre-fill the sign-in form, and wait for the user to complete login
-                # (e.g. solve any Cloudflare Turnstile challenge and click Login).
+                # No saved session — try importing cookies from Firefox first.
+                # This avoids the Cloudflare Turnstile challenge that fires
+                # when Playwright drives the login form directly.
+                if self.importFirefoxSession(sessionFile=sessionFile):
+                    try:
+                        context = browser.new_context(
+                            storage_state=str(sessionFile),
+                            user_agent=_PLAYWRIGHT_USER_AGENT,
+                        )
+                        context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
+                    except Exception as e:
+                        logger.warning(
+                            f"imported Firefox session could not be loaded ({e}); "
+                            "falling back to manual login"
+                        )
+                        sessionFile.unlink(missing_ok=True)
+                        context = None
+
+            if context is None:
+                # No valid session at all — relaunch as non-headless and ask the
+                # user to log in manually (Cloudflare challenge requires a human).
                 username, password = self._loadOrPromptGrokCredentials(
                     credentialsFile=credentialsFile
                 )
@@ -1221,8 +1395,8 @@ Errors:         {stats['errors']}
             # Detect session expiry: an expired (or invalid) session causes
             # Grok to redirect the browser to the login page instead of loading
             # /imagine/saved.  When that happens, wipe the stale session file,
-            # relaunch the browser as visible, pre-fill credentials, and let
-            # the user complete login.
+            # try importing a fresh Firefox session, and fall back to manual
+            # Playwright login only if the Firefox session is also unavailable.
             if urllib.parse.urlparse(page.url).path != "/imagine/saved":
                 logger.warning(
                     f"session appears expired (redirected to {page.url!r}); "
@@ -1231,29 +1405,58 @@ Errors:         {stats['errors']}
                 context.close()
                 browser.close()
                 sessionFile.unlink(missing_ok=True)
-                username, password = self._loadOrPromptGrokCredentials(
-                    credentialsFile=credentialsFile
-                )
-                browser = playwright.chromium.launch(headless=False, args=_PLAYWRIGHT_BROWSER_ARGS)
-                context = browser.new_context(user_agent=_PLAYWRIGHT_USER_AGENT)
-                context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
-                page = context.new_page()
-                page.goto("https://grok.com", wait_until="domcontentloaded")
-                self._autofillLoginPage(page, username)
-                print(
-                    "\nA browser window has opened.\n"
-                    "Your previous Grok session has expired and your email has been pre-filled.\n"
-                    "Please click Next, enter your password, complete any verification,\n"
-                    "then press Enter here to continue...",
-                    flush=True,
-                )
-                input()
-                sessionFile.parent.mkdir(parents=True, exist_ok=True)
-                context.storage_state(path=str(sessionFile))
-                if sessionFile.exists():
-                    sessionFile.chmod(0o600)
-                logger.value("saved Grok session to", str(sessionFile))
-                _navigateToSaved(page)
+
+                _ffSessionOk = False
+                if self.importFirefoxSession(sessionFile=sessionFile):
+                    try:
+                        browser = playwright.chromium.launch(headless=True, args=_PLAYWRIGHT_BROWSER_ARGS)
+                        context = browser.new_context(
+                            storage_state=str(sessionFile),
+                            user_agent=_PLAYWRIGHT_USER_AGENT,
+                        )
+                        context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
+                        page = context.new_page()
+                        _navigateToSaved(page)
+                        if urllib.parse.urlparse(page.url).path == "/imagine/saved":
+                            _ffSessionOk = True
+                        else:
+                            context.close()
+                            browser.close()
+                            sessionFile.unlink(missing_ok=True)
+                    except Exception as e:
+                        logger.warning(
+                            f"imported Firefox session could not be loaded ({e}); "
+                            "falling back to manual login"
+                        )
+                        try:
+                            browser.close()
+                        except Exception:
+                            pass
+
+                if not _ffSessionOk:
+                    username, password = self._loadOrPromptGrokCredentials(
+                        credentialsFile=credentialsFile
+                    )
+                    browser = playwright.chromium.launch(headless=False, args=_PLAYWRIGHT_BROWSER_ARGS)
+                    context = browser.new_context(user_agent=_PLAYWRIGHT_USER_AGENT)
+                    context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
+                    page = context.new_page()
+                    page.goto("https://grok.com", wait_until="domcontentloaded")
+                    self._autofillLoginPage(page, username)
+                    print(
+                        "\nA browser window has opened.\n"
+                        "Your previous Grok session has expired and your email has been pre-filled.\n"
+                        "Please click Next, enter your password, complete any verification,\n"
+                        "then press Enter here to continue...",
+                        flush=True,
+                    )
+                    input()
+                    sessionFile.parent.mkdir(parents=True, exist_ok=True)
+                    context.storage_state(path=str(sessionFile))
+                    if sessionFile.exists():
+                        sessionFile.chmod(0o600)
+                    logger.value("saved Grok session to", str(sessionFile))
+                    _navigateToSaved(page)
 
             previousLinkCount = 0
             stallCount = 0
@@ -1353,6 +1556,16 @@ def main():
         help="delete saved Grok session and credentials config files to force a fresh login on the next --grok run"
     )
     parser.add_argument(
+        "--import-firefox-session",
+        dest="import_firefox_session",
+        action="store_true",
+        help=(
+            "import Grok cookies from your Firefox profile into the saved session file — "
+            "log into grok.com/imagine/saved in Firefox first, then run this to avoid "
+            "the Cloudflare Turnstile challenge during --grok"
+        ),
+    )
+    parser.add_argument(
         "--grok",
         action="store_true",
         help="Log into Grok and download media from saved Imagine items into --source"
@@ -1405,6 +1618,23 @@ Deleted:
 Not found:
 {not_found_list}
 """
+        drawBox(summary)
+
+    elif args.import_firefox_session:
+        ok = organizer.importFirefoxSession()
+        if ok:
+            summary = (
+                f"FIREFOX SESSION IMPORTED\n"
+                f"  Session file: {GROK_SESSION_FILE}\n\n"
+                f"Run --grok to start scraping."
+            )
+        else:
+            summary = (
+                "FIREFOX SESSION IMPORT FAILED\n\n"
+                "Make sure you are logged into grok.com in Firefox,\n"
+                "then run --import-firefox-session again.\n\n"
+                "Alternatively, run --grok and log in via the browser window."
+            )
         drawBox(summary)
 
     elif args.grok:

@@ -2,6 +2,7 @@
 
 import json
 import shutil
+import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -1361,6 +1362,221 @@ def testAutofillLoginPageFallsBackGracefullyOnError(organizer: VideoOrganizer):
     fakePage.wait_for_selector.side_effect = Exception("timeout waiting for selector")
     # Should not raise
     organizer._autofillLoginPage(fakePage, "u@e.com")
+
+
+# ---------------------------------------------------------------------------
+# _findFirefoxProfile
+# ---------------------------------------------------------------------------
+
+
+def _make_firefox_base(tmp_path: Path, profiles: list) -> Path:
+    """Create a minimal Firefox profile directory tree under tmp_path.
+
+    Each entry in *profiles* is a dict with keys:
+        section (str): ConfigParser section name, e.g. "Profile0"
+        path    (str): value for the Path key
+        relative (bool): whether IsRelative should be "1" (default True)
+        default  (bool): whether to add Default=1 (default False)
+    """
+    import configparser
+
+    base = tmp_path / "firefox"
+    base.mkdir()
+    config = configparser.ConfigParser()
+    for p in profiles:
+        section = p["section"]
+        config[section] = {"Path": p["path"]}
+        if p.get("relative", True):
+            config[section]["IsRelative"] = "1"
+            (base / p["path"]).mkdir(parents=True, exist_ok=True)
+        if p.get("default", False):
+            config[section]["Default"] = "1"
+    with open(base / "profiles.ini", "w") as f:
+        config.write(f)
+    return base
+
+
+def testFindFirefoxProfileReturnsDefaultProfile(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """The section with Default=1 is returned ahead of any other Profile section."""
+    base = _make_firefox_base(
+        tmp_path,
+        [
+            {"section": "Profile0", "path": "profiles/other"},
+            {"section": "Profile1", "path": "profiles/default", "default": True},
+        ],
+    )
+    result = organizer._findFirefoxProfile(_firefoxBase=base)
+    assert result == base / "profiles/default"
+
+
+def testFindFirefoxProfileReturnsFallbackProfile(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """When no Default=1 is set, the first Profile section is returned."""
+    base = _make_firefox_base(
+        tmp_path,
+        [{"section": "Profile0", "path": "profiles/first"}],
+    )
+    result = organizer._findFirefoxProfile(_firefoxBase=base)
+    assert result == base / "profiles/first"
+
+
+def testFindFirefoxProfileReturnsNoneWhenNoIni(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """None is returned when profiles.ini does not exist."""
+    base = tmp_path / "firefox_missing"
+    result = organizer._findFirefoxProfile(_firefoxBase=base)
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# importFirefoxSession
+# ---------------------------------------------------------------------------
+
+
+def _make_firefox_cookies_db(profile_dir: Path, cookies: list) -> None:
+    """Create a minimal Firefox moz_cookies SQLite database.
+
+    Each entry in *cookies* is a tuple:
+        (name, value, host, path, expiry, isSecure, isHttpOnly, sameSite)
+    """
+    db_path = profile_dir / "cookies.sqlite"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        """
+        CREATE TABLE moz_cookies (
+            name TEXT, value TEXT, host TEXT, path TEXT,
+            expiry INTEGER, isSecure INTEGER, isHttpOnly INTEGER, sameSite INTEGER
+        )
+        """
+    )
+    conn.executemany("INSERT INTO moz_cookies VALUES (?,?,?,?,?,?,?,?)", cookies)
+    conn.commit()
+    conn.close()
+
+
+def testImportFirefoxSessionWritesStorageState(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """Cookies for grok.com are read and written as a Playwright storage-state JSON."""
+    profileDir = tmp_path / "profile"
+    profileDir.mkdir()
+    _make_firefox_cookies_db(
+        profileDir,
+        [
+            ("session_id", "abc123", "grok.com", "/", 9999999999, 1, 1, 1),
+            ("auth_token", "tok456", ".grok.com", "/", 9999999999, 1, 0, 0),
+        ],
+    )
+    sessionFile = tmp_path / "session.json"
+
+    result = organizer.importFirefoxSession(sessionFile=sessionFile, profilePath=profileDir)
+
+    assert result is True
+    assert sessionFile.exists()
+    state = json.loads(sessionFile.read_text())
+    assert "cookies" in state
+    names = {c["name"] for c in state["cookies"]}
+    assert "session_id" in names
+    assert "auth_token" in names
+    # sameSite values should be mapped to Playwright strings
+    for cookie in state["cookies"]:
+        assert cookie["sameSite"] in {"None", "Lax", "Strict"}
+
+
+def testImportFirefoxSessionReturnsFalseWhenNoCookiesDbFile(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """False is returned when the profile directory has no cookies.sqlite."""
+    profileDir = tmp_path / "profile"
+    profileDir.mkdir()
+    sessionFile = tmp_path / "session.json"
+
+    result = organizer.importFirefoxSession(sessionFile=sessionFile, profilePath=profileDir)
+
+    assert result is False
+    assert not sessionFile.exists()
+
+
+def testImportFirefoxSessionReturnsFalseWhenNoGrokCookies(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """False is returned when cookies.sqlite exists but has no grok.com/x.ai rows."""
+    profileDir = tmp_path / "profile"
+    profileDir.mkdir()
+    _make_firefox_cookies_db(
+        profileDir,
+        [("unrelated", "val", "example.com", "/", 9999999999, 0, 0, 0)],
+    )
+    sessionFile = tmp_path / "session.json"
+
+    result = organizer.importFirefoxSession(sessionFile=sessionFile, profilePath=profileDir)
+
+    assert result is False
+    assert not sessionFile.exists()
+
+
+def testImportFirefoxSessionReturnsFalseWhenNoProfile(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """False is returned when no Firefox profile can be located."""
+    sessionFile = tmp_path / "session.json"
+    # Patch _findFirefoxProfile to return None (no Firefox installed)
+    with patch.object(organizer, "_findFirefoxProfile", return_value=None):
+        result = organizer.importFirefoxSession(sessionFile=sessionFile)
+
+    assert result is False
+    assert not sessionFile.exists()
+
+
+# ---------------------------------------------------------------------------
+# scrapeGrokSavedMedia — Firefox session auto-import
+# ---------------------------------------------------------------------------
+
+
+def testScrapeGrokSavedMediaUsesFirefoxSessionWhenAvailable(
+    confirmedOrganizer: VideoOrganizer, tmp_path: Path
+):
+    """When importFirefoxSession succeeds, the scraper uses the imported session
+    and does NOT fall back to opening a visible Playwright browser window."""
+    sessionFile = tmp_path / "grokSession.json"
+    assert not sessionFile.exists()
+
+    fakePage = MagicMock()
+    fakePage.url = "https://grok.com/imagine/saved"
+    fakePage.eval_on_selector_all.return_value = []
+
+    fakeContext = MagicMock()
+    fakeContext.new_page.return_value = fakePage
+    fakeContext.storage_state.return_value = None
+
+    fakeBrowser = MagicMock()
+    fakeBrowser.new_context.return_value = fakeContext
+
+    fakePW = MagicMock()
+    fakePW.chromium.launch.return_value = fakeBrowser
+
+    def _fake_import(sessionFile=None, profilePath=None):
+        """Simulate a successful Firefox import by writing a minimal session file."""
+        sessionFile.write_text(json.dumps({"cookies": [], "origins": []}))
+        return True
+
+    with (
+        patch("organiseMyVideo.sync_playwright") as mockPW,
+        patch.object(confirmedOrganizer, "importFirefoxSession", side_effect=_fake_import),
+    ):
+        mockPW.return_value.__enter__.return_value = fakePW
+        confirmedOrganizer.scrapeGrokSavedMedia(sessionFile=sessionFile)
+
+    # The browser should only have been launched headless (the Firefox import path)
+    # — no non-headless launch for manual login.
+    launch_calls = fakePW.chromium.launch.call_args_list
+    assert all(
+        c.kwargs.get("headless") is not False for c in launch_calls
+    ), "browser should only be launched in headless mode when a Firefox session is available"
 
 
 # ---------------------------------------------------------------------------
