@@ -239,30 +239,54 @@ class GrokMixin:
             # manual entry so the user is never blocked.
             logger.warning(f"auto-fill of login form failed ({e}); please log in manually")
 
-    def _findFirefoxProfile(self, _firefoxBase: Optional[Path] = None) -> Optional[Path]:
-        """Locate the default Firefox profile directory on the current OS.
+    @staticmethod
+    def _firefoxBaseCandidates(system: str) -> List[Path]:
+        """Return candidate Firefox base directories for the given OS, in priority order.
 
-        Reads ``profiles.ini`` from the platform-specific Firefox configuration
-        directory and returns the path to the profile flagged as the default, or
-        the first ``Profile`` section found if none is explicitly defaulted.
+        On Linux, multiple installation methods are covered:
+
+        * Traditional package-manager install (``~/.mozilla/firefox``)
+        * Ubuntu/Debian Snap package (``~/snap/firefox/common/.mozilla/firefox``
+          and ``~/snap/firefox/current/.mozilla/firefox``)
+        * Flatpak (``~/.var/app/org.mozilla.firefox/.mozilla/firefox``)
+        """
+        home = Path.home()
+        if system == "Windows":
+            appdata = os.environ.get("APPDATA")
+            if not appdata:
+                return []
+            return [Path(appdata) / "Mozilla" / "Firefox"]
+        if system == "Darwin":
+            return [home / "Library" / "Application Support" / "Firefox"]
+        # Linux — try all common install locations
+        return [
+            home / ".mozilla" / "firefox",
+            home / "snap" / "firefox" / "common" / ".mozilla" / "firefox",
+            home / "snap" / "firefox" / "current" / ".mozilla" / "firefox",
+            home / ".var" / "app" / "org.mozilla.firefox" / ".mozilla" / "firefox",
+        ]
+
+    @staticmethod
+    def _findProfileInBase(
+        firefoxBase: Path, requireCookies: bool = False
+    ) -> Optional[Path]:
+        """Return the best profile directory found under *firefoxBase*.
+
+        Reads ``profiles.ini`` and returns the profile marked ``Default=1``,
+        or the first ``Profile`` section if none is flagged.  When
+        *requireCookies* is ``True`` the profile is only returned if it
+        contains ``cookies.sqlite``.
 
         Args:
-            _firefoxBase: Override the platform-derived Firefox base directory.
-                          Intended for unit tests only.
+            firefoxBase: Firefox configuration base directory (containing
+                         ``profiles.ini``).
+            requireCookies: When ``True``, only return a profile that has a
+                            ``cookies.sqlite`` file.
 
         Returns:
-            Path to the profile directory, or None if no Firefox install is found.
+            Path to the profile directory, or ``None``.
         """
-        if _firefoxBase is None:
-            system = platform.system()
-            if system == "Windows":
-                _firefoxBase = Path(os.environ.get("APPDATA", "")) / "Mozilla" / "Firefox"
-            elif system == "Darwin":
-                _firefoxBase = Path.home() / "Library" / "Application Support" / "Firefox"
-            else:
-                _firefoxBase = Path.home() / ".mozilla" / "firefox"
-
-        profilesIni = _firefoxBase / "profiles.ini"
+        profilesIni = firefoxBase / "profiles.ini"
         if not profilesIni.exists():
             return None
 
@@ -274,22 +298,85 @@ class GrokMixin:
             if not path:
                 return None
             if config.get(section, "IsRelative", fallback="0") == "1":
-                return _firefoxBase / path
+                return firefoxBase / path
             return Path(path)
+
+        def _accept(p: Optional[Path]) -> bool:
+            if p is None:
+                return False
+            if requireCookies:
+                return (p / "cookies.sqlite").exists()
+            return True
 
         # Prefer the profile explicitly marked as the default.
         for section in config.sections():
             if config.get(section, "Default", fallback="0") == "1":
                 resolved = _resolve(section)
-                if resolved:
+                if _accept(resolved):
                     return resolved
 
         # Fall back to the first Profile section.
         for section in config.sections():
             if section.startswith("Profile"):
                 resolved = _resolve(section)
-                if resolved:
+                if _accept(resolved):
                     return resolved
+
+        return None
+
+    def _findFirefoxProfile(self, _firefoxBase: Optional[Path] = None) -> Optional[Path]:
+        """Locate the best Firefox profile directory on the current OS.
+
+        When *_firefoxBase* is provided (unit-test override), that single base
+        directory is searched and its profile returned.
+
+        Otherwise, all platform-appropriate Firefox install locations are
+        searched (see :meth:`_firefoxBaseCandidates`).  Within each candidate
+        base the search runs in two passes:
+
+        1. **With cookies** — prefer any profile that already has
+           ``cookies.sqlite`` (meaning the user has actually browsed with it).
+           The candidate with the most recently modified ``cookies.sqlite``
+           wins, so if both a traditional and Snap install are present the one
+           the user actively uses is selected.
+        2. **Without cookies** — fall back to the default/first profile even if
+           ``cookies.sqlite`` is absent, so the existing warning message in
+           :meth:`importFirefoxSession` is still shown.
+
+        Args:
+            _firefoxBase: Override the candidate list with a single base
+                          directory.  Intended for unit tests only.
+
+        Returns:
+            Path to the best profile directory, or ``None`` if no Firefox
+            install is found.
+        """
+        if _firefoxBase is not None:
+            # Unit-test fast path: single base, no cookies preference.
+            return self._findProfileInBase(_firefoxBase)
+
+        candidates = self._firefoxBaseCandidates(platform.system())
+
+        # Pass 1: prefer profile that has cookies.sqlite, picking the most
+        # recently modified one so the actively-used install wins.
+        best: Optional[Path] = None
+        bestMtime: float = -1.0
+        for base in candidates:
+            profile = self._findProfileInBase(base, requireCookies=True)
+            if profile is not None:
+                mtime = (profile / "cookies.sqlite").stat().st_mtime
+                if mtime > bestMtime:
+                    bestMtime = mtime
+                    best = profile
+        if best is not None:
+            return best
+
+        # Pass 2: no profile with cookies found — return the default/first
+        # profile from the first candidate that has profiles.ini.
+        for base in candidates:
+            profile = self._findProfileInBase(base)
+            if profile is not None:
+                return profile
 
         return None
 

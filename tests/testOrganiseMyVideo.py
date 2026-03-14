@@ -1432,6 +1432,118 @@ def testFindFirefoxProfileReturnsNoneWhenNoIni(
     assert result is None
 
 
+def testFindFirefoxProfilePrefersProfileWithCookies(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """When multiple candidate bases exist, the profile that has cookies.sqlite
+    is preferred over one without — even when the empty profile is the 'default'."""
+    import configparser as cp
+    home = tmp_path
+
+    # Traditional install: has profiles.ini + default profile, but NO cookies.sqlite.
+    tradBase = home / ".mozilla" / "firefox"
+    tradBase.mkdir(parents=True, exist_ok=True)
+    ini = cp.ConfigParser()
+    ini["Profile0"] = {"Path": "default", "IsRelative": "1", "Default": "1"}
+    tradProfileDir = tradBase / "default"
+    tradProfileDir.mkdir(parents=True, exist_ok=True)
+    with open(tradBase / "profiles.ini", "w") as f:
+        ini.write(f)
+    # No cookies.sqlite in tradProfileDir.
+
+    # Snap install: has profiles.ini + profile WITH cookies.sqlite.
+    snapBase = home / "snap" / "firefox" / "common" / ".mozilla" / "firefox"
+    snapBase.mkdir(parents=True, exist_ok=True)
+    ini2 = cp.ConfigParser()
+    ini2["Profile0"] = {"Path": "snap-profile", "IsRelative": "1"}
+    snapProfileDir = snapBase / "snap-profile"
+    snapProfileDir.mkdir(parents=True, exist_ok=True)
+    (snapProfileDir / "cookies.sqlite").write_bytes(b"")  # exists
+    with open(snapBase / "profiles.ini", "w") as f:
+        ini2.write(f)
+
+    with patch("organiseMyVideo.grok.Path.home", return_value=home):
+        result = organizer._findFirefoxProfile()
+
+    assert result == snapProfileDir, (
+        "should prefer the Snap profile that has cookies.sqlite over "
+        "the traditional profile that does not"
+    )
+
+
+def testFindFirefoxProfileFallsBackToFirstCandidateWhenNoCookies(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """When no candidate base has cookies.sqlite, the default profile from the
+    first valid candidate base is returned."""
+    home = tmp_path
+
+    # Only the traditional install exists, and its profile has no cookies.sqlite.
+    tradBase = home / ".mozilla" / "firefox"
+    tradBase.mkdir(parents=True, exist_ok=True)
+    import configparser as cp
+    ini = cp.ConfigParser()
+    ini["Profile0"] = {"Path": "default-profile", "IsRelative": "1", "Default": "1"}
+    profileDir = tradBase / "default-profile"
+    profileDir.mkdir(parents=True, exist_ok=True)
+    with open(tradBase / "profiles.ini", "w") as f:
+        ini.write(f)
+    # No cookies.sqlite — should still return the profile.
+
+    with patch("organiseMyVideo.grok.Path.home", return_value=home):
+        result = organizer._findFirefoxProfile()
+
+    assert result == profileDir
+
+
+def testFindFirefoxProfileReturnsNoneWhenNoInstallFound(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """None is returned when none of the candidate bases contain profiles.ini."""
+    home = tmp_path  # empty — no Firefox directories exist
+    with patch("organiseMyVideo.grok.Path.home", return_value=home):
+        result = organizer._findFirefoxProfile()
+    assert result is None
+
+
+def testFindFirefoxProfilePicksMostRecentCookies(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """When two installs both have cookies.sqlite, the one with the most
+    recently modified file is preferred (the actively-used install)."""
+    import os
+    import time
+    import configparser as cp
+    home = tmp_path
+
+    def _makeInstall(base: Path, profile_name: str, cookies_mtime: float) -> Path:
+        base.mkdir(parents=True, exist_ok=True)
+        ini = cp.ConfigParser()
+        ini["Profile0"] = {"Path": profile_name, "IsRelative": "1", "Default": "1"}
+        profileDir = base / profile_name
+        profileDir.mkdir(parents=True, exist_ok=True)
+        db = profileDir / "cookies.sqlite"
+        db.write_bytes(b"")
+        os.utime(str(db), (cookies_mtime, cookies_mtime))
+        with open(base / "profiles.ini", "w") as f:
+            ini.write(f)
+        return profileDir
+
+    old_time = time.time() - 3600  # 1 hour ago
+    new_time = time.time()         # now
+
+    tradBase = home / ".mozilla" / "firefox"
+    snapBase = home / "snap" / "firefox" / "common" / ".mozilla" / "firefox"
+
+    _makeInstall(tradBase, "old-profile", old_time)
+    snapProfile = _makeInstall(snapBase, "new-profile", new_time)
+
+    with patch("organiseMyVideo.grok.Path.home", return_value=home):
+        result = organizer._findFirefoxProfile()
+
+    assert result == snapProfile, "should pick the install with the newer cookies.sqlite"
+
+
 # ---------------------------------------------------------------------------
 # importFirefoxSession
 # ---------------------------------------------------------------------------
