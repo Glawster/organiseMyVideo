@@ -57,3 +57,4 @@ class VideoOrganizer(VideoMixin, TorrentMixin, GrokMixin):
         """
         self.sourceDir = Path(sourceDir)
         self.dryRun = dryRun
+        self._promptHelpDisplayed = False
