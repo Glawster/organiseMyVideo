@@ -210,29 +210,33 @@ class GrokMixin:
         logger.value("saved grok credentials to", str(credentialsFile))
         return username, password
 
-    def _autofillLoginPage(self, page, username: str) -> None:
-        """Pre-fill the email field on the X.ai sign-in form.
+    def _autofillLoginPage(self, page, username: str, password: str) -> None:
+        """Pre-fill the email and password fields on the X.ai sign-in form.
 
-        Only the email address is filled automatically.  Clicking Next,
-        entering the password, and clicking Login are all intentionally left
-        for the user so that Cloudflare Turnstile's human-verification
-        challenge is triggered by real human navigation rather than automated
-        page transitions — automating those clicks causes Turnstile error
-        600010 (unsupported browser / bot detected).
+        Fills the email, clicks Next, waits for the password field, then fills
+        the password.  The Login button is intentionally left for the user to
+        click so that Cloudflare Turnstile's human-verification challenge is
+        triggered by real human interaction.
 
-        Silently degrades to a warning log if the email field is not found
-        within the timeout so the user can still log in manually.
+        Silently degrades to a warning log if any selector is not found so the
+        user can still log in manually.
 
         Args:
             page: Playwright Page instance on the X.ai sign-in page.
             username: Email address to pre-fill.
+            password: Password to pre-fill after clicking Next.
         """
         EMAIL_SELECTOR = "input[type='email'], input[autocomplete='username'], input[name='email']"
+        NEXT_SELECTOR = "button[type='submit'], button:has-text('Next')"
+        PASSWORD_SELECTOR = "input[type='password']"
         SELECTOR_TIMEOUT = 10_000
         try:
             page.wait_for_selector(EMAIL_SELECTOR, timeout=SELECTOR_TIMEOUT)
             page.fill(EMAIL_SELECTOR, username)
-            logger.info("email pre-filled — please click Next, enter your password, and log in")
+            page.click(NEXT_SELECTOR)
+            page.wait_for_selector(PASSWORD_SELECTOR, timeout=SELECTOR_TIMEOUT)
+            page.fill(PASSWORD_SELECTOR, password)
+            logger.info("email and password pre-filled — please click Login and complete any verification")
         except Exception as e:
             # Broad catch is intentional: Playwright raises various exception
             # types depending on the failure (timeout, missing element, navigation
@@ -631,10 +635,10 @@ class GrokMixin:
                 context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
                 page = context.new_page()
                 page.goto("https://grok.com", wait_until="domcontentloaded")
-                self._autofillLoginPage(page, username)
+                self._autofillLoginPage(page, username, password)
                 print(
-                    "\nA browser window has opened and your email has been pre-filled.\n"
-                    "Please click Next, enter your password, complete any verification,\n"
+                    "\nA browser window has opened and your credentials have been pre-filled.\n"
+                    "Please click Login, complete any verification,\n"
                     "then press Enter here to continue...",
                     flush=True,
                 )
@@ -733,11 +737,11 @@ class GrokMixin:
                     context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
                     page = context.new_page()
                     page.goto("https://grok.com", wait_until="domcontentloaded")
-                    self._autofillLoginPage(page, username)
+                    self._autofillLoginPage(page, username, password)
                     print(
-                        "\nA browser window has opened.\n"
-                        "Your previous Grok session has expired and your email has been pre-filled.\n"
-                        "Please click Next, enter your password, complete any verification,\n"
+                        "\nA browser window has opened and your credentials have been pre-filled.\n"
+                        "Your previous Grok session has expired.\n"
+                        "Please click Login, complete any verification,\n"
                         "then press Enter here to continue...",
                         flush=True,
                     )

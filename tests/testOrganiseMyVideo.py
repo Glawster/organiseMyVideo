@@ -1342,18 +1342,18 @@ def testLoadOrPromptGrokCredentialsPromptsWhenFileIncomplete(
 # ---------------------------------------------------------------------------
 
 
-def testAutofillLoginPageFillsEmailOnly(organizer: VideoOrganizer):
-    """Only the email field is filled — Next click and password are left for the user
-    so that Cloudflare Turnstile sees a real human interaction."""
+def testAutofillLoginPageFillsEmailAndPassword(organizer: VideoOrganizer):
+    """Both email and password are filled and Next is clicked; Login is left for the user
+    so that Cloudflare Turnstile sees a real human clicking it."""
     fakePage = MagicMock()
-    organizer._autofillLoginPage(fakePage, "user@example.com")
+    organizer._autofillLoginPage(fakePage, "user@example.com", "s3cr3t")
 
     # page.fill(selector, value) — check the value argument (index 1) of each call
     filled_values = [call.args[1] for call in fakePage.fill.call_args_list]
     assert "user@example.com" in filled_values, "email not filled"
-    assert "s3cr3t" not in filled_values, "password must not be filled automatically"
-    # Next/submit button must NOT be clicked automatically
-    fakePage.click.assert_not_called()
+    assert "s3cr3t" in filled_values, "password not filled"
+    # Next button must have been clicked; Login must NOT be clicked automatically
+    fakePage.click.assert_called_once()
 
 
 def testAutofillLoginPageFallsBackGracefullyOnError(organizer: VideoOrganizer):
@@ -1361,7 +1361,7 @@ def testAutofillLoginPageFallsBackGracefullyOnError(organizer: VideoOrganizer):
     fakePage = MagicMock()
     fakePage.wait_for_selector.side_effect = Exception("timeout waiting for selector")
     # Should not raise
-    organizer._autofillLoginPage(fakePage, "u@e.com")
+    organizer._autofillLoginPage(fakePage, "u@e.com", "p@ssw0rd")
 
 
 # ---------------------------------------------------------------------------
@@ -1799,10 +1799,10 @@ def testScrapeGrokSavedMediaSavesSessionAfterLogin(
         c.kwargs.get("headless") is False for c in launch_calls
     ), "expected at least one non-headless browser launch for manual login"
 
-    # Only email should have been pre-filled; password is left for the user
+    # Both email and password should have been pre-filled
     filled_values = [call.args[1] for call in fakePage.fill.call_args_list]
     assert "user@example.com" in filled_values, "email not filled"
-    assert "s3cr3t" not in filled_values, "password must not be filled automatically"
+    assert "s3cr3t" in filled_values, "password not filled"
 
     # storage_state should have been called (at least once) to save the session
     assert fakeContext.storage_state.called
