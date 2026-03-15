@@ -210,6 +210,43 @@ class GrokMixin:
         logger.value("saved grok credentials to", str(credentialsFile))
         return username, password
 
+    @staticmethod
+    def _sanitizeStorageState(sessionFile: Path) -> None:
+        """Fix cookie ``expires`` values in a Playwright storage-state JSON file.
+
+        Playwright requires cookie ``expires`` to be either ``-1`` (session
+        cookie / no expiry) or a **positive integer** (Unix timestamp in
+        seconds).  Values that are invalid — ``0``, ``null``, other negative
+        numbers, or non-integer floats — cause ``new_context()`` to raise:
+
+        ``Error setting storage state: Cookie should have a valid expires``
+
+        This helper reads the file, normalises every cookie's ``expires``
+        in-place, and writes the file back.  It is called immediately after
+        writing any session file and again just before loading it, so that
+        sessions written by an older version of Playwright (which emitted
+        ``0`` for session cookies) are also fixed transparently.
+
+        Args:
+            sessionFile: Path to the Playwright storage-state JSON file to fix.
+        """
+        try:
+            data = json.loads(sessionFile.read_text())
+        except Exception:
+            return  # file missing or unparseable — caller will handle the error
+        changed = False
+        for cookie in data.get("cookies", []):
+            raw = cookie.get("expires")
+            if raw is None or raw == 0 or (isinstance(raw, (int, float)) and raw < 0 and raw != -1):
+                cookie["expires"] = -1
+                changed = True
+            elif isinstance(raw, float) and raw != int(raw):
+                # Truncate fractional seconds to a plain integer
+                cookie["expires"] = int(raw)
+                changed = True
+        if changed:
+            sessionFile.write_text(json.dumps(data, indent=2))
+
     def _autofillLoginPage(self, page, username: str, password: str) -> None:
         """Pre-fill the email and password fields on the X.ai sign-in form.
 
@@ -497,6 +534,7 @@ class GrokMixin:
         sessionFile.parent.mkdir(parents=True, exist_ok=True)
         sessionFile.write_text(json.dumps(storageState, indent=2))
         sessionFile.chmod(0o600)
+        self._sanitizeStorageState(sessionFile)
         logger.value(f"imported {len(cookies)} cookies from Firefox to", str(sessionFile))
         return True
 
@@ -592,6 +630,7 @@ class GrokMixin:
             if sessionFile.exists():
                 try:
                     logger.info("loading saved Grok session")
+                    self._sanitizeStorageState(sessionFile)
                     context = browser.new_context(
                         storage_state=str(sessionFile),
                         user_agent=_PLAYWRIGHT_USER_AGENT,
@@ -610,6 +649,7 @@ class GrokMixin:
                 # when Playwright drives the login form directly.
                 if self.importFirefoxSession(sessionFile=sessionFile):
                     try:
+                        self._sanitizeStorageState(sessionFile)
                         context = browser.new_context(
                             storage_state=str(sessionFile),
                             user_agent=_PLAYWRIGHT_USER_AGENT,
@@ -659,6 +699,7 @@ class GrokMixin:
                 context.storage_state(path=str(sessionFile))
                 if sessionFile.exists():
                     sessionFile.chmod(0o600)
+                    self._sanitizeStorageState(sessionFile)
                 logger.value("saved Grok session to", str(sessionFile))
             else:
                 page = context.new_page()
@@ -705,6 +746,7 @@ class GrokMixin:
                 if self.importFirefoxSession(sessionFile=sessionFile):
                     try:
                         browser = playwright.chromium.launch(headless=True, args=_PLAYWRIGHT_BROWSER_ARGS)
+                        self._sanitizeStorageState(sessionFile)
                         context = browser.new_context(
                             storage_state=str(sessionFile),
                             user_agent=_PLAYWRIGHT_USER_AGENT,
@@ -757,6 +799,7 @@ class GrokMixin:
                     context.storage_state(path=str(sessionFile))
                     if sessionFile.exists():
                         sessionFile.chmod(0o600)
+                        self._sanitizeStorageState(sessionFile)
                     logger.value("saved Grok session to", str(sessionFile))
 
             previousLinkCount = 0
@@ -806,6 +849,8 @@ class GrokMixin:
 
             # Refresh the session on disk so it stays current.
             context.storage_state(path=str(sessionFile))
+            if sessionFile.exists():
+                self._sanitizeStorageState(sessionFile)
 
             if not postUrls:
                 logger.warning(

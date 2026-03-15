@@ -1338,6 +1338,62 @@ def testLoadOrPromptGrokCredentialsPromptsWhenFileIncomplete(
 
 
 # ---------------------------------------------------------------------------
+# _sanitizeStorageState
+# ---------------------------------------------------------------------------
+
+
+def testSanitizeStorageStateConvertsZeroExpiresToMinusOne(tmp_path, organizer: VideoOrganizer):
+    """expires: 0 must be normalised to -1 (Playwright rejects 0)."""
+    f = tmp_path / "session.json"
+    f.write_text(json.dumps({"cookies": [{"name": "a", "expires": 0}], "origins": []}))
+    organizer._sanitizeStorageState(f)
+    data = json.loads(f.read_text())
+    assert data["cookies"][0]["expires"] == -1
+
+
+def testSanitizeStorageStateConvertsNullExpiresToMinusOne(tmp_path, organizer: VideoOrganizer):
+    """expires: null must be normalised to -1."""
+    f = tmp_path / "session.json"
+    f.write_text(json.dumps({"cookies": [{"name": "a", "expires": None}], "origins": []}))
+    organizer._sanitizeStorageState(f)
+    data = json.loads(f.read_text())
+    assert data["cookies"][0]["expires"] == -1
+
+
+def testSanitizeStorageStateConvertsNegativeExpiresToMinusOne(tmp_path, organizer: VideoOrganizer):
+    """expires: -999 must be normalised to -1 (only -1 is a valid sentinel)."""
+    f = tmp_path / "session.json"
+    f.write_text(json.dumps({"cookies": [{"name": "a", "expires": -999}], "origins": []}))
+    organizer._sanitizeStorageState(f)
+    data = json.loads(f.read_text())
+    assert data["cookies"][0]["expires"] == -1
+
+
+def testSanitizeStorageStateTruncatesFloatExpires(tmp_path, organizer: VideoOrganizer):
+    """expires with a fractional part should be truncated to int."""
+    f = tmp_path / "session.json"
+    f.write_text(json.dumps({"cookies": [{"name": "a", "expires": 1700000000.9}], "origins": []}))
+    organizer._sanitizeStorageState(f)
+    data = json.loads(f.read_text())
+    assert data["cookies"][0]["expires"] == 1700000000
+
+
+def testSanitizeStorageStatePreservesValidExpires(tmp_path, organizer: VideoOrganizer):
+    """Valid expires (-1 or positive integer) must be left unchanged."""
+    f = tmp_path / "session.json"
+    f.write_text(json.dumps({"cookies": [{"name": "a", "expires": -1}, {"name": "b", "expires": 1700000000}], "origins": []}))
+    organizer._sanitizeStorageState(f)
+    data = json.loads(f.read_text())
+    assert data["cookies"][0]["expires"] == -1
+    assert data["cookies"][1]["expires"] == 1700000000
+
+
+def testSanitizeStorageStateHandlesMissingFile(tmp_path, organizer: VideoOrganizer):
+    """A missing file must not raise — caller will handle the downstream error."""
+    organizer._sanitizeStorageState(tmp_path / "nonexistent.json")  # should not raise
+
+
+# ---------------------------------------------------------------------------
 # _autofillLoginPage
 # ---------------------------------------------------------------------------
 
