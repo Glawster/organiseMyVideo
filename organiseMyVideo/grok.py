@@ -240,8 +240,10 @@ class GrokMixin:
             if raw is None or raw == 0 or (isinstance(raw, (int, float)) and raw < 0 and raw != -1):
                 cookie["expires"] = -1
                 changed = True
-            elif isinstance(raw, float) and raw != int(raw):
-                # Truncate fractional seconds to a plain integer
+            elif isinstance(raw, float):
+                # Convert any float (whole-number or fractional) to int.
+                # json.dumps serialises 1742000000.0 as "1742000000.0" which
+                # Playwright rejects — it requires a plain JSON integer.
                 cookie["expires"] = int(raw)
                 changed = True
         if changed:
@@ -522,7 +524,10 @@ class GrokMixin:
                 "path": path,
                 # Firefox stores session cookies (no expiry) with expiry=0.
                 # Playwright requires -1 for "no expiry"; 0 is rejected.
-                "expires": expiry if expiry > 0 else -1,
+                # SQLite may return INTEGER columns as Python floats when stored
+                # as REAL affinity — always cast to int so JSON never writes
+                # "1742000000.0", which Playwright also rejects.
+                "expires": int(expiry) if expiry > 0 else -1,
                 "httpOnly": bool(isHttpOnly),
                 "secure": bool(isSecure),
                 "sameSite": _SAMESITE.get(sameSite, "None"),

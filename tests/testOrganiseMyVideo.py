@@ -1378,6 +1378,22 @@ def testSanitizeStorageStateTruncatesFloatExpires(tmp_path, organizer: VideoOrga
     assert data["cookies"][0]["expires"] == 1700000000
 
 
+def testSanitizeStorageStateConvertsWholeNumberFloatToInt(tmp_path, organizer: VideoOrganizer):
+    """expires as a whole-number float (e.g. 1742000000.0) must be converted to int.
+
+    SQLite may return INTEGER columns as Python floats; json.dumps then writes
+    '1742000000.0' which Playwright rejects even though the numeric value is
+    valid.  The sanitizer must convert ALL floats, not just fractional ones.
+    """
+    f = tmp_path / "session.json"
+    # Write the raw float string directly so json.loads returns a float
+    f.write_text('{"cookies": [{"name": "a", "expires": 1742000000.0}], "origins": []}')
+    organizer._sanitizeStorageState(f)
+    data = json.loads(f.read_text())
+    assert isinstance(data["cookies"][0]["expires"], int)
+    assert data["cookies"][0]["expires"] == 1742000000
+
+
 def testSanitizeStorageStatePreservesValidExpires(tmp_path, organizer: VideoOrganizer):
     """Valid expires (-1 or positive integer) must be left unchanged."""
     f = tmp_path / "session.json"
@@ -1681,6 +1697,47 @@ def testImportFirefoxSessionMapsZeroExpiryToMinusOne(
     assert cookies["session_cookie"]["expires"] == -1
     # Persistent cookie: positive expiry must pass through unchanged
     assert cookies["persistent_cookie"]["expires"] == 9999999999
+
+
+def testImportFirefoxSessionConvertsFloatExpiryToInt(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """SQLite may return INTEGER columns as Python floats (REAL affinity).
+
+    json.dumps serialises 1742000000.0 as '1742000000.0', which Playwright
+    rejects.  importFirefoxSession must write a plain JSON integer.
+    """
+    profileDir = tmp_path / "profile"
+    profileDir.mkdir()
+    db_path = profileDir / "cookies.sqlite"
+    # Use a REAL column type to force SQLite to return Python floats, simulating
+    # the REAL-affinity storage that can occur even in INTEGER columns due to
+    # SQLite's dynamic typing.  This reproduces the bug where json.dumps writes
+    # '1742000000.0' instead of '1742000000', which Playwright rejects.
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        """
+        CREATE TABLE moz_cookies (
+            name TEXT, value TEXT, host TEXT, path TEXT,
+            expiry REAL, isSecure INTEGER, isHttpOnly INTEGER, sameSite INTEGER
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO moz_cookies VALUES (?,?,?,?,?,?,?,?)",
+        ("float_cookie", "v", "grok.com", "/", 1742000000.0, 1, 0, 0),
+    )
+    conn.commit()
+    conn.close()
+
+    sessionFile = tmp_path / "session.json"
+    result = organizer.importFirefoxSession(sessionFile=sessionFile, profilePath=profileDir)
+
+    assert result is True
+    state = json.loads(sessionFile.read_text())
+    cookie = state["cookies"][0]
+    assert isinstance(cookie["expires"], int), "expires must be a plain int, not a float"
+    assert cookie["expires"] == 1742000000
 
 
 def testImportFirefoxSessionReturnsFalseWhenNoCookiesDbFile(
