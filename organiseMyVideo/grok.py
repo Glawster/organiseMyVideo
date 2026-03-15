@@ -249,7 +249,7 @@ class GrokMixin:
         if changed:
             sessionFile.write_text(json.dumps(data, indent=2))
 
-    def _autofillLoginPage(self, page, username: str, password: str) -> None:
+    def _autofillLoginPage(self, page, username: str, password: str) -> bool:
         """Pre-fill the email and password fields on the X.ai sign-in form.
 
         Fills the email, clicks Next, waits for the password field, then fills
@@ -264,8 +264,16 @@ class GrokMixin:
             page: Playwright Page instance on the X.ai sign-in page.
             username: Email address to pre-fill.
             password: Password to pre-fill after clicking Next.
+
+        Returns:
+            ``True`` if both fields were filled successfully, ``False`` otherwise.
         """
-        EMAIL_SELECTOR = "input[type='email'], input[autocomplete='username'], input[name='email']"
+        # X/Grok login uses ``input[name="text"]`` for the username/email field.
+        # The other selectors are retained as fallbacks for future page changes.
+        EMAIL_SELECTOR = (
+            "input[name='text'], input[type='email'], "
+            "input[autocomplete='username'], input[name='email']"
+        )
         NEXT_SELECTOR = "button[type='submit'], button:has-text('Next')"
         PASSWORD_SELECTOR = "input[type='password']"
         SELECTOR_TIMEOUT = 10_000
@@ -276,12 +284,14 @@ class GrokMixin:
             page.wait_for_selector(PASSWORD_SELECTOR, timeout=SELECTOR_TIMEOUT)
             page.fill(PASSWORD_SELECTOR, password)
             logger.info("email and password pre-filled — please click Login and complete any verification")
+            return True
         except Exception as e:
             # Broad catch is intentional: Playwright raises various exception
             # types depending on the failure (timeout, missing element, navigation
             # error).  The helper is best-effort; any failure falls back to fully
             # manual entry so the user is never blocked.
             logger.warning(f"auto-fill of login form failed ({e}); please log in manually")
+            return False
 
     def _awaitManualLoginInput(self, page) -> None:
         """Wait for the user to press Enter after completing manual login.
@@ -680,13 +690,20 @@ class GrokMixin:
                 context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
                 page = context.new_page()
                 page.goto("https://grok.com", wait_until="domcontentloaded")
-                self._autofillLoginPage(page, username, password)
-                print(
-                    "\nA browser window has opened and your credentials have been pre-filled.\n"
-                    "Please click Login, complete any verification,\n"
-                    "then press Enter here to continue...",
-                    flush=True,
-                )
+                _filled = self._autofillLoginPage(page, username, password)
+                if _filled:
+                    print(
+                        "\nA browser window has opened and your credentials have been pre-filled.\n"
+                        "Please click Login, complete any verification,\n"
+                        "then press Enter here to continue...",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        "\nA browser window has opened.\n"
+                        "Please log in manually, then press Enter here to continue...",
+                        flush=True,
+                    )
                 self._awaitManualLoginInput(page)
 
                 # Verify login completed before saving the session.
@@ -784,14 +801,22 @@ class GrokMixin:
                     context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
                     page = context.new_page()
                     page.goto("https://grok.com", wait_until="domcontentloaded")
-                    self._autofillLoginPage(page, username, password)
-                    print(
-                        "\nA browser window has opened and your credentials have been pre-filled.\n"
-                        "Your previous Grok session has expired.\n"
-                        "Please click Login, complete any verification,\n"
-                        "then press Enter here to continue...",
-                        flush=True,
-                    )
+                    _filled = self._autofillLoginPage(page, username, password)
+                    if _filled:
+                        print(
+                            "\nA browser window has opened and your credentials have been pre-filled.\n"
+                            "Your previous Grok session has expired.\n"
+                            "Please click Login, complete any verification,\n"
+                            "then press Enter here to continue...",
+                            flush=True,
+                        )
+                    else:
+                        print(
+                            "\nA browser window has opened.\n"
+                            "Your previous Grok session has expired.\n"
+                            "Please log in manually, then press Enter here to continue...",
+                            flush=True,
+                        )
                     self._awaitManualLoginInput(page)
                     _navigateToSaved(page)
                     if urllib.parse.urlparse(page.url).path != "/imagine/saved":

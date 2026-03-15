@@ -1415,10 +1415,9 @@ def testSanitizeStorageStateHandlesMissingFile(tmp_path, organizer: VideoOrganiz
 
 
 def testAutofillLoginPageFillsEmailAndPassword(organizer: VideoOrganizer):
-    """Both email and password are filled and Next is clicked; Login is left for the user
-    so that Cloudflare Turnstile sees a real human clicking it."""
+    """Verify that both email and password are filled, Next is clicked, and True is returned."""
     fakePage = MagicMock()
-    organizer._autofillLoginPage(fakePage, "user@example.com", "s3cr3t")
+    result = organizer._autofillLoginPage(fakePage, "user@example.com", "s3cr3t")
 
     # page.fill(selector, value) — check the value argument (index 1) of each call
     filled_values = [call.args[1] for call in fakePage.fill.call_args_list]
@@ -1426,14 +1425,26 @@ def testAutofillLoginPageFillsEmailAndPassword(organizer: VideoOrganizer):
     assert "s3cr3t" in filled_values, "password not filled"
     # Next button must have been clicked; Login must NOT be clicked automatically
     fakePage.click.assert_called_once()
+    assert result is True, "should return True when pre-fill succeeds"
+
+
+def testAutofillLoginPageUsesXNameTextSelector(organizer: VideoOrganizer):
+    """The email selector must include input[name='text'] — used by X/Grok login."""
+    fakePage = MagicMock()
+    organizer._autofillLoginPage(fakePage, "user@example.com", "s3cr3t")
+    # The first wait_for_selector call must include input[name='text']
+    first_selector = fakePage.wait_for_selector.call_args_list[0].args[0]
+    assert "input[name='text']" in first_selector, (
+        "email selector must include input[name='text'] for X/Grok login"
+    )
 
 
 def testAutofillLoginPageFallsBackGracefullyOnError(organizer: VideoOrganizer):
-    """A timeout or missing selector is caught and does not propagate."""
+    """Verify that a selector timeout does not propagate and False is returned."""
     fakePage = MagicMock()
     fakePage.wait_for_selector.side_effect = Exception("timeout waiting for selector")
-    # Should not raise
-    organizer._autofillLoginPage(fakePage, "u@e.com", "p@ssw0rd")
+    result = organizer._autofillLoginPage(fakePage, "u@e.com", "p@ssw0rd")
+    assert result is False, "should return False when pre-fill fails"
 
 
 # ---------------------------------------------------------------------------
