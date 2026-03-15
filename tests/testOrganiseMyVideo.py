@@ -2,6 +2,7 @@
 
 import json
 import shutil
+import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -117,7 +118,7 @@ def testScanStorageLocationsFindsMovieDirs(tmp_path: Path, organizer: VideoOrgan
     mnt = tmp_path / "mnt"
     (mnt / "movie1").mkdir(parents=True)
     (mnt / "movie2").mkdir(parents=True)
-    with patch("organiseMyVideo.Path") as mockPath:
+    with patch("organiseMyVideo.video.Path") as mockPath:
         mockPath.return_value = mnt
         movieDirs, videoDirs = organizer.scanStorageLocations()
     assert len(movieDirs) == 2
@@ -128,7 +129,7 @@ def testScanStorageLocationsFindsMyPicturesAsMovieStorage(tmp_path: Path, organi
     """/mnt/myPictures root is used as movie storage when no Movies subdir exists."""
     mnt = tmp_path / "mnt"
     (mnt / "myPictures").mkdir(parents=True)
-    with patch("organiseMyVideo.Path") as mockPath:
+    with patch("organiseMyVideo.video.Path") as mockPath:
         mockPath.return_value = mnt
         movieDirs, videoDirs = organizer.scanStorageLocations()
     assert any(d.name == "myPictures" for d in movieDirs)
@@ -139,7 +140,7 @@ def testScanStorageLocationsUsesMyPicturesMoviesSubdir(tmp_path: Path, organizer
     """/mnt/myPictures/Movies is used as movie storage when the Movies subdir exists."""
     mnt = tmp_path / "mnt"
     (mnt / "myPictures" / "Movies").mkdir(parents=True)
-    with patch("organiseMyVideo.Path") as mockPath:
+    with patch("organiseMyVideo.video.Path") as mockPath:
         mockPath.return_value = mnt
         movieDirs, videoDirs = organizer.scanStorageLocations()
     assert any(d.name == "Movies" for d in movieDirs)
@@ -151,7 +152,7 @@ def testScanStorageLocationsFindsMyVideoAsTvStorage(tmp_path: Path, organizer: V
     mnt = tmp_path / "mnt"
     tvDir = mnt / "myVideo" / "TV"
     tvDir.mkdir(parents=True)
-    with patch("organiseMyVideo.Path") as mockPath:
+    with patch("organiseMyVideo.video.Path") as mockPath:
         mockPath.return_value = mnt
         movieDirs, videoDirs = organizer.scanStorageLocations()
     assert len(movieDirs) == 0
@@ -165,7 +166,7 @@ def testScanStorageLocationsFindsAllLocationTypes(tmp_path: Path, organizer: Vid
     (mnt / "myPictures").mkdir(parents=True)
     (mnt / "video1" / "TV").mkdir(parents=True)
     (mnt / "myVideo" / "TV").mkdir(parents=True)
-    with patch("organiseMyVideo.Path") as mockPath:
+    with patch("organiseMyVideo.video.Path") as mockPath:
         mockPath.return_value = mnt
         movieDirs, videoDirs = organizer.scanStorageLocations()
     assert len(movieDirs) == 2
@@ -431,7 +432,7 @@ def testMoveMovieDryRunReturnsTrueWithoutMoving(tmp_path: Path, organizer: Video
 
     movieInfo = {"title": "Inception", "year": "2010", "extension": ".mp4", "type": "movie"}
 
-    with patch("organiseMyVideo.shutil.move") as mockMove:
+    with patch("organiseMyVideo.video.shutil.move") as mockMove:
         result = organizer.moveMovie(srcFile, movieInfo, [movieStorage], interactive=False)
 
     assert result is True
@@ -500,7 +501,7 @@ def testMoveTvShowDryRunReturnsTrueWithoutMoving(tmp_path: Path, organizer: Vide
     tvInfo = {"showName": "Breaking Bad", "season": 1, "episode": 1,
               "extension": ".mkv", "type": "tv"}
 
-    with patch("organiseMyVideo.shutil.move") as mockMove:
+    with patch("organiseMyVideo.video.shutil.move") as mockMove:
         result = organizer.moveTvShow(srcFile, tvInfo, [tvStorage], interactive=False)
 
     assert result is True
@@ -1261,7 +1262,9 @@ def testDownloadMediaFilesUsesPlaywrightContext(confirmedOrganizer: VideoOrganiz
         )
 
     assert stats == {"downloaded": 1, "skipped": 0, "errors": 0}
-    fakeContext.request.get.assert_called_once_with("https://example.com/image01.png")
+    fakeContext.request.get.assert_called_once_with(
+        "https://example.com/image01.png", headers={"Referer": "https://grok.com/"}
+    )
     assert (tmp_path / "Downloads" / "Grok" / "image01.png").read_bytes() == b"image-data"
 
 
@@ -1335,6 +1338,512 @@ def testLoadOrPromptGrokCredentialsPromptsWhenFileIncomplete(
 
 
 # ---------------------------------------------------------------------------
+# _sanitizeStorageState
+# ---------------------------------------------------------------------------
+
+
+def testSanitizeStorageStateConvertsZeroExpiresToMinusOne(tmp_path, organizer: VideoOrganizer):
+    """expires: 0 must be normalised to -1 (Playwright rejects 0)."""
+    f = tmp_path / "session.json"
+    f.write_text(json.dumps({"cookies": [{"name": "a", "expires": 0}], "origins": []}))
+    organizer._sanitizeStorageState(f)
+    data = json.loads(f.read_text())
+    assert data["cookies"][0]["expires"] == -1
+
+
+def testSanitizeStorageStateConvertsNullExpiresToMinusOne(tmp_path, organizer: VideoOrganizer):
+    """expires: null must be normalised to -1."""
+    f = tmp_path / "session.json"
+    f.write_text(json.dumps({"cookies": [{"name": "a", "expires": None}], "origins": []}))
+    organizer._sanitizeStorageState(f)
+    data = json.loads(f.read_text())
+    assert data["cookies"][0]["expires"] == -1
+
+
+def testSanitizeStorageStateConvertsNegativeExpiresToMinusOne(tmp_path, organizer: VideoOrganizer):
+    """expires: -999 must be normalised to -1 (only -1 is a valid sentinel)."""
+    f = tmp_path / "session.json"
+    f.write_text(json.dumps({"cookies": [{"name": "a", "expires": -999}], "origins": []}))
+    organizer._sanitizeStorageState(f)
+    data = json.loads(f.read_text())
+    assert data["cookies"][0]["expires"] == -1
+
+
+def testSanitizeStorageStateTruncatesFloatExpires(tmp_path, organizer: VideoOrganizer):
+    """expires with a fractional part should be truncated to int."""
+    f = tmp_path / "session.json"
+    f.write_text(json.dumps({"cookies": [{"name": "a", "expires": 1700000000.9}], "origins": []}))
+    organizer._sanitizeStorageState(f)
+    data = json.loads(f.read_text())
+    assert data["cookies"][0]["expires"] == 1700000000
+
+
+def testSanitizeStorageStateConvertsWholeNumberFloatToInt(tmp_path, organizer: VideoOrganizer):
+    """expires as a whole-number float (e.g. 1742000000.0) must be converted to int.
+
+    SQLite may return INTEGER columns as Python floats; json.dumps then writes
+    '1742000000.0' which Playwright rejects even though the numeric value is
+    valid.  The sanitizer must convert ALL floats, not just fractional ones.
+    """
+    f = tmp_path / "session.json"
+    # Write the raw float string directly so json.loads returns a float
+    f.write_text('{"cookies": [{"name": "a", "expires": 1742000000.0}], "origins": []}')
+    organizer._sanitizeStorageState(f)
+    data = json.loads(f.read_text())
+    assert isinstance(data["cookies"][0]["expires"], int)
+    assert data["cookies"][0]["expires"] == 1742000000
+
+
+def testSanitizeStorageStatePreservesValidExpires(tmp_path, organizer: VideoOrganizer):
+    """Valid expires (-1 or positive integer) must be left unchanged."""
+    f = tmp_path / "session.json"
+    f.write_text(json.dumps({"cookies": [{"name": "a", "expires": -1}, {"name": "b", "expires": 1700000000}], "origins": []}))
+    organizer._sanitizeStorageState(f)
+    data = json.loads(f.read_text())
+    assert data["cookies"][0]["expires"] == -1
+    assert data["cookies"][1]["expires"] == 1700000000
+
+
+def testSanitizeStorageStateHandlesMissingFile(tmp_path, organizer: VideoOrganizer):
+    """A missing file must not raise — caller will handle the downstream error."""
+    organizer._sanitizeStorageState(tmp_path / "nonexistent.json")  # should not raise
+
+
+# ---------------------------------------------------------------------------
+# _autofillLoginPage
+# ---------------------------------------------------------------------------
+
+
+def testAutofillLoginPageFillsEmailAndPassword(organizer: VideoOrganizer):
+    """Verify that both email and password are filled, Next is clicked, and True is returned."""
+    fakePage = MagicMock()
+    result = organizer._autofillLoginPage(fakePage, "user@example.com", "s3cr3t")
+
+    # page.fill(selector, value) — check the value argument (index 1) of each call
+    filled_values = [call.args[1] for call in fakePage.fill.call_args_list]
+    assert "user@example.com" in filled_values, "email not filled"
+    assert "s3cr3t" in filled_values, "password not filled"
+    # Next button must have been clicked; Login must NOT be clicked automatically
+    fakePage.click.assert_called_once()
+    assert result is True, "should return True when pre-fill succeeds"
+
+
+def testAutofillLoginPageUsesXNameTextSelector(organizer: VideoOrganizer):
+    """The email selector must include input[name='text'] — used by X/Grok login."""
+    fakePage = MagicMock()
+    organizer._autofillLoginPage(fakePage, "user@example.com", "s3cr3t")
+    # The first wait_for_selector call must include input[name='text']
+    first_selector = fakePage.wait_for_selector.call_args_list[0].args[0]
+    assert "input[name='text']" in first_selector, (
+        "email selector must include input[name='text'] for X/Grok login"
+    )
+
+
+def testAutofillLoginPageFallsBackGracefullyOnError(organizer: VideoOrganizer):
+    """Verify that a selector timeout does not propagate and False is returned."""
+    fakePage = MagicMock()
+    fakePage.wait_for_selector.side_effect = Exception("timeout waiting for selector")
+    result = organizer._autofillLoginPage(fakePage, "u@e.com", "p@ssw0rd")
+    assert result is False, "should return False when pre-fill fails"
+
+
+# ---------------------------------------------------------------------------
+# _findFirefoxProfile
+# ---------------------------------------------------------------------------
+
+
+def _make_firefox_base(tmp_path: Path, profiles: list) -> Path:
+    """Create a minimal Firefox profile directory tree under tmp_path.
+
+    Each entry in *profiles* is a dict with keys:
+        section (str): ConfigParser section name, e.g. "Profile0"
+        path    (str): value for the Path key
+        relative (bool): whether IsRelative should be "1" (default True)
+        default  (bool): whether to add Default=1 (default False)
+    """
+    import configparser
+
+    base = tmp_path / "firefox"
+    base.mkdir()
+    config = configparser.ConfigParser()
+    for p in profiles:
+        section = p["section"]
+        config[section] = {"Path": p["path"]}
+        if p.get("relative", True):
+            config[section]["IsRelative"] = "1"
+            (base / p["path"]).mkdir(parents=True, exist_ok=True)
+        if p.get("default", False):
+            config[section]["Default"] = "1"
+    with open(base / "profiles.ini", "w") as f:
+        config.write(f)
+    return base
+
+
+def testFindFirefoxProfileReturnsDefaultProfile(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """The section with Default=1 is returned ahead of any other Profile section."""
+    base = _make_firefox_base(
+        tmp_path,
+        [
+            {"section": "Profile0", "path": "profiles/other"},
+            {"section": "Profile1", "path": "profiles/default", "default": True},
+        ],
+    )
+    result = organizer._findFirefoxProfile(_firefoxBase=base)
+    assert result == base / "profiles/default"
+
+
+def testFindFirefoxProfileReturnsFallbackProfile(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """When no Default=1 is set, the first Profile section is returned."""
+    base = _make_firefox_base(
+        tmp_path,
+        [{"section": "Profile0", "path": "profiles/first"}],
+    )
+    result = organizer._findFirefoxProfile(_firefoxBase=base)
+    assert result == base / "profiles/first"
+
+
+def testFindFirefoxProfileReturnsNoneWhenNoIni(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """None is returned when profiles.ini does not exist."""
+    base = tmp_path / "firefox_missing"
+    result = organizer._findFirefoxProfile(_firefoxBase=base)
+    assert result is None
+
+
+def testFindFirefoxProfilePrefersProfileWithCookies(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """When multiple candidate bases exist, the profile that has cookies.sqlite
+    is preferred over one without — even when the empty profile is the 'default'."""
+    import configparser as cp
+    home = tmp_path
+
+    # Traditional install: has profiles.ini + default profile, but NO cookies.sqlite.
+    tradBase = home / ".mozilla" / "firefox"
+    tradBase.mkdir(parents=True, exist_ok=True)
+    ini = cp.ConfigParser()
+    ini["Profile0"] = {"Path": "default", "IsRelative": "1", "Default": "1"}
+    tradProfileDir = tradBase / "default"
+    tradProfileDir.mkdir(parents=True, exist_ok=True)
+    with open(tradBase / "profiles.ini", "w") as f:
+        ini.write(f)
+    # No cookies.sqlite in tradProfileDir.
+
+    # Snap install: has profiles.ini + profile WITH cookies.sqlite.
+    snapBase = home / "snap" / "firefox" / "common" / ".mozilla" / "firefox"
+    snapBase.mkdir(parents=True, exist_ok=True)
+    ini2 = cp.ConfigParser()
+    ini2["Profile0"] = {"Path": "snap-profile", "IsRelative": "1"}
+    snapProfileDir = snapBase / "snap-profile"
+    snapProfileDir.mkdir(parents=True, exist_ok=True)
+    (snapProfileDir / "cookies.sqlite").write_bytes(b"")  # exists
+    with open(snapBase / "profiles.ini", "w") as f:
+        ini2.write(f)
+
+    with patch("organiseMyVideo.grok.Path.home", return_value=home):
+        result = organizer._findFirefoxProfile()
+
+    assert result == snapProfileDir, (
+        "should prefer the Snap profile that has cookies.sqlite over "
+        "the traditional profile that does not"
+    )
+
+
+def testFindFirefoxProfileFallsBackToFirstCandidateWhenNoCookies(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """When no candidate base has cookies.sqlite, the default profile from the
+    first valid candidate base is returned."""
+    home = tmp_path
+
+    # Only the traditional install exists, and its profile has no cookies.sqlite.
+    tradBase = home / ".mozilla" / "firefox"
+    tradBase.mkdir(parents=True, exist_ok=True)
+    import configparser as cp
+    ini = cp.ConfigParser()
+    ini["Profile0"] = {"Path": "default-profile", "IsRelative": "1", "Default": "1"}
+    profileDir = tradBase / "default-profile"
+    profileDir.mkdir(parents=True, exist_ok=True)
+    with open(tradBase / "profiles.ini", "w") as f:
+        ini.write(f)
+    # No cookies.sqlite — should still return the profile.
+
+    with patch("organiseMyVideo.grok.Path.home", return_value=home):
+        result = organizer._findFirefoxProfile()
+
+    assert result == profileDir
+
+
+def testFindFirefoxProfileReturnsNoneWhenNoInstallFound(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """None is returned when none of the candidate bases contain profiles.ini."""
+    home = tmp_path  # empty — no Firefox directories exist
+    with patch("organiseMyVideo.grok.Path.home", return_value=home):
+        result = organizer._findFirefoxProfile()
+    assert result is None
+
+
+def testFindFirefoxProfilePicksMostRecentCookies(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """When two installs both have cookies.sqlite, the one with the most
+    recently modified file is preferred (the actively-used install)."""
+    import os
+    import time
+    import configparser as cp
+    home = tmp_path
+
+    def _makeInstall(base: Path, profile_name: str, cookies_mtime: float) -> Path:
+        base.mkdir(parents=True, exist_ok=True)
+        ini = cp.ConfigParser()
+        ini["Profile0"] = {"Path": profile_name, "IsRelative": "1", "Default": "1"}
+        profileDir = base / profile_name
+        profileDir.mkdir(parents=True, exist_ok=True)
+        db = profileDir / "cookies.sqlite"
+        db.write_bytes(b"")
+        os.utime(str(db), (cookies_mtime, cookies_mtime))
+        with open(base / "profiles.ini", "w") as f:
+            ini.write(f)
+        return profileDir
+
+    old_time = time.time() - 3600  # 1 hour ago
+    new_time = time.time()         # now
+
+    tradBase = home / ".mozilla" / "firefox"
+    snapBase = home / "snap" / "firefox" / "common" / ".mozilla" / "firefox"
+
+    _makeInstall(tradBase, "old-profile", old_time)
+    snapProfile = _makeInstall(snapBase, "new-profile", new_time)
+
+    with patch("organiseMyVideo.grok.Path.home", return_value=home):
+        result = organizer._findFirefoxProfile()
+
+    assert result == snapProfile, "should pick the install with the newer cookies.sqlite"
+
+
+# ---------------------------------------------------------------------------
+# importFirefoxSession
+# ---------------------------------------------------------------------------
+
+
+def _make_firefox_cookies_db(profile_dir: Path, cookies: list) -> None:
+    """Create a minimal Firefox moz_cookies SQLite database.
+
+    Each entry in *cookies* is a tuple:
+        (name, value, host, path, expiry, isSecure, isHttpOnly, sameSite)
+    """
+    db_path = profile_dir / "cookies.sqlite"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        """
+        CREATE TABLE moz_cookies (
+            name TEXT, value TEXT, host TEXT, path TEXT,
+            expiry INTEGER, isSecure INTEGER, isHttpOnly INTEGER, sameSite INTEGER
+        )
+        """
+    )
+    conn.executemany("INSERT INTO moz_cookies VALUES (?,?,?,?,?,?,?,?)", cookies)
+    conn.commit()
+    conn.close()
+
+
+def testImportFirefoxSessionWritesStorageState(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """Cookies for grok.com are read and written as a Playwright storage-state JSON."""
+    profileDir = tmp_path / "profile"
+    profileDir.mkdir()
+    _make_firefox_cookies_db(
+        profileDir,
+        [
+            ("session_id", "abc123", "grok.com", "/", 9999999999, 1, 1, 1),
+            ("auth_token", "tok456", ".grok.com", "/", 9999999999, 1, 0, 0),
+        ],
+    )
+    sessionFile = tmp_path / "session.json"
+
+    result = organizer.importFirefoxSession(sessionFile=sessionFile, profilePath=profileDir)
+
+    assert result is True
+    assert sessionFile.exists()
+    state = json.loads(sessionFile.read_text())
+    assert "cookies" in state
+    names = {c["name"] for c in state["cookies"]}
+    assert "session_id" in names
+    assert "auth_token" in names
+    # sameSite values should be mapped to Playwright strings
+    for cookie in state["cookies"]:
+        assert cookie["sameSite"] in {"None", "Lax", "Strict"}
+
+
+def testImportFirefoxSessionMapsZeroExpiryToMinusOne(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """Firefox session cookies use expiry=0; Playwright requires -1 (not 0)."""
+    profileDir = tmp_path / "profile"
+    profileDir.mkdir()
+    _make_firefox_cookies_db(
+        profileDir,
+        [
+            # expiry=0 → session cookie (Firefox representation)
+            ("session_cookie", "val1", "grok.com", "/", 0, 1, 1, 1),
+            # expiry>0 → persistent cookie, must be preserved as-is
+            ("persistent_cookie", "val2", "grok.com", "/", 9999999999, 1, 0, 0),
+        ],
+    )
+    sessionFile = tmp_path / "session.json"
+
+    result = organizer.importFirefoxSession(sessionFile=sessionFile, profilePath=profileDir)
+
+    assert result is True
+    state = json.loads(sessionFile.read_text())
+    cookies = {c["name"]: c for c in state["cookies"]}
+    # Session cookie: expiry=0 must be mapped to -1
+    assert cookies["session_cookie"]["expires"] == -1
+    # Persistent cookie: positive expiry must pass through unchanged
+    assert cookies["persistent_cookie"]["expires"] == 9999999999
+
+
+def testImportFirefoxSessionConvertsFloatExpiryToInt(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """SQLite may return INTEGER columns as Python floats (REAL affinity).
+
+    json.dumps serialises 1742000000.0 as '1742000000.0', which Playwright
+    rejects.  importFirefoxSession must write a plain JSON integer.
+    """
+    profileDir = tmp_path / "profile"
+    profileDir.mkdir()
+    db_path = profileDir / "cookies.sqlite"
+    # Use a REAL column type to force SQLite to return Python floats, simulating
+    # the REAL-affinity storage that can occur even in INTEGER columns due to
+    # SQLite's dynamic typing.  This reproduces the bug where json.dumps writes
+    # '1742000000.0' instead of '1742000000', which Playwright rejects.
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        """
+        CREATE TABLE moz_cookies (
+            name TEXT, value TEXT, host TEXT, path TEXT,
+            expiry REAL, isSecure INTEGER, isHttpOnly INTEGER, sameSite INTEGER
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO moz_cookies VALUES (?,?,?,?,?,?,?,?)",
+        ("float_cookie", "v", "grok.com", "/", 1742000000.0, 1, 0, 0),
+    )
+    conn.commit()
+    conn.close()
+
+    sessionFile = tmp_path / "session.json"
+    result = organizer.importFirefoxSession(sessionFile=sessionFile, profilePath=profileDir)
+
+    assert result is True
+    state = json.loads(sessionFile.read_text())
+    cookie = state["cookies"][0]
+    assert isinstance(cookie["expires"], int), "expires must be a plain int, not a float"
+    assert cookie["expires"] == 1742000000
+
+
+def testImportFirefoxSessionReturnsFalseWhenNoCookiesDbFile(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """False is returned when the profile directory has no cookies.sqlite."""
+    profileDir = tmp_path / "profile"
+    profileDir.mkdir()
+    sessionFile = tmp_path / "session.json"
+
+    result = organizer.importFirefoxSession(sessionFile=sessionFile, profilePath=profileDir)
+
+    assert result is False
+    assert not sessionFile.exists()
+
+
+def testImportFirefoxSessionReturnsFalseWhenNoGrokCookies(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """False is returned when cookies.sqlite exists but has no grok.com/x.ai rows."""
+    profileDir = tmp_path / "profile"
+    profileDir.mkdir()
+    _make_firefox_cookies_db(
+        profileDir,
+        [("unrelated", "val", "example.com", "/", 9999999999, 0, 0, 0)],
+    )
+    sessionFile = tmp_path / "session.json"
+
+    result = organizer.importFirefoxSession(sessionFile=sessionFile, profilePath=profileDir)
+
+    assert result is False
+    assert not sessionFile.exists()
+
+
+def testImportFirefoxSessionReturnsFalseWhenNoProfile(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """False is returned when no Firefox profile can be located."""
+    sessionFile = tmp_path / "session.json"
+    # Patch _findFirefoxProfile to return None (no Firefox installed)
+    with patch.object(organizer, "_findFirefoxProfile", return_value=None):
+        result = organizer.importFirefoxSession(sessionFile=sessionFile)
+
+    assert result is False
+    assert not sessionFile.exists()
+
+
+# ---------------------------------------------------------------------------
+# scrapeGrokSavedMedia — Firefox session auto-import
+# ---------------------------------------------------------------------------
+
+
+def testScrapeGrokSavedMediaUsesFirefoxSessionWhenAvailable(
+    confirmedOrganizer: VideoOrganizer, tmp_path: Path
+):
+    """When importFirefoxSession succeeds, the scraper uses the imported session
+    and does NOT fall back to opening a visible Playwright browser window."""
+    sessionFile = tmp_path / "grokSession.json"
+    assert not sessionFile.exists()
+
+    fakePage = MagicMock()
+    fakePage.url = "https://grok.com/imagine/saved"
+    fakePage.eval_on_selector_all.return_value = []
+
+    fakeContext = MagicMock()
+    fakeContext.new_page.return_value = fakePage
+    fakeContext.storage_state.return_value = None
+
+    fakeBrowser = MagicMock()
+    fakeBrowser.new_context.return_value = fakeContext
+
+    fakePW = MagicMock()
+    fakePW.chromium.launch.return_value = fakeBrowser
+
+    def _fake_import(sessionFile=None, profilePath=None):
+        """Simulate a successful Firefox import by writing a minimal session file."""
+        sessionFile.write_text(json.dumps({"cookies": [], "origins": []}))
+        return True
+
+    with (
+        patch("organiseMyVideo.grok.sync_playwright") as mockPW,
+        patch.object(confirmedOrganizer, "importFirefoxSession", side_effect=_fake_import),
+    ):
+        mockPW.return_value.__enter__.return_value = fakePW
+        confirmedOrganizer.scrapeGrokSavedMedia(sessionFile=sessionFile)
+
+    # The browser should only have been launched headless (the Firefox import path)
+    # — no non-headless launch for manual login.
+    launch_calls = fakePW.chromium.launch.call_args_list
+    assert all(
+        c.kwargs.get("headless") is not False for c in launch_calls
+    ), "browser should only be launched in headless mode when a Firefox session is available"
+
+
+# ---------------------------------------------------------------------------
 # scrapeGrokSavedMedia — session file behaviour
 # ---------------------------------------------------------------------------
 
@@ -1348,6 +1857,7 @@ def testScrapeGrokSavedMediaUsesSessionFileWhenPresent(
     sessionFile.write_text("{}")  # minimal valid storage-state
 
     fakePage = MagicMock()
+    fakePage.url = "https://grok.com/imagine/saved"  # valid session → stays on saved page
     fakePage.eval_on_selector_all.return_value = []  # empty gallery → 0 posts
 
     fakeContext = MagicMock()
@@ -1360,7 +1870,7 @@ def testScrapeGrokSavedMediaUsesSessionFileWhenPresent(
     fakePW = MagicMock()
     fakePW.chromium.launch.return_value = fakeBrowser
 
-    with patch("organiseMyVideo.sync_playwright") as mockPW:
+    with patch("organiseMyVideo.grok.sync_playwright") as mockPW:
         mockPW.return_value.__enter__.return_value = fakePW
         stats = confirmedOrganizer.scrapeGrokSavedMedia(sessionFile=sessionFile)
 
@@ -1375,13 +1885,18 @@ def testScrapeGrokSavedMediaUsesSessionFileWhenPresent(
 def testScrapeGrokSavedMediaSavesSessionAfterLogin(
     confirmedOrganizer: VideoOrganizer, tmp_path: Path
 ):
-    """When no session file exists the browser is relaunched non-headless so
-    the user can log in manually, then storage_state() persists the session."""
+    """When no session file exists the browser is relaunched non-headless,
+    the email is pre-filled via _autofillLoginPage, and storage_state()
+    persists the session."""
     sessionFile = tmp_path / "new_session.json"
+    credFile = tmp_path / "grokCredentials.json"
+    credFile.write_text(json.dumps({"username": "user@example.com", "password": "s3cr3t"}))
     assert not sessionFile.exists()
 
     fakePage = MagicMock()
+    fakePage.url = "https://grok.com/imagine/saved"  # successful login → stays on saved page
     fakePage.eval_on_selector_all.return_value = []
+    fakePage.is_closed.return_value = False  # browser stays open after user presses Enter
 
     fakeContext = MagicMock()
     fakeContext.new_page.return_value = fakePage
@@ -1394,17 +1909,24 @@ def testScrapeGrokSavedMediaSavesSessionAfterLogin(
     fakePW.chromium.launch.return_value = fakeBrowser
 
     with (
-        patch("organiseMyVideo.sync_playwright") as mockPW,
+        patch("organiseMyVideo.grok.sync_playwright") as mockPW,
         patch("builtins.input", return_value=""),  # simulate user pressing Enter
     ):
         mockPW.return_value.__enter__.return_value = fakePW
-        confirmedOrganizer.scrapeGrokSavedMedia(sessionFile=sessionFile)
+        confirmedOrganizer.scrapeGrokSavedMedia(
+            sessionFile=sessionFile, credentialsFile=credFile
+        )
 
     # The browser should have been relaunched non-headless for manual login
     launch_calls = fakePW.chromium.launch.call_args_list
     assert any(
         c.kwargs.get("headless") is False for c in launch_calls
     ), "expected at least one non-headless browser launch for manual login"
+
+    # Both email and password should have been pre-filled
+    filled_values = [call.args[1] for call in fakePage.fill.call_args_list]
+    assert "user@example.com" in filled_values, "email not filled"
+    assert "s3cr3t" in filled_values, "password not filled"
 
     # storage_state should have been called (at least once) to save the session
     assert fakeContext.storage_state.called
@@ -1413,6 +1935,147 @@ def testScrapeGrokSavedMediaSavesSessionAfterLogin(
         for call in fakeContext.storage_state.call_args_list
     ]
     assert str(sessionFile) in saved_paths
+
+
+def testManualLoginExitsCleanlyIfBrowserWindowClosed(
+    confirmedOrganizer: VideoOrganizer, tmp_path: Path
+):
+    """If the user closes the browser window during manual login, the process
+    should exit with SystemExit(1) instead of crashing with a Playwright error."""
+    sessionFile = tmp_path / "new_session.json"
+    credFile = tmp_path / "grokCredentials.json"
+    credFile.write_text(json.dumps({"username": "user@example.com", "password": "s3cr3t"}))
+
+    fakePage = MagicMock()
+    fakePage.url = "https://grok.com/imagine/saved"
+    fakePage.eval_on_selector_all.return_value = []
+    # Simulate the user closing the browser window — page.is_closed() returns True
+    fakePage.is_closed.return_value = True
+
+    fakeContext = MagicMock()
+    fakeContext.new_page.return_value = fakePage
+
+    fakeBrowser = MagicMock()
+    fakeBrowser.new_context.return_value = fakeContext
+
+    fakePW = MagicMock()
+    fakePW.chromium.launch.return_value = fakeBrowser
+
+    with (
+        patch("organiseMyVideo.grok.sync_playwright") as mockPW,
+        patch("builtins.input", return_value=""),  # simulate user pressing Enter
+    ):
+        mockPW.return_value.__enter__.return_value = fakePW
+        with pytest.raises(SystemExit) as exc_info:
+            confirmedOrganizer.scrapeGrokSavedMedia(
+                sessionFile=sessionFile, credentialsFile=credFile
+            )
+
+    assert exc_info.value.code == 1
+    # storage_state must NOT have been called — the session should not be saved
+    # when the browser was closed without completing login
+    assert not fakeContext.storage_state.called
+
+
+def testManualLoginExitsCleanlyIfEnterPressedWithoutLoggingIn(
+    confirmedOrganizer: VideoOrganizer, tmp_path: Path
+):
+    """If the user presses Enter without completing login (browser still open but
+    URL is not /imagine/saved), the process should exit with SystemExit(1) and
+    must NOT save an unauthenticated session to disk."""
+    sessionFile = tmp_path / "new_session.json"
+    credFile = tmp_path / "grokCredentials.json"
+    credFile.write_text(json.dumps({"username": "user@example.com", "password": "s3cr3t"}))
+
+    # Saved-session page that appears expired (redirects away from /imagine/saved)
+    fakeExpiredPage = MagicMock()
+    fakeExpiredPage.url = "https://grok.com/imagine"  # expired → not /imagine/saved
+    fakeExpiredPage.eval_on_selector_all.return_value = []
+    fakeExpiredPage.is_closed.return_value = False
+
+    # Login page that stays on grok.com after the user presses Enter without logging in
+    fakeLoginPage = MagicMock()
+    fakeLoginPage.url = "https://grok.com/sign-in"  # not /imagine/saved — login incomplete
+    fakeLoginPage.eval_on_selector_all.return_value = []
+    fakeLoginPage.is_closed.return_value = False
+
+    fakeExpiredContext = MagicMock()
+    fakeExpiredContext.new_page.return_value = fakeExpiredPage
+
+    fakeLoginContext = MagicMock()
+    fakeLoginContext.new_page.return_value = fakeLoginPage
+
+    fakeHeadlessBrowser = MagicMock()
+    fakeHeadlessBrowser.new_context.return_value = fakeExpiredContext
+
+    fakeHeadfulBrowser = MagicMock()
+    fakeHeadfulBrowser.new_context.return_value = fakeLoginContext
+
+    def _launch(headless=True, **kwargs):
+        return fakeHeadlessBrowser if headless else fakeHeadfulBrowser
+
+    fakePW = MagicMock()
+    fakePW.chromium.launch.side_effect = _launch
+
+    sessionFile.write_text("{}")  # existing (expired) session file
+
+    with (
+        patch("organiseMyVideo.grok.sync_playwright") as mockPW,
+        patch("builtins.input", return_value=""),  # simulate user pressing Enter
+        patch.object(confirmedOrganizer, "importFirefoxSession", return_value=False),
+    ):
+        mockPW.return_value.__enter__.return_value = fakePW
+        with pytest.raises(SystemExit) as exc_info:
+            confirmedOrganizer.scrapeGrokSavedMedia(
+                sessionFile=sessionFile, credentialsFile=credFile
+            )
+
+    assert exc_info.value.code == 1
+    # Session must NOT have been saved for the incomplete login
+    assert not fakeLoginContext.storage_state.called
+
+
+def testFreshLoginExitsCleanlyIfVerificationFails(
+    confirmedOrganizer: VideoOrganizer, tmp_path: Path
+):
+    """When there is no existing session and the user presses Enter while the
+    browser is still on the verification/login page (e.g. Cloudflare Turnstile
+    failed), the process must exit with SystemExit(1) and must NOT save an
+    unauthenticated session."""
+    sessionFile = tmp_path / "new_session.json"
+    credFile = tmp_path / "grokCredentials.json"
+    credFile.write_text(json.dumps({"username": "user@example.com", "password": "s3cr3t"}))
+    assert not sessionFile.exists()
+
+    # Login page where verification failed — stays on accounts.x.ai, not /imagine/saved
+    fakePage = MagicMock()
+    fakePage.url = "https://accounts.x.ai/sign-in?redirect=grok-com&email=true"
+    fakePage.eval_on_selector_all.return_value = []
+    fakePage.is_closed.return_value = False
+
+    fakeContext = MagicMock()
+    fakeContext.new_page.return_value = fakePage
+
+    fakeBrowser = MagicMock()
+    fakeBrowser.new_context.return_value = fakeContext
+
+    fakePW = MagicMock()
+    fakePW.chromium.launch.return_value = fakeBrowser
+
+    with (
+        patch("organiseMyVideo.grok.sync_playwright") as mockPW,
+        patch("builtins.input", return_value=""),  # simulate user pressing Enter
+    ):
+        mockPW.return_value.__enter__.return_value = fakePW
+        with pytest.raises(SystemExit) as exc_info:
+            confirmedOrganizer.scrapeGrokSavedMedia(
+                sessionFile=sessionFile, credentialsFile=credFile
+            )
+
+    assert exc_info.value.code == 1
+    # Session file must NOT have been written
+    assert not sessionFile.exists()
+    assert not fakeContext.storage_state.called
 
 
 # ---------------------------------------------------------------------------
