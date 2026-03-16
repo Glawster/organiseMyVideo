@@ -1379,6 +1379,50 @@ def testSanitizeStorageStatePreservesValidExpires(tmp_path, organizer: VideoOrga
     assert data["cookies"][1]["expires"] == 1700000000
 
 
+def testSanitizeStorageStatePreservesExpiresAtMaxLimit(tmp_path, organizer: VideoOrganizer):
+    """An expires exactly equal to kMaxCookieExpiresDateInSeconds (253402300799) is valid
+    and must be left unchanged."""
+    f = tmp_path / "session.json"
+    f.write_text(json.dumps({"cookies": [{"name": "a", "expires": 253402300799}], "origins": []}))
+    organizer._sanitizeStorageState(f)
+    data = json.loads(f.read_text())
+    assert data["cookies"][0]["expires"] == 253402300799
+
+
+def testSanitizeStorageStateClampsOverLimitInt(tmp_path, organizer: VideoOrganizer):
+    """expires > 253402300799 is rejected by Playwright — it must be clamped to the max.
+
+    Some sites set far-future expiry timestamps (e.g. 9999999999999) which
+    exceed Playwright's internal kMaxCookieExpiresDateInSeconds limit.
+    """
+    f = tmp_path / "session.json"
+    f.write_text(json.dumps({"cookies": [{"name": "a", "expires": 9999999999999}], "origins": []}))
+    organizer._sanitizeStorageState(f)
+    data = json.loads(f.read_text())
+    assert data["cookies"][0]["expires"] == 253402300799
+
+
+def testSanitizeStorageStateClampsOverLimitFloat(tmp_path, organizer: VideoOrganizer):
+    """A float expires that exceeds the max limit must also be clamped to 253402300799."""
+    f = tmp_path / "session.json"
+    # Write raw float string so json.loads returns a float
+    f.write_text('{"cookies": [{"name": "a", "expires": 9999999999999.0}], "origins": []}')
+    organizer._sanitizeStorageState(f)
+    data = json.loads(f.read_text())
+    assert data["cookies"][0]["expires"] == 253402300799
+
+
+def testSanitizeStorageStateConvertsBooleanToMinusOne(tmp_path, organizer: VideoOrganizer):
+    """expires: True (Python bool) serialises to JSON true which Playwright cannot use
+    as a numeric expires.  It must be normalised to -1."""
+    f = tmp_path / "session.json"
+    # json.dumps writes True as JSON true
+    f.write_text('{"cookies": [{"name": "a", "expires": true}], "origins": []}')
+    organizer._sanitizeStorageState(f)
+    data = json.loads(f.read_text())
+    assert data["cookies"][0]["expires"] == -1
+
+
 def testSanitizeStorageStateHandlesMissingFile(tmp_path, organizer: VideoOrganizer):
     """A missing file must not raise — caller will handle the downstream error."""
     organizer._sanitizeStorageState(tmp_path / "nonexistent.json")  # should not raise
@@ -1694,6 +1738,37 @@ def testImportFirefoxSessionMapsZeroExpiryToMinusOne(
     assert cookies["session_cookie"]["expires"] == -1
     # Persistent cookie: positive expiry must pass through unchanged
     assert cookies["persistent_cookie"]["expires"] == 9999999999
+
+
+def testImportFirefoxSessionClampsOverLimitExpiry(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """Cookies with expiry > 253402300799 (Playwright's kMaxCookieExpiresDateInSeconds)
+    must be clamped to 253402300799.
+
+    Some sites and auth providers set expiry in the far future (e.g.
+    expiry=9999999999999).  Playwright's rewriteCookies() rejects any
+    expires > 253402300799 with "Cookie should have a valid expires".
+    """
+    profileDir = tmp_path / "profile"
+    profileDir.mkdir()
+    _make_firefox_cookies_db(
+        profileDir,
+        [
+            # Expiry far beyond year 9999 — Playwright would reject this
+            ("far_future", "val", "grok.com", "/", 9999999999999, 1, 0, 0),
+        ],
+    )
+    sessionFile = tmp_path / "session.json"
+
+    result = organizer.importFirefoxSession(sessionFile=sessionFile, profilePath=profileDir)
+
+    assert result is True
+    state = json.loads(sessionFile.read_text())
+    cookie = state["cookies"][0]
+    assert cookie["expires"] == 253402300799, (
+        "far-future expiry must be clamped to kMaxCookieExpiresDateInSeconds"
+    )
 
 
 def testImportFirefoxSessionConvertsFloatExpiryToInt(

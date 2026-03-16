@@ -34,6 +34,12 @@ from .constants import (
 
 logger = getLogger("organiseMyVideo")
 
+# Playwright's maximum allowed cookie expires value (from kMaxCookieExpiresDateInSeconds
+# in playwright/driver/package/lib/server/network.js).  Any timestamp beyond this
+# (9999-12-31 23:59:59 UTC) is rejected by Playwright's rewriteCookies() with the
+# "Cookie should have a valid expires" error, even though the value is a positive integer.
+_PLAYWRIGHT_MAX_COOKIE_EXPIRES = 253402300799
+
 
 class GrokMixin:
     """Methods for authenticating with Grok and scraping saved Imagine media."""
@@ -170,39 +176,67 @@ class GrokMixin:
         """Fix cookie ``expires`` values in a Playwright storage-state JSON file.
 
         Playwright requires cookie ``expires`` to be either ``-1`` (session
-        cookie / no expiry) or a **positive integer** (Unix timestamp in
-        seconds).  Values that are invalid — ``0``, ``null``, other negative
-        numbers, or non-integer floats — cause ``new_context()`` to raise:
+        cookie / no expiry) or a **positive integer no greater than
+        253402300799** (9999-12-31 23:59:59 UTC, Playwright's internal maximum).
+        Values outside this range cause ``new_context()`` to raise:
 
         ``Error setting storage state: Cookie should have a valid expires``
+
+        Specific fixups applied:
+
+        * ``None``, ``0``, ``False``, or any other non-numeric value → ``-1``
+        * Negative numbers other than ``-1`` → ``-1``
+        * Floats → truncated to ``int`` (Playwright requires a plain JSON
+          integer, not ``1742000000.0``).  A float that truncates to ``0`` or a
+          negative value is converted to ``-1`` instead.
+        * Integers greater than ``253402300799`` → clamped to ``253402300799``
 
         This helper reads the file, normalises every cookie's ``expires``
         in-place, and writes the file back.  It is called immediately after
         writing any session file and again just before loading it, so that
         sessions written by an older version of Playwright (which emitted
-        ``0`` for session cookies) are also fixed transparently.
+        ``0`` for session cookies) or by sites that set far-future expiry dates
+        are also fixed transparently.
 
         Args:
             sessionFile: Path to the Playwright storage-state JSON file to fix.
         """
         try:
-            data = json.loads(sessionFile.read_text())
+            data = json.loads(sessionFile.read_text(encoding="utf-8"))
         except Exception:
             return  # file missing or unparseable — caller will handle the error
         changed = False
         for cookie in data.get("cookies", []):
             raw = cookie.get("expires")
-            if raw is None or raw == 0 or (isinstance(raw, (int, float)) and raw < 0 and raw != -1):
+            # ---- booleans: True/False serialize to JSON true/false, not numbers
+            if isinstance(raw, bool):
+                cookie["expires"] = -1
+                changed = True
+            # ---- None, 0, or any negative except -1 → session cookie sentinel
+            elif raw is None or raw == 0 or (isinstance(raw, (int, float)) and raw < 0 and raw != -1):
                 cookie["expires"] = -1
                 changed = True
             elif isinstance(raw, float):
                 # Convert any float (whole-number or fractional) to int.
                 # json.dumps serialises 1742000000.0 as "1742000000.0" which
                 # Playwright rejects — it requires a plain JSON integer.
-                cookie["expires"] = int(raw)
+                # A float that truncates to 0 or a negative is treated as a
+                # session cookie.  A float beyond the max is clamped.
+                int_val = int(raw)
+                if int_val == 0 or int_val < -1:
+                    cookie["expires"] = -1
+                elif int_val > _PLAYWRIGHT_MAX_COOKIE_EXPIRES:
+                    cookie["expires"] = _PLAYWRIGHT_MAX_COOKIE_EXPIRES
+                else:
+                    cookie["expires"] = int_val
+                changed = True
+            elif isinstance(raw, int) and raw > _PLAYWRIGHT_MAX_COOKIE_EXPIRES:
+                # Timestamps beyond year 9999 are rejected by Playwright's
+                # rewriteCookies() validation.  Clamp to the allowed maximum.
+                cookie["expires"] = _PLAYWRIGHT_MAX_COOKIE_EXPIRES
                 changed = True
         if changed:
-            sessionFile.write_text(json.dumps(data, indent=2))
+            sessionFile.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     def _openFirefoxWindow(self, url: str) -> None:
         """Open the user's system Firefox browser at *url*.
@@ -512,7 +546,9 @@ class GrokMixin:
                 # SQLite may return INTEGER columns as Python floats when stored
                 # as REAL affinity — always cast to int so JSON never writes
                 # "1742000000.0", which Playwright also rejects.
-                "expires": int(expiry) if expiry > 0 else -1,
+                # Some sites set extremely far-future expiry timestamps.
+                # Playwright rejects any expires > 253402300799 (year 9999).
+                "expires": min(int(expiry), _PLAYWRIGHT_MAX_COOKIE_EXPIRES) if expiry > 0 else -1,
                 "httpOnly": bool(isHttpOnly),
                 "secure": bool(isSecure),
                 "sameSite": _SAMESITE.get(sameSite, "None"),
