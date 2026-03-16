@@ -1312,57 +1312,6 @@ def testDownloadMediaFilesPlaywrightContextNonOkResponse(confirmedOrganizer: Vid
 
 
 # ---------------------------------------------------------------------------
-# _loadOrPromptGrokCredentials
-# ---------------------------------------------------------------------------
-
-
-def testLoadOrPromptGrokCredentialsLoadsFromFile(organizer: VideoOrganizer, tmp_path: Path):
-    """Existing credentials file is read without prompting the user."""
-    credFile = tmp_path / "grokCredentials.json"
-    credFile.write_text(json.dumps({"username": "user@example.com", "password": "s3cr3t"}))
-
-    username, password = organizer._loadOrPromptGrokCredentials(credentialsFile=credFile)
-
-    assert username == "user@example.com"
-    assert password == "s3cr3t"
-
-
-def testLoadOrPromptGrokCredentialsPromptsAndSavesWhenFileMissing(
-    organizer: VideoOrganizer, tmp_path: Path
-):
-    """When no credentials file exists, the user is prompted and the result is saved."""
-    credFile = tmp_path / "sub" / "grokCredentials.json"
-
-    with patch("builtins.input", return_value="user@example.com"), patch(
-        "getpass.getpass", return_value="s3cr3t"
-    ):
-        username, password = organizer._loadOrPromptGrokCredentials(credentialsFile=credFile)
-
-    assert username == "user@example.com"
-    assert password == "s3cr3t"
-    assert credFile.exists()
-    saved = json.loads(credFile.read_text())
-    assert saved["username"] == "user@example.com"
-    assert saved["password"] == "s3cr3t"
-
-
-def testLoadOrPromptGrokCredentialsPromptsWhenFileIncomplete(
-    organizer: VideoOrganizer, tmp_path: Path
-):
-    """A credentials file missing the password triggers a fresh prompt."""
-    credFile = tmp_path / "grokCredentials.json"
-    credFile.write_text(json.dumps({"username": "user@example.com", "password": ""}))
-
-    with patch("builtins.input", return_value="user@example.com"), patch(
-        "getpass.getpass", return_value="newpass"
-    ):
-        username, password = organizer._loadOrPromptGrokCredentials(credentialsFile=credFile)
-
-    assert password == "newpass"
-    saved = json.loads(credFile.read_text())
-    assert saved["password"] == "newpass"
-
-
 # ---------------------------------------------------------------------------
 # _sanitizeStorageState
 # ---------------------------------------------------------------------------
@@ -1430,47 +1379,102 @@ def testSanitizeStorageStatePreservesValidExpires(tmp_path, organizer: VideoOrga
     assert data["cookies"][1]["expires"] == 1700000000
 
 
+def testSanitizeStorageStatePreservesExpiresAtMaxLimit(tmp_path, organizer: VideoOrganizer):
+    """An expires exactly equal to kMaxCookieExpiresDateInSeconds (253402300799) is valid
+    and must be left unchanged."""
+    f = tmp_path / "session.json"
+    f.write_text(json.dumps({"cookies": [{"name": "a", "expires": 253402300799}], "origins": []}))
+    organizer._sanitizeStorageState(f)
+    data = json.loads(f.read_text())
+    assert data["cookies"][0]["expires"] == 253402300799
+
+
+def testSanitizeStorageStateClampsOverLimitInt(tmp_path, organizer: VideoOrganizer):
+    """expires > 253402300799 is rejected by Playwright — it must be clamped to the max.
+
+    Some sites set far-future expiry timestamps (e.g. 9999999999999) which
+    exceed Playwright's internal kMaxCookieExpiresDateInSeconds limit.
+    """
+    f = tmp_path / "session.json"
+    f.write_text(json.dumps({"cookies": [{"name": "a", "expires": 9999999999999}], "origins": []}))
+    organizer._sanitizeStorageState(f)
+    data = json.loads(f.read_text())
+    assert data["cookies"][0]["expires"] == 253402300799
+
+
+def testSanitizeStorageStateClampsOverLimitFloat(tmp_path, organizer: VideoOrganizer):
+    """A float expires that exceeds the max limit must also be clamped to 253402300799."""
+    f = tmp_path / "session.json"
+    # Write raw float string so json.loads returns a float
+    f.write_text('{"cookies": [{"name": "a", "expires": 9999999999999.0}], "origins": []}')
+    organizer._sanitizeStorageState(f)
+    data = json.loads(f.read_text())
+    assert data["cookies"][0]["expires"] == 253402300799
+
+
+def testSanitizeStorageStateConvertsBooleanToMinusOne(tmp_path, organizer: VideoOrganizer):
+    """expires: True (Python bool) serialises to JSON true which Playwright cannot use
+    as a numeric expires.  It must be normalised to -1."""
+    f = tmp_path / "session.json"
+    # json.dumps writes True as JSON true
+    f.write_text('{"cookies": [{"name": "a", "expires": true}], "origins": []}')
+    organizer._sanitizeStorageState(f)
+    data = json.loads(f.read_text())
+    assert data["cookies"][0]["expires"] == -1
+
+
 def testSanitizeStorageStateHandlesMissingFile(tmp_path, organizer: VideoOrganizer):
     """A missing file must not raise — caller will handle the downstream error."""
     organizer._sanitizeStorageState(tmp_path / "nonexistent.json")  # should not raise
 
 
 # ---------------------------------------------------------------------------
-# _autofillLoginPage
+# _firefoxLaunch
 # ---------------------------------------------------------------------------
 
 
-def testAutofillLoginPageFillsEmailAndPassword(organizer: VideoOrganizer):
-    """Verify that both email and password are filled, Next is clicked, and True is returned."""
-    fakePage = MagicMock()
-    result = organizer._autofillLoginPage(fakePage, "user@example.com", "s3cr3t")
+def testFirefoxLaunchReturnsLaunchedBrowser(organizer: VideoOrganizer):
+    """When launch succeeds the returned browser object is passed through."""
+    fakeBrowser = MagicMock()
+    fakePW = MagicMock()
+    fakePW.firefox.launch.return_value = fakeBrowser
 
-    # page.fill(selector, value) — check the value argument (index 1) of each call
-    filled_values = [call.args[1] for call in fakePage.fill.call_args_list]
-    assert "user@example.com" in filled_values, "email not filled"
-    assert "s3cr3t" in filled_values, "password not filled"
-    # Next button must have been clicked; Login must NOT be clicked automatically
-    fakePage.click.assert_called_once()
-    assert result is True, "should return True when pre-fill succeeds"
+    result = organizer._firefoxLaunch(fakePW)
+
+    fakePW.firefox.launch.assert_called_once_with(headless=True)
+    assert result is fakeBrowser
 
 
-def testAutofillLoginPageUsesXNameTextSelector(organizer: VideoOrganizer):
-    """The email selector must include input[name='text'] — used by X/Grok login."""
-    fakePage = MagicMock()
-    organizer._autofillLoginPage(fakePage, "user@example.com", "s3cr3t")
-    # The first wait_for_selector call must include input[name='text']
-    first_selector = fakePage.wait_for_selector.call_args_list[0].args[0]
-    assert "input[name='text']" in first_selector, (
-        "email selector must include input[name='text'] for X/Grok login"
+def testFirefoxLaunchConvertsNotInstalledErrorToRuntimeError(organizer: VideoOrganizer):
+    """When the Firefox binary is absent Playwright raises an error containing
+    'Executable doesn't exist'.  _firefoxLaunch must convert that to RuntimeError."""
+    fakePW = MagicMock()
+    fakePW.firefox.launch.side_effect = Exception(
+        "BrowserType.launch: Executable doesn't exist at /home/user/.cache/ms-playwright/firefox-1509/firefox/firefox"
     )
 
+    with pytest.raises(RuntimeError, match="playwright install firefox"):
+        organizer._firefoxLaunch(fakePW)
 
-def testAutofillLoginPageFallsBackGracefullyOnError(organizer: VideoOrganizer):
-    """Verify that a selector timeout does not propagate and False is returned."""
-    fakePage = MagicMock()
-    fakePage.wait_for_selector.side_effect = Exception("timeout waiting for selector")
-    result = organizer._autofillLoginPage(fakePage, "u@e.com", "p@ssw0rd")
-    assert result is False, "should return False when pre-fill fails"
+
+def testFirefoxLaunchConvertsPlaywrightInstallHintToRuntimeError(organizer: VideoOrganizer):
+    """Error messages containing the 'playwright install' hint are also converted."""
+    fakePW = MagicMock()
+    fakePW.firefox.launch.side_effect = Exception(
+        "Please run the following command to download new browsers:\n\n    playwright install\n"
+    )
+
+    with pytest.raises(RuntimeError, match="playwright install firefox"):
+        organizer._firefoxLaunch(fakePW)
+
+
+def testFirefoxLaunchPropagatesOtherExceptions(organizer: VideoOrganizer):
+    """Errors unrelated to missing browser binaries are re-raised unchanged."""
+    fakePW = MagicMock()
+    fakePW.firefox.launch.side_effect = OSError("network error")
+
+    with pytest.raises(OSError, match="network error"):
+        organizer._firefoxLaunch(fakePW)
 
 
 # ---------------------------------------------------------------------------
@@ -1736,6 +1740,37 @@ def testImportFirefoxSessionMapsZeroExpiryToMinusOne(
     assert cookies["persistent_cookie"]["expires"] == 9999999999
 
 
+def testImportFirefoxSessionClampsOverLimitExpiry(
+    organizer: VideoOrganizer, tmp_path: Path
+):
+    """Cookies with expiry > 253402300799 (Playwright's kMaxCookieExpiresDateInSeconds)
+    must be clamped to 253402300799.
+
+    Some sites and auth providers set expiry in the far future (e.g.
+    expiry=9999999999999).  Playwright's rewriteCookies() rejects any
+    expires > 253402300799 with "Cookie should have a valid expires".
+    """
+    profileDir = tmp_path / "profile"
+    profileDir.mkdir()
+    _make_firefox_cookies_db(
+        profileDir,
+        [
+            # Expiry far beyond year 9999 — Playwright would reject this
+            ("far_future", "val", "grok.com", "/", 9999999999999, 1, 0, 0),
+        ],
+    )
+    sessionFile = tmp_path / "session.json"
+
+    result = organizer.importFirefoxSession(sessionFile=sessionFile, profilePath=profileDir)
+
+    assert result is True
+    state = json.loads(sessionFile.read_text())
+    cookie = state["cookies"][0]
+    assert cookie["expires"] == 253402300799, (
+        "far-future expiry must be clamped to kMaxCookieExpiresDateInSeconds"
+    )
+
+
 def testImportFirefoxSessionConvertsFloatExpiryToInt(
     organizer: VideoOrganizer, tmp_path: Path
 ):
@@ -1831,7 +1866,7 @@ def testScrapeGrokSavedMediaUsesFirefoxSessionWhenAvailable(
     confirmedOrganizer: VideoOrganizer, tmp_path: Path
 ):
     """When importFirefoxSession succeeds, the scraper uses the imported session
-    and does NOT fall back to opening a visible Playwright browser window."""
+    and does NOT fall back to opening a system Firefox window."""
     sessionFile = tmp_path / "grokSession.json"
     assert not sessionFile.exists()
 
@@ -1847,7 +1882,7 @@ def testScrapeGrokSavedMediaUsesFirefoxSessionWhenAvailable(
     fakeBrowser.new_context.return_value = fakeContext
 
     fakePW = MagicMock()
-    fakePW.chromium.launch.return_value = fakeBrowser
+    fakePW.firefox.launch.return_value = fakeBrowser
 
     def _fake_import(sessionFile=None, profilePath=None):
         """Simulate a successful Firefox import by writing a minimal session file."""
@@ -1857,16 +1892,16 @@ def testScrapeGrokSavedMediaUsesFirefoxSessionWhenAvailable(
     with (
         patch("organiseMyVideo.grok.sync_playwright") as mockPW,
         patch.object(confirmedOrganizer, "importFirefoxSession", side_effect=_fake_import),
+        patch.object(confirmedOrganizer, "_openFirefoxWindow") as mockOpenFF,
     ):
         mockPW.return_value.__enter__.return_value = fakePW
         confirmedOrganizer.scrapeGrokSavedMedia(sessionFile=sessionFile)
 
-    # The browser should only have been launched headless (the Firefox import path)
-    # — no non-headless launch for manual login.
-    launch_calls = fakePW.chromium.launch.call_args_list
-    assert all(
-        c.kwargs.get("headless") is not False for c in launch_calls
-    ), "browser should only be launched in headless mode when a Firefox session is available"
+    # Playwright Firefox was used for scraping (not Chromium)
+    assert fakePW.firefox.launch.called
+    assert not fakePW.chromium.launch.called
+    # System Firefox should NOT have been opened (cookies were imported silently)
+    mockOpenFF.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -1878,7 +1913,7 @@ def testScrapeGrokSavedMediaUsesSessionFileWhenPresent(
     confirmedOrganizer: VideoOrganizer, tmp_path: Path
 ):
     """When a session file exists the browser context is initialised from it
-    and the login form automation code is never reached."""
+    and no system Firefox window is opened."""
     sessionFile = tmp_path / "grokSession.json"
     sessionFile.write_text("{}")  # minimal valid storage-state
 
@@ -1894,9 +1929,12 @@ def testScrapeGrokSavedMediaUsesSessionFileWhenPresent(
     fakeBrowser.new_context.return_value = fakeContext
 
     fakePW = MagicMock()
-    fakePW.chromium.launch.return_value = fakeBrowser
+    fakePW.firefox.launch.return_value = fakeBrowser
 
-    with patch("organiseMyVideo.grok.sync_playwright") as mockPW:
+    with (
+        patch("organiseMyVideo.grok.sync_playwright") as mockPW,
+        patch.object(confirmedOrganizer, "_openFirefoxWindow") as mockOpenFF,
+    ):
         mockPW.return_value.__enter__.return_value = fakePW
         stats = confirmedOrganizer.scrapeGrokSavedMedia(sessionFile=sessionFile)
 
@@ -1906,23 +1944,24 @@ def testScrapeGrokSavedMediaUsesSessionFileWhenPresent(
     assert "storage_state" in call_kwargs.kwargs
     assert call_kwargs.kwargs["storage_state"] == str(sessionFile)
     assert stats["postsFound"] == 0
+    # Playwright Firefox used (not Chromium), system Firefox not opened
+    assert fakePW.firefox.launch.called
+    assert not fakePW.chromium.launch.called
+    mockOpenFF.assert_not_called()
 
 
-def testScrapeGrokSavedMediaSavesSessionAfterLogin(
+def testScrapeGrokSavedMediaOpensFirefoxAndImportsCookiesWhenNoSession(
     confirmedOrganizer: VideoOrganizer, tmp_path: Path
 ):
-    """When no session file exists the browser is relaunched non-headless,
-    the email is pre-filled via _autofillLoginPage, and storage_state()
-    persists the session."""
+    """When no session file exists and no Firefox cookies can be imported silently,
+    system Firefox is opened, the user logs in, cookies are imported, and the
+    headless Playwright Firefox scraper uses those cookies."""
     sessionFile = tmp_path / "new_session.json"
-    credFile = tmp_path / "grokCredentials.json"
-    credFile.write_text(json.dumps({"username": "user@example.com", "password": "s3cr3t"}))
     assert not sessionFile.exists()
 
     fakePage = MagicMock()
-    fakePage.url = "https://grok.com/imagine/saved"  # successful login → stays on saved page
+    fakePage.url = "https://grok.com/imagine/saved"
     fakePage.eval_on_selector_all.return_value = []
-    fakePage.is_closed.return_value = False  # browser stays open after user presses Enter
 
     fakeContext = MagicMock()
     fakeContext.new_page.return_value = fakePage
@@ -1932,152 +1971,119 @@ def testScrapeGrokSavedMediaSavesSessionAfterLogin(
     fakeBrowser.new_context.return_value = fakeContext
 
     fakePW = MagicMock()
-    fakePW.chromium.launch.return_value = fakeBrowser
+    fakePW.firefox.launch.return_value = fakeBrowser
+
+    _import_calls = [False]  # first call returns False; subsequent calls create file and return True
+
+    def _fake_import(sessionFile=None, profilePath=None):
+        if _import_calls:
+            return _import_calls.pop(0)
+        sessionFile.write_text(json.dumps({"cookies": [], "origins": []}))
+        return True
 
     with (
         patch("organiseMyVideo.grok.sync_playwright") as mockPW,
-        patch("builtins.input", return_value=""),  # simulate user pressing Enter
+        patch.object(confirmedOrganizer, "_openFirefoxWindow") as mockOpenFF,
+        patch.object(confirmedOrganizer, "importFirefoxSession", side_effect=_fake_import),
+        patch("builtins.input", return_value=""),
     ):
         mockPW.return_value.__enter__.return_value = fakePW
-        confirmedOrganizer.scrapeGrokSavedMedia(
-            sessionFile=sessionFile, credentialsFile=credFile
-        )
+        confirmedOrganizer.scrapeGrokSavedMedia(sessionFile=sessionFile)
 
-    # The browser should have been relaunched non-headless for manual login
-    launch_calls = fakePW.chromium.launch.call_args_list
-    assert any(
-        c.kwargs.get("headless") is False for c in launch_calls
-    ), "expected at least one non-headless browser launch for manual login"
-
-    # Both email and password should have been pre-filled
-    filled_values = [call.args[1] for call in fakePage.fill.call_args_list]
-    assert "user@example.com" in filled_values, "email not filled"
-    assert "s3cr3t" in filled_values, "password not filled"
-
-    # storage_state should have been called (at least once) to save the session
-    assert fakeContext.storage_state.called
-    saved_paths = [
-        call.kwargs.get("path") or (call.args[0] if call.args else None)
-        for call in fakeContext.storage_state.call_args_list
-    ]
-    assert str(sessionFile) in saved_paths
+    # System Firefox was opened for login
+    mockOpenFF.assert_called_once()
+    # Playwright Firefox was used for scraping (headless, not Chromium)
+    assert fakePW.firefox.launch.called
+    assert not fakePW.chromium.launch.called
 
 
-def testManualLoginExitsCleanlyIfBrowserWindowClosed(
+def testScrapeGrokSavedMediaExitsIfCookieImportFailsAfterLogin(
     confirmedOrganizer: VideoOrganizer, tmp_path: Path
 ):
-    """If the user closes the browser window during manual login, the process
-    should exit with SystemExit(1) instead of crashing with a Playwright error."""
+    """When the user presses Enter after opening Firefox but cookie import still
+    fails, the process exits with SystemExit(1)."""
     sessionFile = tmp_path / "new_session.json"
-    credFile = tmp_path / "grokCredentials.json"
-    credFile.write_text(json.dumps({"username": "user@example.com", "password": "s3cr3t"}))
-
-    fakePage = MagicMock()
-    fakePage.url = "https://grok.com/imagine/saved"
-    fakePage.eval_on_selector_all.return_value = []
-    # Simulate the user closing the browser window — page.is_closed() returns True
-    fakePage.is_closed.return_value = True
-
-    fakeContext = MagicMock()
-    fakeContext.new_page.return_value = fakePage
-
-    fakeBrowser = MagicMock()
-    fakeBrowser.new_context.return_value = fakeContext
 
     fakePW = MagicMock()
-    fakePW.chromium.launch.return_value = fakeBrowser
 
     with (
         patch("organiseMyVideo.grok.sync_playwright") as mockPW,
-        patch("builtins.input", return_value=""),  # simulate user pressing Enter
+        patch.object(confirmedOrganizer, "_openFirefoxWindow"),
+        patch.object(confirmedOrganizer, "importFirefoxSession", return_value=False),
+        patch("builtins.input", return_value=""),
     ):
         mockPW.return_value.__enter__.return_value = fakePW
         with pytest.raises(SystemExit) as exc_info:
-            confirmedOrganizer.scrapeGrokSavedMedia(
-                sessionFile=sessionFile, credentialsFile=credFile
-            )
+            confirmedOrganizer.scrapeGrokSavedMedia(sessionFile=sessionFile)
 
     assert exc_info.value.code == 1
-    # storage_state must NOT have been called — the session should not be saved
-    # when the browser was closed without completing login
-    assert not fakeContext.storage_state.called
 
 
-def testManualLoginExitsCleanlyIfEnterPressedWithoutLoggingIn(
+def testScrapeGrokSavedMediaOpensFirefoxWhenSessionExpired(
     confirmedOrganizer: VideoOrganizer, tmp_path: Path
 ):
-    """If the user presses Enter without completing login (browser still open but
-    URL is not /imagine/saved), the process should exit with SystemExit(1) and
-    must NOT save an unauthenticated session to disk."""
-    sessionFile = tmp_path / "new_session.json"
-    credFile = tmp_path / "grokCredentials.json"
-    credFile.write_text(json.dumps({"username": "user@example.com", "password": "s3cr3t"}))
+    """When a saved session has expired (Grok redirects away from /imagine/saved),
+    system Firefox is opened for re-login and cookies are re-imported."""
+    sessionFile = tmp_path / "grokSession.json"
+    sessionFile.write_text("{}")  # existing but expired session
 
-    # Saved-session page that appears expired (redirects away from /imagine/saved)
+    # First page visit with expired session redirects away from /imagine/saved
     fakeExpiredPage = MagicMock()
-    fakeExpiredPage.url = "https://grok.com/imagine"  # expired → not /imagine/saved
+    fakeExpiredPage.url = "https://grok.com/sign-in"
     fakeExpiredPage.eval_on_selector_all.return_value = []
-    fakeExpiredPage.is_closed.return_value = False
 
-    # Login page that stays on grok.com after the user presses Enter without logging in
-    fakeLoginPage = MagicMock()
-    fakeLoginPage.url = "https://grok.com/sign-in"  # not /imagine/saved — login incomplete
-    fakeLoginPage.eval_on_selector_all.return_value = []
-    fakeLoginPage.is_closed.return_value = False
+    # Second page visit after re-login lands on the correct URL
+    fakeFreshPage = MagicMock()
+    fakeFreshPage.url = "https://grok.com/imagine/saved"
+    fakeFreshPage.eval_on_selector_all.return_value = []
 
     fakeExpiredContext = MagicMock()
     fakeExpiredContext.new_page.return_value = fakeExpiredPage
 
-    fakeLoginContext = MagicMock()
-    fakeLoginContext.new_page.return_value = fakeLoginPage
+    fakeFreshContext = MagicMock()
+    fakeFreshContext.new_page.return_value = fakeFreshPage
+    fakeFreshContext.storage_state.return_value = None
 
-    fakeHeadlessBrowser = MagicMock()
-    fakeHeadlessBrowser.new_context.return_value = fakeExpiredContext
+    fakeExpiredBrowser = MagicMock()
+    fakeExpiredBrowser.new_context.return_value = fakeExpiredContext
 
-    fakeHeadfulBrowser = MagicMock()
-    fakeHeadfulBrowser.new_context.return_value = fakeLoginContext
-
-    def _launch(headless=True, **kwargs):
-        return fakeHeadlessBrowser if headless else fakeHeadfulBrowser
+    fakeFreshBrowser = MagicMock()
+    fakeFreshBrowser.new_context.return_value = fakeFreshContext
 
     fakePW = MagicMock()
-    fakePW.chromium.launch.side_effect = _launch
+    fakePW.firefox.launch.side_effect = [fakeExpiredBrowser, fakeFreshBrowser]
 
-    sessionFile.write_text("{}")  # existing (expired) session file
+    def _fake_import(sessionFile=None, profilePath=None):
+        sessionFile.write_text(json.dumps({"cookies": [], "origins": []}))
+        return True
 
     with (
         patch("organiseMyVideo.grok.sync_playwright") as mockPW,
-        patch("builtins.input", return_value=""),  # simulate user pressing Enter
-        patch.object(confirmedOrganizer, "importFirefoxSession", return_value=False),
+        patch.object(confirmedOrganizer, "_openFirefoxWindow") as mockOpenFF,
+        patch.object(confirmedOrganizer, "importFirefoxSession", side_effect=_fake_import),
+        patch("builtins.input", return_value=""),
     ):
         mockPW.return_value.__enter__.return_value = fakePW
-        with pytest.raises(SystemExit) as exc_info:
-            confirmedOrganizer.scrapeGrokSavedMedia(
-                sessionFile=sessionFile, credentialsFile=credFile
-            )
+        confirmedOrganizer.scrapeGrokSavedMedia(sessionFile=sessionFile)
 
-    assert exc_info.value.code == 1
-    # Session must NOT have been saved for the incomplete login
-    assert not fakeLoginContext.storage_state.called
+    # Firefox was opened for re-login after session expiry
+    mockOpenFF.assert_called_once()
+    # Playwright Firefox used in both passes
+    assert fakePW.firefox.launch.call_count == 2
+    assert not fakePW.chromium.launch.called
 
 
-def testFreshLoginExitsCleanlyIfVerificationFails(
+def testScrapeGrokSavedMediaExitsIfReloginCookieImportFails(
     confirmedOrganizer: VideoOrganizer, tmp_path: Path
 ):
-    """When there is no existing session and the user presses Enter while the
-    browser is still on the verification/login page (e.g. Cloudflare Turnstile
-    failed), the process must exit with SystemExit(1) and must NOT save an
-    unauthenticated session."""
-    sessionFile = tmp_path / "new_session.json"
-    credFile = tmp_path / "grokCredentials.json"
-    credFile.write_text(json.dumps({"username": "user@example.com", "password": "s3cr3t"}))
-    assert not sessionFile.exists()
+    """When a saved session has expired and cookie import fails after re-login
+    via Firefox, the process must exit with SystemExit(1)."""
+    sessionFile = tmp_path / "grokSession.json"
+    sessionFile.write_text("{}")  # existing but expired session
 
-    # Login page where verification failed — stays on accounts.x.ai, not /imagine/saved
     fakePage = MagicMock()
-    fakePage.url = "https://accounts.x.ai/sign-in?redirect=grok-com&email=true"
+    fakePage.url = "https://grok.com/sign-in"  # expired → redirected away
     fakePage.eval_on_selector_all.return_value = []
-    fakePage.is_closed.return_value = False
 
     fakeContext = MagicMock()
     fakeContext.new_page.return_value = fakePage
@@ -2086,22 +2092,47 @@ def testFreshLoginExitsCleanlyIfVerificationFails(
     fakeBrowser.new_context.return_value = fakeContext
 
     fakePW = MagicMock()
-    fakePW.chromium.launch.return_value = fakeBrowser
+    fakePW.firefox.launch.return_value = fakeBrowser
 
     with (
         patch("organiseMyVideo.grok.sync_playwright") as mockPW,
-        patch("builtins.input", return_value=""),  # simulate user pressing Enter
+        patch.object(confirmedOrganizer, "_openFirefoxWindow"),
+        patch.object(confirmedOrganizer, "importFirefoxSession", return_value=False),
+        patch("builtins.input", return_value=""),
     ):
         mockPW.return_value.__enter__.return_value = fakePW
         with pytest.raises(SystemExit) as exc_info:
-            confirmedOrganizer.scrapeGrokSavedMedia(
-                sessionFile=sessionFile, credentialsFile=credFile
-            )
+            confirmedOrganizer.scrapeGrokSavedMedia(sessionFile=sessionFile)
 
     assert exc_info.value.code == 1
-    # Session file must NOT have been written
-    assert not sessionFile.exists()
-    assert not fakeContext.storage_state.called
+
+
+def testScrapeGrokSavedMediaRaisesRuntimeErrorWhenFirefoxNotInstalled(
+    confirmedOrganizer: VideoOrganizer, tmp_path: Path
+):
+    """When the Playwright Firefox binary is not installed, scrapeGrokSavedMedia
+    must raise a clear RuntimeError even if cookies have already been imported —
+    it must never crash with a raw Playwright traceback."""
+    sessionFile = tmp_path / "grokSession.json"
+
+    fakePW = MagicMock()
+    fakePW.firefox.launch.side_effect = Exception(
+        "BrowserType.launch: Executable doesn't exist at /home/user/.cache/ms-playwright/firefox-1509/firefox/firefox"
+    )
+
+    def _fake_import(sessionFile=None, profilePath=None):
+        sessionFile.write_text(json.dumps({"cookies": [], "origins": []}))
+        return True
+
+    with (
+        patch("organiseMyVideo.grok.sync_playwright") as mockPW,
+        patch.object(confirmedOrganizer, "_openFirefoxWindow"),
+        patch.object(confirmedOrganizer, "importFirefoxSession", side_effect=_fake_import),
+        patch("builtins.input", return_value=""),
+    ):
+        mockPW.return_value.__enter__.return_value = fakePW
+        with pytest.raises(RuntimeError, match="playwright install firefox"):
+            confirmedOrganizer.scrapeGrokSavedMedia(sessionFile=sessionFile)
 
 
 # ---------------------------------------------------------------------------
