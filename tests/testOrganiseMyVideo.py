@@ -1385,6 +1385,55 @@ def testSanitizeStorageStateHandlesMissingFile(tmp_path, organizer: VideoOrganiz
 
 
 # ---------------------------------------------------------------------------
+# _firefoxLaunch
+# ---------------------------------------------------------------------------
+
+
+def testFirefoxLaunchReturnsLaunchedBrowser(organizer: VideoOrganizer):
+    """When launch succeeds the returned browser object is passed through."""
+    fakeBrowser = MagicMock()
+    fakePW = MagicMock()
+    fakePW.firefox.launch.return_value = fakeBrowser
+
+    result = organizer._firefoxLaunch(fakePW)
+
+    fakePW.firefox.launch.assert_called_once_with(headless=True)
+    assert result is fakeBrowser
+
+
+def testFirefoxLaunchConvertsNotInstalledErrorToRuntimeError(organizer: VideoOrganizer):
+    """When the Firefox binary is absent Playwright raises an error containing
+    'Executable doesn't exist'.  _firefoxLaunch must convert that to RuntimeError."""
+    fakePW = MagicMock()
+    fakePW.firefox.launch.side_effect = Exception(
+        "BrowserType.launch: Executable doesn't exist at /home/user/.cache/ms-playwright/firefox-1509/firefox/firefox"
+    )
+
+    with pytest.raises(RuntimeError, match="playwright install firefox"):
+        organizer._firefoxLaunch(fakePW)
+
+
+def testFirefoxLaunchConvertsPlaywrightInstallHintToRuntimeError(organizer: VideoOrganizer):
+    """Error messages containing the 'playwright install' hint are also converted."""
+    fakePW = MagicMock()
+    fakePW.firefox.launch.side_effect = Exception(
+        "Please run the following command to download new browsers:\n\n    playwright install\n"
+    )
+
+    with pytest.raises(RuntimeError, match="playwright install firefox"):
+        organizer._firefoxLaunch(fakePW)
+
+
+def testFirefoxLaunchPropagatesOtherExceptions(organizer: VideoOrganizer):
+    """Errors unrelated to missing browser binaries are re-raised unchanged."""
+    fakePW = MagicMock()
+    fakePW.firefox.launch.side_effect = OSError("network error")
+
+    with pytest.raises(OSError, match="network error"):
+        organizer._firefoxLaunch(fakePW)
+
+
+# ---------------------------------------------------------------------------
 # _findFirefoxProfile
 # ---------------------------------------------------------------------------
 
@@ -1981,6 +2030,34 @@ def testScrapeGrokSavedMediaExitsIfReloginCookieImportFails(
             confirmedOrganizer.scrapeGrokSavedMedia(sessionFile=sessionFile)
 
     assert exc_info.value.code == 1
+
+
+def testScrapeGrokSavedMediaRaisesRuntimeErrorWhenFirefoxNotInstalled(
+    confirmedOrganizer: VideoOrganizer, tmp_path: Path
+):
+    """When the Playwright Firefox binary is not installed, scrapeGrokSavedMedia
+    must raise a clear RuntimeError even if cookies have already been imported —
+    it must never crash with a raw Playwright traceback."""
+    sessionFile = tmp_path / "grokSession.json"
+
+    fakePW = MagicMock()
+    fakePW.firefox.launch.side_effect = Exception(
+        "BrowserType.launch: Executable doesn't exist at /home/user/.cache/ms-playwright/firefox-1509/firefox/firefox"
+    )
+
+    def _fake_import(sessionFile=None, profilePath=None):
+        sessionFile.write_text(json.dumps({"cookies": [], "origins": []}))
+        return True
+
+    with (
+        patch("organiseMyVideo.grok.sync_playwright") as mockPW,
+        patch.object(confirmedOrganizer, "_openFirefoxWindow"),
+        patch.object(confirmedOrganizer, "importFirefoxSession", side_effect=_fake_import),
+        patch("builtins.input", return_value=""),
+    ):
+        mockPW.return_value.__enter__.return_value = fakePW
+        with pytest.raises(RuntimeError, match="playwright install firefox"):
+            confirmedOrganizer.scrapeGrokSavedMedia(sessionFile=sessionFile)
 
 
 # ---------------------------------------------------------------------------

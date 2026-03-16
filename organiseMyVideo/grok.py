@@ -237,17 +237,51 @@ class GrokMixin:
         elif system == "Darwin":
             subprocess.Popen(["open", "-a", "Firefox", url])
         else:
-            firefox = (
-                shutil.which("firefox")
-                or shutil.which("firefox-esr")
-                or shutil.which("firefox-bin")
+            for candidate in ("firefox", "firefox-esr", "firefox-bin"):
+                firefox = shutil.which(candidate)
+                if firefox:
+                    subprocess.Popen([firefox, "--new-window", url])
+                    return
+            logger.warning(
+                f"Firefox not found on PATH; please open Firefox manually and navigate to {url}"
             )
-            if firefox:
-                subprocess.Popen([firefox, "--new-window", url])
-            else:
-                logger.warning(
-                    f"Firefox not found on PATH; please open Firefox manually and navigate to {url}"
-                )
+
+    @staticmethod
+    def _firefoxLaunch(playwright) -> object:
+        """Launch Playwright Firefox headless, raising a clear error if not installed.
+
+        Playwright's default error for a missing browser binary contains a raw
+        file path and a generic "please run playwright install" hint buried in
+        an ASCII box — easy to miss.  This wrapper intercepts that specific
+        error and re-raises it as a plain :class:`RuntimeError` with an
+        actionable message so users see exactly what to run.
+
+        All other exceptions are re-raised unchanged.
+
+        Args:
+            playwright: The Playwright instance from ``sync_playwright()``.
+
+        Returns:
+            A Playwright ``Browser`` instance.
+
+        Raises:
+            RuntimeError: When the Firefox browser binary has not been
+                          installed via ``playwright install firefox``.
+        """
+        try:
+            return playwright.firefox.launch(headless=True)
+        except Exception as e:
+            msg = str(e)
+            msg_lower = msg.lower()
+            if (
+                ("executable" in msg_lower and ("exist" in msg_lower or "found" in msg_lower))
+                or "playwright install" in msg_lower
+            ):
+                raise RuntimeError(
+                    "Playwright Firefox browser is not installed.\n"
+                    "Run: playwright install firefox"
+                ) from e
+            raise
 
     @staticmethod
     def _firefoxBaseCandidates(system: str) -> List[Path]:
@@ -588,9 +622,11 @@ class GrokMixin:
                 try:
                     logger.info("loading saved Grok session")
                     self._sanitizeStorageState(sessionFile)
-                    browser = playwright.firefox.launch(headless=True)
+                    browser = self._firefoxLaunch(playwright)
                     context = browser.new_context(storage_state=str(sessionFile))
                     context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
+                except RuntimeError:
+                    raise  # Firefox not installed — propagate immediately
                 except Exception as e:
                     logger.warning(
                         f"saved session could not be loaded ({e}); "
@@ -609,9 +645,11 @@ class GrokMixin:
                 if self.importFirefoxSession(sessionFile=sessionFile):
                     try:
                         self._sanitizeStorageState(sessionFile)
-                        browser = playwright.firefox.launch(headless=True)
+                        browser = self._firefoxLaunch(playwright)
                         context = browser.new_context(storage_state=str(sessionFile))
                         context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
+                    except RuntimeError:
+                        raise  # Firefox not installed — propagate immediately
                     except Exception as e:
                         logger.warning(
                             f"imported Firefox session could not be loaded ({e}); "
@@ -643,7 +681,7 @@ class GrokMixin:
                     raise SystemExit(1)
 
                 self._sanitizeStorageState(sessionFile)
-                browser = playwright.firefox.launch(headless=True)
+                browser = self._firefoxLaunch(playwright)
                 context = browser.new_context(storage_state=str(sessionFile))
                 context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
 
@@ -701,7 +739,7 @@ class GrokMixin:
                     raise SystemExit(1)
 
                 self._sanitizeStorageState(sessionFile)
-                browser = playwright.firefox.launch(headless=True)
+                browser = self._firefoxLaunch(playwright)
                 context = browser.new_context(storage_state=str(sessionFile))
                 context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
                 page = context.new_page()
