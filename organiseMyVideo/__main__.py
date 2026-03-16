@@ -124,7 +124,7 @@ Not found:
                 "FIREFOX SESSION IMPORT FAILED\n\n"
                 "Make sure you are logged into grok.com in Firefox,\n"
                 "then run --import-firefox-session again.\n\n"
-                "Alternatively, run --grok and log in via the browser window."
+                "Alternatively, run --grok and Firefox will be opened automatically."
             )
         drawBox(summary)
 

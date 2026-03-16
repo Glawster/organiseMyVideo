@@ -9,18 +9,6 @@ GROK_MEDIA_EXTENSIONS = {".mp4", ".mov", ".webm", ".png", ".jpg", ".jpeg", ".gif
 GROK_USER_CONTENT_DOMAINS = {"imagine-public.x.ai", "images-public.x.ai"}
 GROK_CREDENTIALS_FILE = Path.home() / ".config" / "organiseMyVideo" / "grokCredentials.json"
 
-# Browser launch arguments that suppress Playwright's automation fingerprint.
-# Without these, X.ai's sign-in page detects the automated browser and returns
-# 403 on background API calls before the user can log in.
-_PLAYWRIGHT_BROWSER_ARGS = ["--disable-blink-features=AutomationControlled"]
-# Realistic Chrome user-agent used for all Playwright contexts.  Playwright's
-# default headless UA contains "HeadlessChrome" which bot-detection heuristics
-# flag immediately.
-_PLAYWRIGHT_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/122.0.0.0 Safari/537.36"
-)
 # JavaScript snippet injected into every page of every context to remove the
 # navigator.webdriver property that Playwright exposes by default.
 _PLAYWRIGHT_INIT_SCRIPT = (
