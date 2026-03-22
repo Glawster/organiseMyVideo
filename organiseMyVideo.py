@@ -6,6 +6,7 @@ Movies:    /mnt/movie<n>/Title (Year)/  or  /mnt/myPictures/Title (Year)/
 TV Shows: /mnt/video<n>/TV/Show Name/Season NN/  or  /mnt/myVideo/TV/Show Name/Season NN/
 """
 
+import difflib
 import os
 import sys
 import re
@@ -194,7 +195,35 @@ class VideoOrganizer:
                     return item
         
         return None
-    
+
+    def findBestMatchingTvShow(self, showName: str, videoDirs: List[Path]) -> Optional[str]:
+        """
+        Find the best matching existing TV show folder name.
+
+        Uses fuzzy matching so that minor differences in punctuation or
+        capitalisation between the filename-derived show name and the folder
+        name on disk are tolerated.
+
+        Args:
+            showName: Show name parsed from the filename
+            videoDirs: List of TV storage directories to search
+
+        Returns:
+            Best matching folder name, or None if no close match is found
+        """
+        folderNames = []
+        for tvRoot in videoDirs:
+            if tvRoot.exists():
+                for item in tvRoot.iterdir():
+                    if item.is_dir():
+                        folderNames.append(item.name)
+
+        if not folderNames:
+            return None
+
+        matches = difflib.get_close_matches(showName, folderNames, n=1, cutoff=0.6)
+        return matches[0] if matches else None
+
     def getStorageWithMostSpace(self, storageDirs: List[Path]) -> Optional[Path]:
         """
         Return the storage location with the most free space. 
@@ -227,7 +256,8 @@ class VideoOrganizer:
         
         return bestDir
     
-    def promptUserConfirmation(self, filename: str, defaultName: str, fileType: str) -> Optional[dict]:
+    def promptUserConfirmation(self, filename: str, defaultName: str, fileType: str,
+                               videoDirs: Optional[List[Path]] = None) -> Optional[dict]:
         """
         Prompt user to confirm or correct the detected name.
 
@@ -235,6 +265,8 @@ class VideoOrganizer:
             filename: Original filename
             defaultName:  Detected name to confirm
             fileType: Type of file ('tv' or 'movie')
+            videoDirs: Optional list of TV storage directories used to suggest
+                       an existing show name when the user switches to TV mode.
 
         Returns:
             dict with 'name' and 'type' keys, or None to skip this item.
@@ -270,8 +302,15 @@ class VideoOrganizer:
             logger.info("user requested to quit")
             sys.exit(0)
         elif response.lower() == "t":
-            showName = input(f"  Enter show name (default: {defaultName}): ").strip()
-            return {"name": showName if showName else defaultName, "type": "tv"}
+            tvDefault = defaultName
+            if videoDirs:
+                tvParsed = self.parseTvFilename(filename)
+                parsedShowName = tvParsed["showName"] if tvParsed else defaultName
+                bestMatch = self.findBestMatchingTvShow(parsedShowName, videoDirs)
+                if bestMatch:
+                    tvDefault = bestMatch
+            showName = input(f"  Enter show name (default: {tvDefault}): ").strip()
+            return {"name": showName if showName else tvDefault, "type": "tv"}
         elif response.lower() == "m":
             title = input(f"  Enter movie title (default: {defaultName}): ").strip()
             return {"name": title if title else defaultName, "type": "movie"}
@@ -303,7 +342,8 @@ class VideoOrganizer:
             result = self.promptUserConfirmation(
                 sourceFile.name,
                 f"{title} ({year})",
-                "movie"
+                "movie",
+                videoDirs=videoDirs,
             )
             if result is None:
                 logger.info(f"skipping: {sourceFile.name}")
@@ -391,7 +431,8 @@ class VideoOrganizer:
             result = self.promptUserConfirmation(
                 sourceFile.name,
                 showName,
-                "tv"
+                "tv",
+                videoDirs=videoDirs,
             )
             if result is None:
                 logger.info(f"skipping: {sourceFile.name}")
