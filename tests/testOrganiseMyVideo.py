@@ -228,6 +228,51 @@ def testFindExistingTvShowDirNotFound(tmp_path: Path, organizer: VideoOrganizer)
 
 
 # ---------------------------------------------------------------------------
+# findBestMatchingTvShow
+# ---------------------------------------------------------------------------
+
+
+def testFindBestMatchingTvShowExactMatch(tmp_path: Path, organizer: VideoOrganizer):
+    tvRoot = tmp_path / "TV"
+    tvRoot.mkdir()
+    (tvRoot / "Breaking Bad").mkdir()
+    result = organizer.findBestMatchingTvShow("Breaking Bad", [tvRoot])
+    assert result == "Breaking Bad"
+
+
+def testFindBestMatchingTvShowFuzzyMatchReturnsFolder(tmp_path: Path, organizer: VideoOrganizer):
+    """Folder name is returned even when the parsed show name differs slightly."""
+    tvRoot = tmp_path / "TV"
+    tvRoot.mkdir()
+    (tvRoot / "Law and Order Special Victims Unit").mkdir()
+    # Simulates a parsed show name that omits the trailing word
+    result = organizer.findBestMatchingTvShow("Law and Order Special Victims Unit", [tvRoot])
+    assert result == "Law and Order Special Victims Unit"
+
+
+def testFindBestMatchingTvShowCaseInsensitive(tmp_path: Path, organizer: VideoOrganizer):
+    """Fuzzy matching is case-insensitive enough to match mixed-case folder names."""
+    tvRoot = tmp_path / "TV"
+    tvRoot.mkdir()
+    (tvRoot / "Breaking Bad").mkdir()
+    result = organizer.findBestMatchingTvShow("breaking bad", [tvRoot])
+    assert result == "Breaking Bad"
+
+
+def testFindBestMatchingTvShowNoMatch(tmp_path: Path, organizer: VideoOrganizer):
+    tvRoot = tmp_path / "TV"
+    tvRoot.mkdir()
+    (tvRoot / "Breaking Bad").mkdir()
+    result = organizer.findBestMatchingTvShow("Completely Different Show", [tvRoot])
+    assert result is None
+
+
+def testFindBestMatchingTvShowEmptyDirs(organizer: VideoOrganizer):
+    result = organizer.findBestMatchingTvShow("Breaking Bad", [])
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
 # _isSampleLikeFolder
 # ---------------------------------------------------------------------------
 
@@ -597,6 +642,39 @@ def testPromptUserConfirmationTDefaultsToCurrentName(organizer: VideoOrganizer):
     with patch("builtins.input", side_effect=["t", ""]):
         result = organizer.promptUserConfirmation("file.mkv", "Inception (2010)", "movie")
     assert result == {"name": "Inception (2010)", "type": "tv"}
+
+
+def testPromptUserConfirmationTUsesMatchingTvFolderAsDefault(tmp_path: Path, organizer: VideoOrganizer):
+    """When videoDirs is provided and a folder matches the parsed show name, use it as default."""
+    tvDir = tmp_path / "TV"
+    tvDir.mkdir()
+    (tvDir / "Law and Order Special Victims Unit").mkdir()
+    filename = "Law.and.Order.Special.Victims.Unit.S27E13.Corrosive.1080p.mkv"
+    with patch("builtins.input", side_effect=["t", ""]):
+        result = organizer.promptUserConfirmation(filename, "Law and Order Special Victims Unit S27E13 Corrosive (1080)", "movie", videoDirs=[tvDir])
+    assert result == {"name": "Law and Order Special Victims Unit", "type": "tv"}
+
+
+def testPromptUserConfirmationTFallsBackToDefaultWhenNoTvFolderMatch(tmp_path: Path, organizer: VideoOrganizer):
+    """When videoDirs has no matching folder, fall back to the original defaultName."""
+    tvDir = tmp_path / "TV"
+    tvDir.mkdir()
+    (tvDir / "Breaking Bad").mkdir()
+    filename = "Law.and.Order.Special.Victims.Unit.S27E13.Corrosive.1080p.mkv"
+    with patch("builtins.input", side_effect=["t", ""]):
+        result = organizer.promptUserConfirmation(filename, "Law and Order Special Victims Unit S27E13 Corrosive (1080)", "movie", videoDirs=[tvDir])
+    assert result == {"name": "Law and Order Special Victims Unit S27E13 Corrosive (1080)", "type": "tv"}
+
+
+def testPromptUserConfirmationTUserCanOverrideSuggestedTvFolder(tmp_path: Path, organizer: VideoOrganizer):
+    """User can override the suggested TV folder name by typing a custom name."""
+    tvDir = tmp_path / "TV"
+    tvDir.mkdir()
+    (tvDir / "Law and Order Special Victims Unit").mkdir()
+    filename = "Law.and.Order.Special.Victims.Unit.S27E13.Corrosive.1080p.mkv"
+    with patch("builtins.input", side_effect=["t", "My Custom Show"]):
+        result = organizer.promptUserConfirmation(filename, "Some Movie (2024)", "movie", videoDirs=[tvDir])
+    assert result == {"name": "My Custom Show", "type": "tv"}
 
 
 def testPromptUserConfirmationMSwitchesToMovie(organizer: VideoOrganizer):
