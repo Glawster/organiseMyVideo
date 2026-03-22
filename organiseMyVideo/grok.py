@@ -4,9 +4,9 @@ import os
 import re
 import json
 import shutil
-import getpass
 import platform
 import sqlite3
+import subprocess
 import tempfile
 import configparser
 import urllib.parse
@@ -29,12 +29,16 @@ from .constants import (
     GROK_CREDENTIALS_FILE,
     GROK_SESSION_FILE,
     _GROK_SAVED_URL,
-    _PLAYWRIGHT_BROWSER_ARGS,
-    _PLAYWRIGHT_USER_AGENT,
     _PLAYWRIGHT_INIT_SCRIPT,
 )
 
 logger = getLogger("organiseMyVideo")
+
+# Playwright's maximum allowed cookie expires value (from kMaxCookieExpiresDateInSeconds
+# in playwright/driver/package/lib/server/network.js).  Any timestamp beyond this
+# (9999-12-31 23:59:59 UTC) is rejected by Playwright's rewriteCookies() with the
+# "Cookie should have a valid expires" error, even though the value is a positive integer.
+_PLAYWRIGHT_MAX_COOKIE_EXPIRES = 253402300799
 
 
 class GrokMixin:
@@ -167,146 +171,151 @@ class GrokMixin:
 
         return stats
 
-    def _loadOrPromptGrokCredentials(
-        self, credentialsFile: Path = GROK_CREDENTIALS_FILE
-    ) -> tuple:
-        """
-        Load Grok credentials from a JSON file, prompting if not found.
-
-        If the file exists and contains both ``username`` and ``password``,
-        those values are returned directly.  Otherwise the user is prompted
-        interactively (password entry is hidden) and the credentials are saved
-        to the file for future use.
-
-        Args:
-            credentialsFile: Path to the JSON credentials file.
-
-        Returns:
-            Tuple of (username, password).
-        """
-        if credentialsFile.exists():
-            try:
-                data = json.loads(credentialsFile.read_text())
-                username = data.get("username", "")
-                password = data.get("password", "")
-                if username and password:
-                    logger.value("loaded grok credentials from", str(credentialsFile))
-                    return username, password
-            except Exception as e:
-                logger.error(f"failed to load credentials from {credentialsFile}: {e}")
-
-        logger.info("grok credentials not found - please enter your credentials")
-        username = input("Grok username (email): ").strip()
-        password = getpass.getpass("Grok password: ")
-
-        if not username or not password:
-            raise RuntimeError("username and password are required for --grok")
-
-        credentialsFile.parent.mkdir(parents=True, exist_ok=True)
-        credentialsFile.write_text(
-            json.dumps({"username": username, "password": password}, indent=2)
-        )
-        credentialsFile.chmod(0o600)
-        logger.value("saved grok credentials to", str(credentialsFile))
-        return username, password
-
     @staticmethod
     def _sanitizeStorageState(sessionFile: Path) -> None:
         """Fix cookie ``expires`` values in a Playwright storage-state JSON file.
 
         Playwright requires cookie ``expires`` to be either ``-1`` (session
-        cookie / no expiry) or a **positive integer** (Unix timestamp in
-        seconds).  Values that are invalid — ``0``, ``null``, other negative
-        numbers, or non-integer floats — cause ``new_context()`` to raise:
+        cookie / no expiry) or a **positive integer no greater than
+        253402300799** (9999-12-31 23:59:59 UTC, Playwright's internal maximum).
+        Values outside this range cause ``new_context()`` to raise:
 
         ``Error setting storage state: Cookie should have a valid expires``
+
+        Specific fixups applied:
+
+        * ``None``, ``0``, ``False``, or any other non-numeric value → ``-1``
+        * Negative numbers other than ``-1`` → ``-1``
+        * Floats → truncated to ``int`` (Playwright requires a plain JSON
+          integer, not ``1742000000.0``).  A float that truncates to ``0`` or a
+          negative value is converted to ``-1`` instead.
+        * Integers greater than ``253402300799`` → clamped to ``253402300799``
 
         This helper reads the file, normalises every cookie's ``expires``
         in-place, and writes the file back.  It is called immediately after
         writing any session file and again just before loading it, so that
         sessions written by an older version of Playwright (which emitted
-        ``0`` for session cookies) are also fixed transparently.
+        ``0`` for session cookies) or by sites that set far-future expiry dates
+        are also fixed transparently.
 
         Args:
             sessionFile: Path to the Playwright storage-state JSON file to fix.
         """
         try:
-            data = json.loads(sessionFile.read_text())
+            data = json.loads(sessionFile.read_text(encoding="utf-8"))
         except Exception:
             return  # file missing or unparseable — caller will handle the error
         changed = False
         for cookie in data.get("cookies", []):
             raw = cookie.get("expires")
-            if raw is None or raw == 0 or (isinstance(raw, (int, float)) and raw < 0 and raw != -1):
+            # ---- booleans: True/False serialize to JSON true/false, not numbers
+            if isinstance(raw, bool):
+                cookie["expires"] = -1
+                changed = True
+            # ---- None, 0, or any negative except -1 → session cookie sentinel
+            elif raw is None or raw == 0 or (isinstance(raw, (int, float)) and raw < 0 and raw != -1):
                 cookie["expires"] = -1
                 changed = True
             elif isinstance(raw, float):
                 # Convert any float (whole-number or fractional) to int.
                 # json.dumps serialises 1742000000.0 as "1742000000.0" which
                 # Playwright rejects — it requires a plain JSON integer.
-                cookie["expires"] = int(raw)
+                # A float that truncates to 0 or a negative is treated as a
+                # session cookie.  A float beyond the max is clamped.
+                int_val = int(raw)
+                if int_val == 0 or int_val < -1:
+                    cookie["expires"] = -1
+                elif int_val > _PLAYWRIGHT_MAX_COOKIE_EXPIRES:
+                    cookie["expires"] = _PLAYWRIGHT_MAX_COOKIE_EXPIRES
+                else:
+                    cookie["expires"] = int_val
+                changed = True
+            elif isinstance(raw, int) and raw > _PLAYWRIGHT_MAX_COOKIE_EXPIRES:
+                # Timestamps beyond year 9999 are rejected by Playwright's
+                # rewriteCookies() validation.  Clamp to the allowed maximum.
+                cookie["expires"] = _PLAYWRIGHT_MAX_COOKIE_EXPIRES
                 changed = True
         if changed:
-            sessionFile.write_text(json.dumps(data, indent=2))
+            sessionFile.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
-    def _autofillLoginPage(self, page, username: str, password: str) -> bool:
-        """Pre-fill the email and password fields on the X.ai sign-in form.
+    def _openFirefoxWindow(self, url: str) -> None:
+        """Open the user's system Firefox browser at *url*.
 
-        Fills the email, clicks Next, waits for the password field, then fills
-        the password.  The Login button is intentionally left for the user to
-        click so that Cloudflare Turnstile's human-verification challenge is
-        triggered by real human interaction.
+        Uses platform-appropriate commands:
 
-        Silently degrades to a warning log if any selector is not found so the
-        user can still log in manually.
+        * Linux: ``firefox`` or ``firefox-esr`` (whichever is found on PATH)
+        * macOS: ``open -a Firefox``
+        * Windows: ``cmd /c start <url>``
+
+        Only ``https://`` and ``http://`` URLs are accepted; any other value
+        raises ``ValueError`` to prevent command injection.
+
+        If Firefox cannot be located on the system, a warning is logged and
+        the user is expected to open Firefox manually and navigate to *url*.
 
         Args:
-            page: Playwright Page instance on the X.ai sign-in page.
-            username: Email address to pre-fill.
-            password: Password to pre-fill after clicking Next.
+            url: The URL to open in Firefox.  Must begin with ``https://`` or
+                 ``http://``.
+
+        Raises:
+            ValueError: If *url* does not start with ``https://`` or
+                        ``http://``.
+        """
+        if not url.startswith(("https://", "http://")):
+            raise ValueError(f"refusing to open non-http URL: {url!r}")
+
+        system = platform.system()
+        if system == "Windows":
+            # Use cmd /c start to avoid shell=True with a plain string.
+            subprocess.Popen(["cmd", "/c", "start", "", url])
+        elif system == "Darwin":
+            subprocess.Popen(["open", "-a", "Firefox", url])
+        else:
+            for candidate in ("firefox", "firefox-esr", "firefox-bin"):
+                firefox = shutil.which(candidate)
+                if firefox:
+                    subprocess.Popen([firefox, "--new-window", url])
+                    return
+            logger.warning(
+                f"Firefox not found on PATH; please open Firefox manually and navigate to {url}"
+            )
+
+    @staticmethod
+    def _firefoxLaunch(playwright) -> object:
+        """Launch Playwright Firefox headless, raising a clear error if not installed.
+
+        Playwright's default error for a missing browser binary contains a raw
+        file path and a generic "please run playwright install" hint buried in
+        an ASCII box — easy to miss.  This wrapper intercepts that specific
+        error and re-raises it as a plain :class:`RuntimeError` with an
+        actionable message so users see exactly what to run.
+
+        All other exceptions are re-raised unchanged.
+
+        Args:
+            playwright: The Playwright instance from ``sync_playwright()``.
 
         Returns:
-            ``True`` if both fields were filled successfully, ``False`` otherwise.
+            A Playwright ``Browser`` instance.
+
+        Raises:
+            RuntimeError: When the Firefox browser binary has not been
+                          installed via ``playwright install firefox``.
         """
-        # X/Grok login uses ``input[name="text"]`` for the username/email field.
-        # The other selectors are retained as fallbacks for future page changes.
-        EMAIL_SELECTOR = (
-            "input[name='text'], input[type='email'], "
-            "input[autocomplete='username'], input[name='email']"
-        )
-        NEXT_SELECTOR = "button[type='submit'], button:has-text('Next')"
-        PASSWORD_SELECTOR = "input[type='password']"
-        SELECTOR_TIMEOUT = 10_000
         try:
-            page.wait_for_selector(EMAIL_SELECTOR, timeout=SELECTOR_TIMEOUT)
-            page.fill(EMAIL_SELECTOR, username)
-            page.click(NEXT_SELECTOR)
-            page.wait_for_selector(PASSWORD_SELECTOR, timeout=SELECTOR_TIMEOUT)
-            page.fill(PASSWORD_SELECTOR, password)
-            logger.info("email and password pre-filled — please click Login and complete any verification")
-            return True
+            return playwright.firefox.launch(headless=True)
         except Exception as e:
-            # Broad catch is intentional: Playwright raises various exception
-            # types depending on the failure (timeout, missing element, navigation
-            # error).  The helper is best-effort; any failure falls back to fully
-            # manual entry so the user is never blocked.
-            logger.warning(f"auto-fill of login form failed ({e}); please log in manually")
-            return False
-
-    def _awaitManualLoginInput(self, page) -> None:
-        """Wait for the user to press Enter after completing manual login.
-
-        If the browser window is closed before the user presses Enter,
-        raises ``SystemExit(1)`` so the process exits cleanly instead of
-        crashing with a Playwright error on the next page operation.
-
-        Args:
-            page: Playwright Page instance shown to the user.
-        """
-        input()
-        if page.is_closed():
-            logger.warning("browser window closed before login completed; aborting")
-            raise SystemExit(1)
+            msg = str(e)
+            msg_lower = msg.lower()
+            if (
+                ("executable" in msg_lower and ("exist" in msg_lower or "found" in msg_lower))
+                or "playwright install" in msg_lower
+            ):
+                raise RuntimeError(
+                    "Playwright Firefox browser is not installed.\n"
+                    "Run: playwright install firefox"
+                ) from e
+            raise
 
     @staticmethod
     def _firefoxBaseCandidates(system: str) -> List[Path]:
@@ -537,7 +546,9 @@ class GrokMixin:
                 # SQLite may return INTEGER columns as Python floats when stored
                 # as REAL affinity — always cast to int so JSON never writes
                 # "1742000000.0", which Playwright also rejects.
-                "expires": int(expiry) if expiry > 0 else -1,
+                # Some sites set extremely far-future expiry timestamps.
+                # Playwright rejects any expires > 253402300799 (year 9999).
+                "expires": min(int(expiry), _PLAYWRIGHT_MAX_COOKIE_EXPIRES) if expiry > 0 else -1,
                 "httpOnly": bool(isHttpOnly),
                 "secure": bool(isSecure),
                 "sameSite": _SAMESITE.get(sameSite, "None"),
@@ -589,24 +600,25 @@ class GrokMixin:
         sessionFile: Path = GROK_SESSION_FILE,
         credentialsFile: Path = GROK_CREDENTIALS_FILE,
     ) -> dict:
-        """Log into Grok and scrape saved Imagine media, downloading to ~/Downloads/Grok.
+        """Scrape saved Imagine media from Grok, downloading to ~/Downloads/Grok.
 
-        Authentication uses Playwright ``storage_state`` (cookies + localStorage)
-        persisted at *sessionFile* (default :data:`GROK_SESSION_FILE`).
+        Authentication uses Playwright Firefox ``storage_state`` (cookies +
+        localStorage) persisted at *sessionFile*.  When no valid session is
+        available the user's system Firefox browser is opened at
+        ``grok.com/imagine/saved`` so the user can log in without being blocked
+        by Cloudflare verification; cookies are then imported from the Firefox
+        profile and used to run the headless scrape.
 
-        * **If the session file exists** the browser starts already authenticated
-          and no username/password interaction is needed.
+        *credentialsFile* is retained for API compatibility but is no longer
+        used in the authentication flow — login is now always handled via the
+        user's system Firefox browser.
 
-        * **If the session file is absent** a visible browser window opens, saved
-          credentials from *credentialsFile* are pre-filled into the sign-in form,
-          and the user just needs to complete the login (e.g. click Login and
-          solve any Cloudflare challenge).  The resulting session is saved so
-          subsequent runs are instant.
+        Authentication priority:
 
-        * **If the saved session has expired** (detected when Grok redirects the
-          browser away from ``/imagine/saved`` rather than loading the page), the
-          stale session file is deleted automatically, credentials are pre-filled,
-          and the user is prompted to log in again via a visible browser window.
+        1. Load saved session from *sessionFile*.
+        2. Import cookies from the user's Firefox profile.
+        3. Open system Firefox at ``grok.com/imagine/saved`` and wait for the
+           user to log in, then import the resulting cookies.
 
         After authentication the scrape runs in two phases:
 
@@ -630,101 +642,84 @@ class GrokMixin:
         if sync_playwright is None:
             raise RuntimeError(
                 "Playwright is required for --grok: "
-                "pip install playwright && playwright install chromium"
+                "pip install playwright && playwright install firefox"
             )
 
         logger.doing("starting Grok scrape for saved Imagine media")
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True, args=_PLAYWRIGHT_BROWSER_ARGS)
+            browser = None
+            context = None
 
             # ------------------------------------------------------------------
             # Authentication — prefer a saved session so that the full login
-            # flow (which may involve OAuth redirects, CAPTCHA, or 2FA) is only
-            # required once.
+            # flow is only required once.
             # ------------------------------------------------------------------
             if sessionFile.exists():
                 try:
                     logger.info("loading saved Grok session")
                     self._sanitizeStorageState(sessionFile)
-                    context = browser.new_context(
-                        storage_state=str(sessionFile),
-                        user_agent=_PLAYWRIGHT_USER_AGENT,
-                    )
+                    browser = self._firefoxLaunch(playwright)
+                    context = browser.new_context(storage_state=str(sessionFile))
                     context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
+                except RuntimeError:
+                    raise  # Firefox not installed — propagate immediately
                 except Exception as e:
-                    logger.warning(f"saved session could not be loaded ({e}); falling back to fresh login")
+                    logger.warning(
+                        f"saved session could not be loaded ({e}); "
+                        "falling back to Firefox import"
+                    )
+                    if browser:
+                        browser.close()
                     sessionFile.unlink(missing_ok=True)
                     context = None
-            else:
-                context = None
+                    browser = None
 
             if context is None:
-                # No saved session — try importing cookies from Firefox first.
-                # This avoids the Cloudflare Turnstile challenge that fires
-                # when Playwright drives the login form directly.
+                # No saved session — try importing cookies from the user's
+                # Firefox profile.  This avoids any Cloudflare challenge because
+                # the cookies were issued to a real Firefox browser.
                 if self.importFirefoxSession(sessionFile=sessionFile):
                     try:
                         self._sanitizeStorageState(sessionFile)
-                        context = browser.new_context(
-                            storage_state=str(sessionFile),
-                            user_agent=_PLAYWRIGHT_USER_AGENT,
-                        )
+                        browser = self._firefoxLaunch(playwright)
+                        context = browser.new_context(storage_state=str(sessionFile))
                         context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
+                    except RuntimeError:
+                        raise  # Firefox not installed — propagate immediately
                     except Exception as e:
                         logger.warning(
                             f"imported Firefox session could not be loaded ({e}); "
-                            "falling back to manual login"
+                            "falling back to manual Firefox login"
                         )
+                        if browser:
+                            browser.close()
                         sessionFile.unlink(missing_ok=True)
                         context = None
+                        browser = None
 
             if context is None:
-                # No valid session at all — relaunch as non-headless and ask the
-                # user to log in manually (Cloudflare challenge requires a human).
-                username, password = self._loadOrPromptGrokCredentials(
-                    credentialsFile=credentialsFile
+                # No valid session at all — open the user's system Firefox so
+                # they can log in without Cloudflare blocking the browser.
+                self._openFirefoxWindow(_GROK_SAVED_URL)
+                print(
+                    "\nFirefox has been opened at grok.com/imagine/saved.\n"
+                    "Please log in and navigate to the saved Imagine page.\n"
+                    "Press Enter here when you are logged in and on that page...",
+                    flush=True,
                 )
-                browser.close()
-                browser = playwright.chromium.launch(headless=False, args=_PLAYWRIGHT_BROWSER_ARGS)
-                context = browser.new_context(user_agent=_PLAYWRIGHT_USER_AGENT)
-                context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
-                page = context.new_page()
-                page.goto("https://grok.com", wait_until="domcontentloaded")
-                _filled = self._autofillLoginPage(page, username, password)
-                if _filled:
-                    print(
-                        "\nA browser window has opened and your credentials have been pre-filled.\n"
-                        "Please click Login, complete any verification,\n"
-                        "then press Enter here to continue...",
-                        flush=True,
-                    )
-                else:
-                    print(
-                        "\nA browser window has opened.\n"
-                        "Please log in manually, then press Enter here to continue...",
-                        flush=True,
-                    )
-                self._awaitManualLoginInput(page)
+                input()
 
-                # Verify login completed before saving the session.
-                page.goto(_GROK_SAVED_URL, wait_until="domcontentloaded")
-                page.wait_for_timeout(1000)
-                if urllib.parse.urlparse(page.url).path != "/imagine/saved":
+                if not self.importFirefoxSession(sessionFile=sessionFile):
                     logger.warning(
-                        f"login did not complete — still redirected to {page.url!r}; "
-                        "please restart --grok and complete the login before pressing Enter"
+                        "could not import Grok cookies from Firefox; "
+                        "make sure you are logged in to grok.com in Firefox first"
                     )
                     raise SystemExit(1)
 
-                # Persist session so the login form is never needed again.
-                sessionFile.parent.mkdir(parents=True, exist_ok=True)
-                context.storage_state(path=str(sessionFile))
-                if sessionFile.exists():
-                    sessionFile.chmod(0o600)
-                    self._sanitizeStorageState(sessionFile)
-                logger.value("saved Grok session to", str(sessionFile))
-            else:
-                page = context.new_page()
+                self._sanitizeStorageState(sessionFile)
+                browser = self._firefoxLaunch(playwright)
+                context = browser.new_context(storage_state=str(sessionFile))
+                context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
 
             capturedUrls: set = set()
 
@@ -748,89 +743,58 @@ class GrokMixin:
             # from GROK_USER_CONTENT_DOMAINS, so capturedUrls could stay at
             # zero and cause the scroll to abort after just two passes.
             # ------------------------------------------------------------------
+            page = context.new_page()
             _navigateToSaved(page)
 
             # Detect session expiry: an expired (or invalid) session causes
             # Grok to redirect the browser to the login page instead of loading
-            # /imagine/saved.  When that happens, wipe the stale session file,
-            # try importing a fresh Firefox session, and fall back to manual
-            # Playwright login only if the Firefox session is also unavailable.
+            # /imagine/saved.  Open system Firefox for re-login and import fresh
+            # cookies.
             if urllib.parse.urlparse(page.url).path != "/imagine/saved":
                 logger.warning(
                     f"session appears expired (redirected to {page.url!r}); "
-                    "deleting saved session and switching to manual login"
+                    "opening Firefox for re-login"
                 )
                 context.close()
                 browser.close()
                 sessionFile.unlink(missing_ok=True)
 
-                _ffSessionOk = False
-                if self.importFirefoxSession(sessionFile=sessionFile):
-                    try:
-                        browser = playwright.chromium.launch(headless=True, args=_PLAYWRIGHT_BROWSER_ARGS)
-                        self._sanitizeStorageState(sessionFile)
-                        context = browser.new_context(
-                            storage_state=str(sessionFile),
-                            user_agent=_PLAYWRIGHT_USER_AGENT,
-                        )
-                        context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
-                        page = context.new_page()
-                        _navigateToSaved(page)
-                        if urllib.parse.urlparse(page.url).path == "/imagine/saved":
-                            _ffSessionOk = True
-                        else:
-                            context.close()
-                            browser.close()
-                            sessionFile.unlink(missing_ok=True)
-                    except Exception as e:
-                        logger.warning(
-                            f"imported Firefox session could not be loaded ({e}); "
-                            "falling back to manual login"
-                        )
-                        try:
-                            browser.close()
-                        except Exception:
-                            pass
+                self._openFirefoxWindow(_GROK_SAVED_URL)
+                print(
+                    "\nYour Grok session has expired. Firefox has been opened.\n"
+                    "Please log in and navigate to grok.com/imagine/saved.\n"
+                    "Press Enter here when you are ready...",
+                    flush=True,
+                )
+                input()
 
-                if not _ffSessionOk:
-                    username, password = self._loadOrPromptGrokCredentials(
-                        credentialsFile=credentialsFile
+                if not self.importFirefoxSession(sessionFile=sessionFile):
+                    logger.warning(
+                        "could not import Grok cookies from Firefox after re-login"
                     )
-                    browser = playwright.chromium.launch(headless=False, args=_PLAYWRIGHT_BROWSER_ARGS)
-                    context = browser.new_context(user_agent=_PLAYWRIGHT_USER_AGENT)
-                    context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
-                    page = context.new_page()
-                    page.goto("https://grok.com", wait_until="domcontentloaded")
-                    _filled = self._autofillLoginPage(page, username, password)
-                    if _filled:
-                        print(
-                            "\nA browser window has opened and your credentials have been pre-filled.\n"
-                            "Your previous Grok session has expired.\n"
-                            "Please click Login, complete any verification,\n"
-                            "then press Enter here to continue...",
-                            flush=True,
-                        )
-                    else:
-                        print(
-                            "\nA browser window has opened.\n"
-                            "Your previous Grok session has expired.\n"
-                            "Please log in manually, then press Enter here to continue...",
-                            flush=True,
-                        )
-                    self._awaitManualLoginInput(page)
-                    _navigateToSaved(page)
-                    if urllib.parse.urlparse(page.url).path != "/imagine/saved":
-                        logger.warning(
-                            f"login did not complete — still redirected to {page.url!r}; "
-                            "please restart --grok and complete the login before pressing Enter"
-                        )
-                        raise SystemExit(1)
-                    sessionFile.parent.mkdir(parents=True, exist_ok=True)
-                    context.storage_state(path=str(sessionFile))
-                    if sessionFile.exists():
-                        sessionFile.chmod(0o600)
-                        self._sanitizeStorageState(sessionFile)
-                    logger.value("saved Grok session to", str(sessionFile))
+                    raise SystemExit(1)
+
+                self._sanitizeStorageState(sessionFile)
+                browser = self._firefoxLaunch(playwright)
+                context = browser.new_context(storage_state=str(sessionFile))
+                context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
+                page = context.new_page()
+                _navigateToSaved(page)
+
+                if urllib.parse.urlparse(page.url).path != "/imagine/saved":
+                    logger.warning(
+                        f"still not authenticated after re-login "
+                        f"(redirected to {page.url!r}); aborting"
+                    )
+                    raise SystemExit(1)
+
+                # Persist the refreshed session.
+                sessionFile.parent.mkdir(parents=True, exist_ok=True)
+                context.storage_state(path=str(sessionFile))
+                if sessionFile.exists():
+                    sessionFile.chmod(0o600)
+                    self._sanitizeStorageState(sessionFile)
+                logger.value("saved refreshed Grok session to", str(sessionFile))
 
             previousLinkCount = 0
             stallCount = 0
