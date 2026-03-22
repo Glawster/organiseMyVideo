@@ -1,54 +1,22 @@
-#!/usr/bin/env python3
-"""
-Organise My Video
-Moves video files from a staging directory to organized storage locations.
-Movies:    /mnt/movie<n>/Title (Year)/  or  /mnt/myPictures/Title (Year)/
-TV Shows: /mnt/video<n>/TV/Show Name/Season NN/  or  /mnt/myVideo/TV/Show Name/Season NN/
-"""
+"""Core video-file organisation: scan storage, parse filenames, move files, clean names."""
 
 import os
-import sys
 import re
+import sys
 import shutil
-import argparse
-import logging
-import datetime
-
 from pathlib import Path
 from typing import List, Tuple, Optional
 
-from organiseMyProjects.logUtils import getLogger, drawBox # type: ignore
+from organiseMyProjects.logUtils import getLogger  # type: ignore
 
-# Module-level logger used by class methods; replaced with runtime-configured logger in main().
+from .constants import VIDEO_EXTENSIONS, _PREFIX_REGEX
+
 logger = getLogger("organiseMyVideo")
 
-# Video file extensions to process
-VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".m4v", ".mpg", ".mpeg"}
 
-# Known torrent/index prefixes to strip from file and directory names
-PREFIX_PATTERNS = [
-    r"^\s*www\.UIndex\.org\s*-\s*",
-    r"^\s*www\.Torrenting\.com\s*-\s*",
-]
+class VideoMixin:
+    """Methods for parsing, locating, moving and cleaning video files."""
 
-# Compiled regex combining all known prefixes (built once at module load)
-_PREFIX_REGEX = re.compile("|".join(PREFIX_PATTERNS), re.IGNORECASE)
-
-class VideoOrganizer:
-    """Main class for organizing video files into structured directories."""
-    
-    def __init__(self, sourceDir:  str = "/mnt/video2/toFile", dryRun: bool = True):
-        """
-        Initialize the video organizer.
-        
-        Args:
-            sourceDir: Source directory containing files to organize
-            dryRun: If True, show what would be done without making changes
-        """
-        self.sourceDir = Path(sourceDir)
-        self.dryRun = dryRun
-        self._promptHelpDisplayed = False
-        
     def scanStorageLocations(self) -> Tuple[List[Path], List[Path]]:
         """
         Scan system for movie and video storage locations.
@@ -139,10 +107,10 @@ class VideoOrganizer:
         
         match = re.match(pattern1, nameWithoutExt)
         if not match:
-            match = re. match(pattern2, nameWithoutExt)
+            match = re.match(pattern2, nameWithoutExt)
         
         if match:
-            title = match. group(1).replace(".", " ").strip()
+            title = match.group(1).replace(".", " ").strip()
             year = match.group(2)
             
             return {
@@ -171,7 +139,7 @@ class VideoOrganizer:
         for movieRoot in movieDirs:
             for item in movieRoot.iterdir():
                 if item.is_dir() and item.name.lower() == searchPattern.lower():
-                    logger.value("found existing movie",item)
+                    logger.value("found existing movie", item)
                     return item
         
         return None
@@ -350,7 +318,7 @@ class VideoOrganizer:
         
         destFile = destDir / sourceFile.name
         
-        logger.value("movie",sourceFile.name)
+        logger.value("movie", sourceFile.name)
         logger.value("  ->", destFile)
         
         if self.dryRun:
@@ -559,154 +527,6 @@ class VideoOrganizer:
         logger.done(f"clean complete")
         return stats
 
-    def removeTorrentsInLibrary(self, torrentDir: str = "/mnt/video2/Downloads") -> dict:
-        """
-        Scan the download directory for .torrent files and delete those
-        belonging to movies or TV shows already present in the library.
-
-        When a matching .torrent file lives inside a sub-directory of the
-        download directory, the whole containing folder is removed. This keeps
-        in-progress download folders together instead of deleting only the
-        .torrent file and leaving the partial download behind.
-
-        Args:
-            torrentDir: Directory to scan for .torrent files (default: /mnt/video2/Downloads)
-
-        Returns:
-            Dictionary with counts: {'deleted': int, 'skipped': int, 'errors': int}
-        """
-        logger.doing(f"scanning for obsolete torrent files in {torrentDir}")
-
-        stats = {"deleted": 0, "skipped": 0, "errors": 0}
-
-        downloadPath = Path(torrentDir)
-        if not downloadPath.exists():
-            logger.error(f"torrent directory does not exist: {torrentDir}")
-            return stats
-
-        movieDirs, videoDirs = self.scanStorageLocations()
-
-        # Track removed download sub-directories so nested torrent files from an
-        # already-deleted folder are not processed again later in the scan.
-        removedDirs = set()
-
-        for entry in sorted(downloadPath.rglob("*.torrent")):
-            if not entry.is_file():
-                continue
-            if any(parent in removedDirs for parent in entry.parents):
-                continue
-
-            # The stem may already contain an inner extension (e.g. "Movie.2010.mkv")
-            # or may not (e.g. "Movie.2010"). Append ".mkv" as a neutral fallback so
-            # that the TV/movie parsers (which require an extension suffix) can still match.
-            # Strip known torrent-site prefixes (e.g. "www.Torrenting.com - ") before parsing.
-            stem = _PREFIX_REGEX.sub("", entry.stem, count=1).strip()
-            fallback = stem + ".mkv"
-            tvInfo = self.parseTvFilename(stem) or self.parseTvFilename(fallback)
-            movieInfo = self.parseMovieFilename(stem) or self.parseMovieFilename(fallback)
-
-            inLibrary = False
-
-            if tvInfo and videoDirs:
-                existingDir = self.findExistingTvShowDir(tvInfo["showName"], videoDirs)
-                if existingDir:
-                    inLibrary = True
-                    logger.value("torrent matches TV show", f"{entry.name} → {existingDir}")
-
-            if not inLibrary and movieInfo and movieDirs:
-                existingDir = self.findExistingMovieDir(movieInfo["title"], movieInfo["year"], movieDirs)
-                if existingDir:
-                    inLibrary = True
-                    logger.value("torrent matches Movie", f"{entry.name} → {existingDir}")
-
-            if inLibrary:
-                downloadSubDir = entry.parent if entry.parent != downloadPath else None
-                if self.dryRun:
-                    if downloadSubDir is not None:
-                        logger.action(f"delete folder: {downloadSubDir.name}")
-                        removedDirs.add(downloadSubDir)
-                    else:
-                        logger.action(f"delete torrent: {entry.name}")
-                    stats["deleted"] += 1
-                else:
-                    try:
-                        if downloadSubDir is not None:
-                            shutil.rmtree(downloadSubDir)
-                            logger.action(f"deleted folder: {downloadSubDir.name}")
-                            removedDirs.add(downloadSubDir)
-                        else:
-                            entry.unlink()
-                            logger.action(f"deleted torrent: {entry.name}")
-                        stats["deleted"] += 1
-                    except Exception as e:
-                        logger.error(f"failed to delete {entry.name}: {e}")
-                        stats["errors"] += 1
-            else:
-                logger.value("keeping torrent", entry.name)
-                stats["skipped"] += 1
-
-        logger.done("remove torrents in library complete")
-        return stats
-
-    def cleanTorrentNames(self, torrentDir: str = "/mnt/video2/Downloads") -> dict:
-        """
-        Scan the download directory for .torrent files and rename those whose
-        file names contain known torrent-site prefixes (e.g. "www.Torrenting.com - ").
-
-        Args:
-            torrentDir: Directory to scan for .torrent files (default: /mnt/video2/Downloads)
-
-        Returns:
-            Dictionary with counts: {'renamed': int, 'skipped': int, 'errors': int}
-        """
-        logger.doing(f"cleaning torrent file names in {torrentDir}")
-
-        stats = {"renamed": 0, "skipped": 0, "errors": 0}
-
-        downloadPath = Path(torrentDir)
-        if not downloadPath.exists():
-            logger.error(f"torrent directory does not exist: {torrentDir}")
-            return stats
-
-        for entry in sorted(downloadPath.rglob("*.torrent")):
-            if not entry.is_file():
-                continue
-
-            oldName = entry.name
-            if not _PREFIX_REGEX.match(oldName):
-                continue
-
-            newName = _PREFIX_REGEX.sub("", oldName, count=1).strip()
-
-            if not newName or newName == oldName:
-                logger.value("skipped (no change)", oldName)
-                stats["skipped"] += 1
-                continue
-
-            newPath = entry.parent / newName
-
-            if self.dryRun:
-                logger.action(f"rename torrent: {oldName} → {newName}")
-                stats["renamed"] += 1
-                continue
-
-            try:
-                entry.rename(newPath)
-                logger.action(f"renamed torrent: {oldName} → {newName}")
-                stats["renamed"] += 1
-            except FileExistsError:
-                logger.error(f"target already exists, skipping: {newName}")
-                stats["errors"] += 1
-            except PermissionError:
-                logger.error(f"permission denied renaming: {oldName}")
-                stats["errors"] += 1
-            except Exception as e:
-                logger.error(f"error renaming {oldName}: {e}")
-                stats["errors"] += 1
-
-        logger.done("clean torrent names complete")
-        return stats
-
     def processFiles(self, interactive: bool = True):
         """
         Process all video files in the source directory.
@@ -783,7 +603,7 @@ class VideoOrganizer:
                 if fileType == "m" and movieDirs:
                     # Prompt for movie info
                     title = input(f"  Movie title (default: {videoFile.stem}): ").strip()
-                    title = title if title else videoFile. stem
+                    title = title if title else videoFile.stem
                     year = input("  Year:  ").strip()
                     
                     if year:
@@ -822,6 +642,7 @@ class VideoOrganizer:
             stats["skipped"] += 1
         
         # Print summary
+        from organiseMyProjects.logUtils import drawBox  # type: ignore
         summary = f"""SUMMARY
 Movies moved:   {stats['movies']}
 TV shows moved: {stats['tv']}
@@ -830,103 +651,3 @@ Errors:         {stats['errors']}
 """
         drawBox(summary)
         logger.value("processing complete", stats)
-
-
-def main():
-    """Main entry point for the video organizer."""
-    parser = argparse.ArgumentParser(
-        description="Organize video files into movies and TV show directories"
-    )
-    parser.add_argument(
-        "--source",
-        default="/mnt/video2/toFile",
-        help="Source directory containing files to organize (default: /mnt/video2/toFile)"
-    )
-    parser.add_argument(
-        '--confirm',
-        default=False,
-        action='store_true',
-        help='confirm execution — actually make changes (default is dry-run)',
-    )
-    parser.add_argument(
-        "--clean",
-        action="store_true",
-        help="remove empty sub-folders from source directory (folders with only sample content are treated as empty)"
-    )
-    parser.add_argument(
-        "--non-interactive",
-        dest="non_interactive",
-        action="store_true",
-        help="Run without user prompts (skip files that cannot be auto-detected)"
-    )
-    parser.add_argument(
-        "--torrent",
-        action="store_true",
-        help="scan the torrent download directory for .torrent files and delete those already in the library (dry-run by default; use --confirm to delete)"
-    )
-    args = parser.parse_args()
-    
-    dryRun = True if not args.confirm else False
-
-    # Setup logging — dryRun passed so logger.action() applies [] prefix correctly.
-    # logUtils._setupLogging guards console handler with isinstance(h, StreamHandler)
-    # which also matches FileHandler (subclass); add console handler explicitly if absent.
-    global logger
-    logTimestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    logDir = Path.home() / ".local" / "state" / "organiseMy" / "logs"
-    logDir.mkdir(parents=True, exist_ok=True)
-    logFile = logDir / f"organiseMyVideo_{logTimestamp}.log"
-    logger = getLogger("organiseMyVideo", logDir=logDir, includeConsole=True, dryRun=dryRun)
-    if not any(type(h) is logging.StreamHandler for h in logger.logger.handlers):
-        _ch = logging.StreamHandler()
-        _ch.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-        logger.logger.addHandler(_ch)
-    else:
-        # Update the existing console handler formatter to include timestamp
-        for h in logger.logger.handlers:
-            if type(h) is logging.StreamHandler:
-                h.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-    logger.doing("organiseMyVideo starting")
-    logger.value("logging to", logFile)
-    
-    if dryRun:
-        logger.info("dry-run mode (no changes will be made) — use --confirm to execute")
-    else:
-        logger.info("confirm mode — changes will be made")
-    
-    # Create organizer and run the requested mode
-    organizer = VideoOrganizer(sourceDir=args.source, dryRun=dryRun)
-
-    if args.torrent:
-        torrentDir = organizer.sourceDir.parent / "Downloads" if organizer.sourceDir else Path("/mnt/video2/Downloads")
-        if args.clean:
-            nameStats = organizer.cleanTorrentNames(torrentDir=torrentDir)
-        removeStats = organizer.removeTorrentsInLibrary(torrentDir=torrentDir)
-        summary = f"""TORRENT SUMMARY
-Torrents deleted: {removeStats['deleted']}
-Torrents kept:    {removeStats['skipped']}
-Delete errors:    {removeStats['errors']}
-Names renamed:    {nameStats['renamed']}
-Names skipped:    {nameStats['skipped']}
-Rename errors:    {nameStats['errors']}
-"""
-        drawBox(summary)
-    elif args.clean:
-        nameStats = organizer.cleanNames()
-        cleanStats = organizer.cleanEmptyFolders()
-        summary = f"""CLEAN SUMMARY
-Names renamed:   {nameStats['renamed']}
-Name errors:     {nameStats['errors']}
-Folders removed: {cleanStats['removed']}
-Folders kept:    {cleanStats['skipped']}
-Folder errors:   {cleanStats['errors']}
-"""
-        drawBox(summary)
-    else:
-        organizer.processFiles(interactive=not args.non_interactive)
-
-    logger.done("organiseMyVideo complete")
-
-
-if __name__ == "__main__": 
-    main()
