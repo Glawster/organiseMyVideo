@@ -1,3 +1,4 @@
+<!-- synced from Glawster/organiseMyProjects -- do not edit directly -->
 # GitHub Copilot Instructions -- Master Development Guidelines (v2)
 
 ------------------------------------------------------------------------
@@ -129,12 +130,49 @@ dryRun = not args.confirm
 
 All projects must use centralized logging.
 
+**Module-level initialisation** (bare logger, no dryRun yet):
+
 ``` python
 from organiseMyProjects.logUtils import getLogger
 logger = getLogger("projectName")
 ```
 
--   Initialize logging in main()\
+**Re-initialise in `main()` with full parameters** (logDir, includeConsole, dryRun):
+
+``` python
+logger = getLogger("projectName", logDir=logDir, includeConsole=True, dryRun=dryRun)
+```
+
+**Semantic log methods:**
+
+``` python
+logger.doing("scanning files")           # → scanning files...
+logger.done("scan complete")             # → ...scan complete
+logger.info("found n items")             # → ...found n items
+logger.value("source dir", path)         # → ...source dir: /path
+logger.action("moving file: src → dest") # → ...[] moving file: src → dest  (when dryRun=True)
+```
+
+**The `action()` / dry-run guard pattern:**
+
+``` python
+# Preferred: use logger.action() for operations guarded by dryRun
+logger.action(f"moving file: {src} → {dest}")
+if not dryRun:
+    shutil.move(src, dest)
+```
+
+**`drawBox()` for prominent log entries:**
+
+``` python
+from organiseMyProjects.logUtils import getLogger, drawBox
+drawBox("Sync complete\n3 updated, 0 failed", logger=logger)
+```
+
+-   Initialize logging at module level with `getLogger("projectName")`\
+-   Re-initialize in `main()` passing `logDir`, `includeConsole`, and `dryRun`\
+-   Use `logger.doing()` / `logger.done()` to bracket major operations\
+-   Use `logger.action()` for operations that are skipped in dry-run — never construct a manual `prefix = "[] "` string\
 -   Use lowercase messages\
 -   Use consistent message patterns
 
@@ -148,9 +186,17 @@ Use --confirm (never --dry-run).
 prefix = "[] " if dryRun else ""
 ```
 
+The `prefix` string is only used for `print()` console output. For logging, use `logger.action()` instead (see Logging Pattern above).
+
 Guard operations:
 
 ``` python
+# For logging: use logger.action()
+logger.action(f"moving file: {src} → {dest}")
+if not dryRun:
+    shutil.move(src, dest)
+
+# For print() console output only:
 print(f"{prefix}moving file: {src}")
 if not dryRun:
     shutil.move(src, dest)
