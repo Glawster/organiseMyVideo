@@ -30,7 +30,7 @@ from .grok import GrokMixin, sync_playwright  # noqa: F401 — re-exported for t
 from .torrent import TorrentMixin
 from .video import VideoMixin
 
-logger = getLogger("organiseMyVideo")
+logger = getLogger("organiseMyVideo")  # __init__.py: use explicit name as stem would be '__init__'
 
 
 class VideoOrganizer(VideoMixin, TorrentMixin, GrokMixin):
