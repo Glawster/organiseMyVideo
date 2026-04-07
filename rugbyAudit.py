@@ -51,7 +51,7 @@ from typing import Iterable
 from mutagen.mp4 import MP4, MP4FreeForm  # type: ignore
 
 
-LOGGER = logging.getLogger("mp4MatchAudit")
+logger = logging.getLogger("mp4MatchAudit")
 SUPPORTED_SUFFIXES = {".mp4", ".m4v", ".mov"}
 FREEFORM_PREFIX = "----:com.apple.iTunes:"
 
@@ -113,7 +113,7 @@ class Mp4TagHelper:
         try:
             mp4File = MP4(str(filePath))
         except Exception as exc:
-            LOGGER.warning("...failed to read tags: %s | %s", filePath, exc)
+            logger.warning("...failed to read tags: %s | %s", filePath, exc)
             return {"_readError": str(exc)}
 
         if mp4File.tags is None:
@@ -243,16 +243,16 @@ class InteractivePrompter:
 
     def playVideo(self, filePath: Path | None) -> None:
         if filePath is None:
-            LOGGER.info("...no file available to play")
+            logger.info("...no file available to play")
             return
         if self.playerPath is None:
-            LOGGER.info("...no supported video player found on PATH")
+            logger.info("...no supported video player found on PATH")
             return
 
         try:
             subprocess.run([self.playerPath, str(filePath)], check=False)
         except Exception as exc:
-            LOGGER.warning("...failed to play video: %s | %s", filePath, exc)
+            logger.warning("...failed to play video: %s | %s", filePath, exc)
 
     @staticmethod
     def _findPlayer() -> str | None:
@@ -351,15 +351,32 @@ def promptForFile(
     defaultTitle = getDefaultText(tags, "title")
     defaultComment = getDefaultText(tags, "comment")
 
-    LOGGER.info("")
-    LOGGER.info("...file: %s", filePath)
+    logger.info("")
+    logger.info("...file: %s", filePath)
     if seasonInfo:
-        LOGGER.info("...season: %s", seasonInfo.seasonLabel)
+        logger.info("...season: %s", seasonInfo.seasonLabel)
     if episode is not None:
-        LOGGER.info("...episode: %s", episode)
+        logger.info("...episode: %s", episode)
+    logger.info("...score: %s", defaultComment or "")
 
-    title = prompter.prompt("title", defaultTitle, filePath=filePath)
-    comment = prompter.prompt("score/comment", defaultComment, filePath=filePath)
+    if defaultComment:
+        logger.info("...skipping file with existing score")
+        title = defaultTitle
+        comment = defaultComment
+    else:
+        homeTeam = prompter.prompt("home team", None, filePath=filePath)
+        if homeTeam == "g":
+            homeTeam = "Gloucester-Hartpury"
+
+        awayTeam = prompter.prompt("away team", None, filePath=filePath)
+        if awayTeam == "g":
+            awayTeam = "Gloucester-Hartpury"
+
+        title = None
+        if homeTeam and awayTeam:
+            title = f"{homeTeam} vs. {awayTeam}"
+
+        comment = prompter.prompt("score/comment", defaultComment, filePath=filePath)
 
     if title is None:
         title = defaultTitle
@@ -392,9 +409,9 @@ def promptForFile(
 
     if writeChanges:
         tagHelper.writeTags(filePath, valuesToWrite)
-        LOGGER.info("...updated tags")
+        logger.info("...updated tags")
     else:
-        LOGGER.info("...dry run values prepared")
+        logger.info("...dry run values prepared")
 
     return {
         "filePath": str(filePath),
@@ -440,7 +457,7 @@ def main(argv: list[str] | None = None) -> int:
 
     inputRoot = Path(args.inputRoot).expanduser().resolve()
     if not inputRoot.exists() or not inputRoot.is_dir():
-        LOGGER.error("Input folder is invalid: %s", inputRoot)
+        logger.error("Input folder is invalid: %s", inputRoot)
         return 2
 
     tagHelper = Mp4TagHelper()
@@ -463,15 +480,15 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
     except UserQuitRequested:
-        LOGGER.info("...user requested quit")
+        logger.info("...user requested quit")
 
     outputCsv = Path(args.outputCsv).expanduser().resolve()
     writeCsv(outputCsv, rows)
 
-    LOGGER.info("")
-    LOGGER.info("...files processed: %s", len(rows))
-    LOGGER.info("...csv report: %s", outputCsv)
-    LOGGER.info("...mode: %s", "write" if args.write else "dry-run")
+    logger.info("")
+    logger.info("...files processed: %s", len(rows))
+    logger.info("...csv report: %s", outputCsv)
+    logger.info("...mode: %s", "write" if args.write else "dry-run")
     return 0
 
 
