@@ -11,7 +11,16 @@ Purpose
 - optionally write updated metadata back to files
 - write a CSV audit report
 
-User interaction rule
+User interaction rule (team picker)
+- up/down arrows (or j/k when not filtering) navigate the team list
+- typing any character filters the list to matching team names
+- pressing Enter selects the highlighted team, or submits the typed text as a new name
+- pressing Escape skips the field (leaves it blank)
+- pressing g (when not filtering) instantly selects Gloucester-Hartpury
+- pressing q (when not filtering) quits the session
+- pressing Backspace removes the last filter character
+
+User interaction rule (score/comment prompt)
 - pressing Enter accepts the shown default
 - entering q quits the session
 - entering p plays the current video so you can inspect it
@@ -30,6 +39,9 @@ Notes
   example: folder 2024 => seasonLabel 2024/25
 - episode is assigned by ordering matches within a season folder
   after sorting by file path
+- the team list is built automatically from existing title tags before
+  the interactive loop starts; new names entered during the session are
+  added to the list immediately
 
 Dependencies
     pip install mutagen
@@ -39,6 +51,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import curses
 import logging
 import re
 import shutil
@@ -278,6 +291,195 @@ class UserQuitRequested(Exception):
     """Raised when the user chooses to quit the interactive session."""
 
 
+class TeamPicker:
+    """Curses-based interactive team picker with a plain-text numbered fallback.
+
+    Usage::
+
+        picker = TeamPicker()
+        team = picker.pick("Home team", knownTeams)
+    """
+
+    GLOUCESTER = "Gloucester-Hartpury"
+
+    def pick(self, label: str, knownTeams: list[str]) -> str | None:
+        """Return a team name chosen interactively.
+
+        Tries a full-screen curses picker first.  Falls back to a numbered
+        plain-text list when curses is unavailable (e.g. no TTY).
+
+        - Raises *UserQuitRequested* if the user presses ``q``.
+        - Returns ``None`` if the user presses Escape (skip / leave blank).
+        - Appends any new name to *knownTeams* (sorted in place) so that
+          subsequent calls benefit from it immediately.
+        """
+        try:
+            return curses.wrapper(self._cursesPick, label, knownTeams)
+        except UserQuitRequested:
+            raise
+        except Exception as exc:
+            logger.debug("...curses picker unavailable (%s), using text fallback", exc)
+            return self._fallbackPick(label, knownTeams)
+
+    # ------------------------------------------------------------------
+    # Curses implementation
+    # ------------------------------------------------------------------
+
+    def _cursesPick(self, stdscr, label: str, knownTeams: list[str]) -> str | None:
+
+        curses.curs_set(0)
+        try:
+            curses.use_default_colors()
+        except curses.error:
+            pass
+
+        selected = 0
+        filterText = ""
+
+        while True:
+            if filterText:
+                filtered = [t for t in knownTeams if filterText.lower() in t.lower()]
+            else:
+                filtered = list(knownTeams)
+
+            if filtered:
+                selected = max(0, min(selected, len(filtered) - 1))
+
+            stdscr.erase()
+            height, width = stdscr.getmaxyx()
+
+            # Header and filter bar
+            self._addstrSafe(stdscr, 0, 0, f"{label}:", width)
+            self._addstrSafe(stdscr, 1, 0, f"  Filter: {filterText}", width)
+            self._addstrSafe(stdscr, 2, 0, "-" * (width - 1), width)
+
+            listTop = 3
+            statusRows = 2
+            listHeight = max(1, height - listTop - statusRows)
+
+            # Team list
+            if filtered:
+                scrollOffset = max(0, selected - listHeight // 2)
+                scrollOffset = min(scrollOffset, max(0, len(filtered) - listHeight))
+                for i in range(listHeight):
+                    idx = scrollOffset + i
+                    if idx >= len(filtered):
+                        break
+                    rowY = listTop + i
+                    if rowY >= height - statusRows:
+                        break
+                    text = f"  {filtered[idx]}"
+                    if idx == selected:
+                        stdscr.attron(curses.A_REVERSE)
+                        self._addstrSafe(stdscr, rowY, 0, text, width)
+                        stdscr.attroff(curses.A_REVERSE)
+                    else:
+                        self._addstrSafe(stdscr, rowY, 0, text, width)
+            else:
+                if filterText:
+                    msg = f"  (no matches - press Enter to use '{filterText}')"
+                else:
+                    msg = "  (no teams known yet - type a name and press Enter)"
+                self._addstrSafe(stdscr, listTop, 0, msg, width)
+
+            # Status bar
+            sepRow = height - statusRows
+            if sepRow >= 0:
+                self._addstrSafe(stdscr, sepRow, 0, "-" * (width - 1), width)
+            if filterText:
+                hint = "up/down navigate  Enter=select/new  Backspace=clear  Esc=skip"
+            else:
+                hint = "up/down/jk navigate  g=Gloucester  Esc=skip  q=quit  type to filter"
+            self._addstrSafe(stdscr, height - 1, 0, hint, width)
+
+            stdscr.refresh()
+            key = stdscr.getch()
+
+            # Universal navigation
+            if key == curses.KEY_UP and filtered:
+                selected = max(0, selected - 1)
+            elif key == curses.KEY_DOWN and filtered:
+                selected = min(len(filtered) - 1, selected + 1)
+            # Enter: select highlighted, submit typed text, or skip
+            elif key in (curses.KEY_ENTER, 10, 13):
+                if filtered:
+                    result = filtered[selected]
+                elif filterText:
+                    result = filterText
+                else:
+                    result = None
+                if result:
+                    self._addToKnownTeams(result, knownTeams)
+                return result
+            # Backspace removes last filter character
+            elif key in (curses.KEY_BACKSPACE, 127, 8):
+                filterText = filterText[:-1]
+                selected = 0
+            # Escape skips the field
+            elif key == 27:
+                return None
+            # Browse-mode shortcuts (only when no filter text is active)
+            elif key == ord("g") and not filterText:
+                self._addToKnownTeams(self.GLOUCESTER, knownTeams)
+                return self.GLOUCESTER
+            elif key == ord("q") and not filterText:
+                raise UserQuitRequested()
+            elif key == ord("j") and not filterText and filtered:
+                selected = min(len(filtered) - 1, selected + 1)
+            elif key == ord("k") and not filterText and filtered:
+                selected = max(0, selected - 1)
+            # Any printable character extends the filter
+            elif 32 <= key <= 126:
+                filterText += chr(key)
+                selected = 0
+
+    @staticmethod
+    def _addstrSafe(stdscr, y: int, x: int, text: str, width: int) -> None:
+        """Write *text* at (*y*, *x*) clipped to *width*, ignoring boundary errors."""
+        try:
+            stdscr.addstr(y, x, text[: max(0, width - x)])
+        except curses.error:
+            pass
+
+    @staticmethod
+    def _addToKnownTeams(name: str, knownTeams: list[str]) -> None:
+        """Add *name* to *knownTeams* if not already present, keeping it sorted."""
+        if name not in knownTeams:
+            knownTeams.append(name)
+            knownTeams.sort(key=str.casefold)
+
+    # ------------------------------------------------------------------
+    # Plain-text fallback
+    # ------------------------------------------------------------------
+
+    def _fallbackPick(self, label: str, knownTeams: list[str]) -> str | None:
+        """Numbered plain-text list used when curses is unavailable."""
+        if knownTeams:
+            print(f"\n{label}:")
+            for i, team in enumerate(knownTeams, start=1):
+                print(f"  {i:2}. {team}")
+            print()
+
+        while True:
+            prompt = f"{label} [number, new name, g=Gloucester, q=quit, Enter=skip]: "
+            response = input(prompt).strip()
+            if not response:
+                return None
+            if response.lower() == "q":
+                raise UserQuitRequested()
+            if response.lower() == "g":
+                self._addToKnownTeams(self.GLOUCESTER, knownTeams)
+                return self.GLOUCESTER
+            if response.isdigit():
+                idx = int(response) - 1
+                if 0 <= idx < len(knownTeams):
+                    return knownTeams[idx]
+                print(f"  ...invalid number, choose 1-{len(knownTeams)}")
+                continue
+            self._addToKnownTeams(response, knownTeams)
+            return response
+
+
 def configureLogging(verbose: bool) -> None:
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO, format="%(message)s"
@@ -358,6 +560,26 @@ def getDefaultText(tags: dict[str, object], fieldName: str) -> str | None:
     return str(value)
 
 
+def buildKnownTeams(
+    inputRoot: Path, tagHelper: Mp4TagHelper, parser: MatchParser
+) -> list[str]:
+    """Pre-scan media files and extract unique team names from existing title tags.
+
+    Returns a case-insensitively sorted list of distinct team names found in
+    the ``title`` atoms of all media files under *inputRoot*.
+    """
+    teamSet: set[str] = set()
+    for filePath in iterMediaFiles(inputRoot):
+        tags = tagHelper.readTags(filePath)
+        title = getDefaultText(tags, "title")
+        homeTeam, awayTeam = parser.parseTitle(title)
+        if homeTeam:
+            teamSet.add(homeTeam.strip())
+        if awayTeam:
+            teamSet.add(awayTeam.strip())
+    return sorted(teamSet, key=str.casefold)
+
+
 def promptForFile(
     filePath: Path,
     inputRoot: Path,
@@ -365,6 +587,8 @@ def promptForFile(
     tagHelper: Mp4TagHelper,
     parser: MatchParser,
     prompter: InteractivePrompter,
+    teamPicker: TeamPicker,
+    knownTeams: list[str],
     writeChanges: bool,
 ) -> dict[str, object]:
     tags = tagHelper.readTags(filePath)
@@ -387,13 +611,8 @@ def promptForFile(
         title = defaultTitle
         comment = defaultComment
     else:
-        homeTeam = prompter.prompt("home team", None, filePath=filePath)
-        if homeTeam == "g":
-            homeTeam = "Gloucester-Hartpury"
-
-        awayTeam = prompter.prompt("away team", None, filePath=filePath)
-        if awayTeam == "g":
-            awayTeam = "Gloucester-Hartpury"
+        homeTeam = teamPicker.pick("Home team", knownTeams)
+        awayTeam = teamPicker.pick("Away team", knownTeams)
 
         title = None
         if homeTeam and awayTeam:
@@ -487,7 +706,12 @@ def main(argv: list[str] | None = None) -> int:
     tagHelper = Mp4TagHelper()
     parser = MatchParser()
     prompter = InteractivePrompter()
+    teamPicker = TeamPicker()
     episodeMap = buildSeasonEpisodes(inputRoot)
+
+    logger.info("...building known teams from existing tags")
+    knownTeams = buildKnownTeams(inputRoot, tagHelper, parser)
+    logger.info("...found %d known team(s)", len(knownTeams))
 
     rows: list[dict[str, object]] = []
     try:
@@ -500,6 +724,8 @@ def main(argv: list[str] | None = None) -> int:
                     tagHelper=tagHelper,
                     parser=parser,
                     prompter=prompter,
+                    teamPicker=teamPicker,
+                    knownTeams=knownTeams,
                     writeChanges=not dryRun,
                 )
             )
