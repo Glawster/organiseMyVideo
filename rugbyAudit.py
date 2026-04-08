@@ -50,7 +50,6 @@ from typing import Iterable
 
 from mutagen.mp4 import MP4, MP4FreeForm  # type: ignore
 
-
 logger = logging.getLogger("mp4MatchAudit")
 SUPPORTED_SUFFIXES = {".mp4", ".m4v", ".mov"}
 FREEFORM_PREFIX = "----:com.apple.iTunes:"
@@ -109,7 +108,10 @@ class MatchInfo:
 
 
 class Mp4TagHelper:
+    """Read and write MP4/M4V metadata tags using mutagen."""
+
     def readTags(self, filePath: Path) -> dict[str, object]:
+        """Return a normalised dict of tag field-name → value for *filePath*."""
         try:
             mp4File = MP4(str(filePath))
         except Exception as exc:
@@ -126,6 +128,7 @@ class Mp4TagHelper:
         return result
 
     def writeTags(self, filePath: Path, values: dict[str, object]) -> None:
+        """Write *values* as MP4 tags to *filePath*, skipping blank/None entries."""
         mp4File = MP4(str(filePath))
         if mp4File.tags is None:
             mp4File.add_tags()
@@ -146,7 +149,7 @@ class Mp4TagHelper:
     @staticmethod
     def _mapFreeformFieldName(key: str) -> str:
         if key.startswith(FREEFORM_PREFIX):
-            return key[len(FREEFORM_PREFIX):]
+            return key[len(FREEFORM_PREFIX) :]
         return key
 
     def _normaliseTagValue(self, value: object) -> object:
@@ -173,7 +176,11 @@ class Mp4TagHelper:
 
 
 class MatchParser:
-    TITLE_PATTERN = re.compile(r"^(?P<home>.+?)\s+(?:vs\.?|v)\s+(?P<away>.+?)$", re.IGNORECASE)
+    """Parse match titles and scores from free-text strings."""
+
+    TITLE_PATTERN = re.compile(
+        r"^(?P<home>.+?)\s+(?:vs\.?|v)\s+(?P<away>.+?)$", re.IGNORECASE
+    )
     SCORE_PATTERN = re.compile(r"^(?P<home>\d{1,3})\s*[-:]\s*(?P<away>\d{1,3})$")
 
     def parseTitle(self, title: str | None) -> tuple[str | None, str | None]:
@@ -216,10 +223,14 @@ class MatchParser:
 
 
 class InteractivePrompter:
+    """Prompt the user for match metadata values and optionally play the video."""
+
     def __init__(self) -> None:
         self.playerPath = self._findPlayer()
 
-    def prompt(self, label: str, default: str | None = None, filePath: Path | None = None) -> str | None:
+    def prompt(
+        self, label: str, default: str | None = None, filePath: Path | None = None
+    ) -> str | None:
         while True:
             if default is None:
                 promptText = f"{label} [enter=blank, q=quit, p=play]: "
@@ -268,14 +279,26 @@ class UserQuitRequested(Exception):
 
 
 def configureLogging(verbose: bool) -> None:
-    logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO, format="%(message)s")
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO, format="%(message)s"
+    )
 
 
 def parseArgs(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Interactively audit and tag rugby match videos.")
-    parser.add_argument("inputRoot", help="root folder to scan")
-    parser.add_argument("--write", action="store_true", help="write metadata changes back to files")
-    parser.add_argument("--outputCsv", default="mp4_match_prompt_audit.csv", help="CSV report path")
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Interactively audit and tag rugby match videos."
+    )
+    parser.add_argument("--source", required=True, help="root folder to scan")
+    parser.add_argument(
+        "--confirm",
+        dest="confirm",
+        action="store_true",
+        help="execute changes — write metadata back to files (default is dry-run)",
+    )
+    parser.add_argument(
+        "--outputCsv", default="mp4_match_prompt_audit.csv", help="CSV report path"
+    )
     parser.add_argument("--verbose", action="store_true", help="enable debug logging")
     return parser.parse_args(argv)
 
@@ -454,8 +477,9 @@ def writeCsv(outputPath: Path, rows: list[dict[str, object]]) -> None:
 def main(argv: list[str] | None = None) -> int:
     args = parseArgs(argv or sys.argv[1:])
     configureLogging(args.verbose)
+    dryRun = not args.confirm
 
-    inputRoot = Path(args.inputRoot).expanduser().resolve()
+    inputRoot = Path(args.source).expanduser().resolve()
     if not inputRoot.exists() or not inputRoot.is_dir():
         logger.error("Input folder is invalid: %s", inputRoot)
         return 2
@@ -469,16 +493,16 @@ def main(argv: list[str] | None = None) -> int:
     try:
         for filePath in iterMediaFiles(inputRoot):
             rows.append(
-            promptForFile(
-                filePath=filePath,
-                inputRoot=inputRoot,
-                episodeMap=episodeMap,
-                tagHelper=tagHelper,
-                parser=parser,
-                prompter=prompter,
-                writeChanges=args.write,
+                promptForFile(
+                    filePath=filePath,
+                    inputRoot=inputRoot,
+                    episodeMap=episodeMap,
+                    tagHelper=tagHelper,
+                    parser=parser,
+                    prompter=prompter,
+                    writeChanges=not dryRun,
+                )
             )
-        )
     except UserQuitRequested:
         logger.info("...user requested quit")
 
@@ -488,7 +512,7 @@ def main(argv: list[str] | None = None) -> int:
     logger.info("")
     logger.info("...files processed: %s", len(rows))
     logger.info("...csv report: %s", outputCsv)
-    logger.info("...mode: %s", "write" if args.write else "dry-run")
+    logger.info("...mode: %s", "write" if not dryRun else "dry-run")
     return 0
 
 
