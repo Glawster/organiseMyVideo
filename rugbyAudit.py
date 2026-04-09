@@ -108,6 +108,23 @@ class SeasonInfo:
 
 
 @dataclass
+class FileContext:
+    """Context shown in the curses info panel while picking team names.
+
+    All fields are optional so the panel degrades gracefully when info
+    is not yet available (e.g. picking the home team before the away
+    team is known).
+    """
+
+    filePath: Path | None = None
+    seasonLabel: str | None = None
+    episode: int | None = None
+    existingTitle: str | None = None
+    existingScore: str | None = None
+    homeTeam: str | None = None
+
+
+@dataclass
 class MatchInfo:
     title: str | None
     comment: str | None
@@ -302,11 +319,20 @@ class TeamPicker:
 
     GLOUCESTER = "Gloucester-Hartpury"
 
-    def pick(self, label: str, knownTeams: list[str]) -> str | None:
+    def pick(
+        self,
+        label: str,
+        knownTeams: list[str],
+        context: FileContext | None = None,
+    ) -> str | None:
         """Return a team name chosen interactively.
 
         Tries a full-screen curses picker first.  Falls back to a numbered
         plain-text list when curses is unavailable (e.g. no TTY).
+
+        *context* is displayed in an info panel at the top of the curses
+        window showing the current file, season, episode, existing title,
+        score, and already-chosen home team.
 
         - Raises *UserQuitRequested* if the user presses ``q``.
         - Returns ``None`` if the user presses Escape (skip / leave blank).
@@ -314,18 +340,24 @@ class TeamPicker:
           subsequent calls benefit from it immediately.
         """
         try:
-            return curses.wrapper(self._cursesPick, label, knownTeams)
+            return curses.wrapper(self._cursesPick, label, knownTeams, context)
         except UserQuitRequested:
             raise
         except Exception as exc:
             logger.debug("...curses picker unavailable (%s), using text fallback", exc)
-            return self._fallbackPick(label, knownTeams)
+            return self._fallbackPick(label, knownTeams, context)
 
     # ------------------------------------------------------------------
     # Curses implementation
     # ------------------------------------------------------------------
 
-    def _cursesPick(self, stdscr, label: str, knownTeams: list[str]) -> str | None:
+    def _cursesPick(
+        self,
+        stdscr,
+        label: str,
+        knownTeams: list[str],
+        context: FileContext | None,
+    ) -> str | None:
 
         curses.curs_set(0)
         try:
@@ -348,12 +380,26 @@ class TeamPicker:
             stdscr.erase()
             height, width = stdscr.getmaxyx()
 
-            # Header and filter bar
-            self._addstrSafe(stdscr, 0, 0, f"{label}:", width)
-            self._addstrSafe(stdscr, 1, 0, f"  Filter: {filterText}", width)
-            self._addstrSafe(stdscr, 2, 0, "-" * (width - 1), width)
+            # ----------------------------------------------------------
+            # Info panel
+            # ----------------------------------------------------------
+            panelLines = self._buildInfoLines(context, width)
+            for row, line in enumerate(panelLines):
+                self._addstrSafe(stdscr, row, 0, line, width)
+            panelHeight = len(panelLines)
 
-            listTop = 3
+            # Separator after panel
+            sepAfterPanel = panelHeight
+            self._addstrSafe(stdscr, sepAfterPanel, 0, "-" * (width - 1), width)
+
+            # Label and filter bar
+            labelRow = sepAfterPanel + 1
+            filterRow = labelRow + 1
+            self._addstrSafe(stdscr, labelRow, 0, f"{label}:", width)
+            self._addstrSafe(stdscr, filterRow, 0, f"  Filter: {filterText}", width)
+            self._addstrSafe(stdscr, filterRow + 1, 0, "-" * (width - 1), width)
+
+            listTop = filterRow + 2
             statusRows = 2
             listHeight = max(1, height - listTop - statusRows)
 
@@ -434,6 +480,41 @@ class TeamPicker:
                 selected = 0
 
     @staticmethod
+    def _buildInfoLines(context: FileContext | None, width: int) -> list[str]:
+        """Return a list of fixed-width strings for the info panel.
+
+        Always returns at least one line so the panel separator is visible.
+        Each field is shown only when it contains useful data.
+        """
+        if context is None:
+            return [" (no file context)"]
+
+        lines: list[str] = []
+
+        if context.filePath is not None:
+            fileName = context.filePath.name
+            lines.append(f" File   : {fileName}"[: width - 1])
+
+        parts: list[str] = []
+        if context.seasonLabel:
+            parts.append(f"Season: {context.seasonLabel}")
+        if context.episode is not None:
+            parts.append(f"Ep: {context.episode}")
+        if parts:
+            lines.append(f" {('   '.join(parts))}"[: width - 1])
+
+        if context.existingTitle:
+            lines.append(f" Title  : {context.existingTitle}"[: width - 1])
+
+        score = context.existingScore or "(none)"
+        lines.append(f" Score  : {score}"[: width - 1])
+
+        if context.homeTeam:
+            lines.append(f" Home   : {context.homeTeam}"[: width - 1])
+
+        return lines if lines else [" (no file context)"]
+
+    @staticmethod
     def _addstrSafe(stdscr, y: int, x: int, text: str, width: int) -> None:
         """Write *text* at (*y*, *x*) clipped to *width*, ignoring boundary errors."""
         try:
@@ -452,8 +533,14 @@ class TeamPicker:
     # Plain-text fallback
     # ------------------------------------------------------------------
 
-    def _fallbackPick(self, label: str, knownTeams: list[str]) -> str | None:
+    def _fallbackPick(
+        self, label: str, knownTeams: list[str], context: FileContext | None = None
+    ) -> str | None:
         """Numbered plain-text list used when curses is unavailable."""
+        if context is not None:
+            infoLines = self._buildInfoLines(context, width=72)
+            print("\n" + "\n".join(infoLines))
+
         if knownTeams:
             print(f"\n{label}:")
             for i, team in enumerate(knownTeams, start=1):
@@ -611,8 +698,23 @@ def promptForFile(
         title = defaultTitle
         comment = defaultComment
     else:
-        homeTeam = teamPicker.pick("Home team", knownTeams)
-        awayTeam = teamPicker.pick("Away team", knownTeams)
+        baseContext = FileContext(
+            filePath=filePath,
+            seasonLabel=seasonInfo.seasonLabel if seasonInfo else None,
+            episode=episode,
+            existingTitle=defaultTitle,
+            existingScore=defaultComment,
+        )
+        homeTeam = teamPicker.pick("Home team", knownTeams, context=baseContext)
+        awayContext = FileContext(
+            filePath=filePath,
+            seasonLabel=seasonInfo.seasonLabel if seasonInfo else None,
+            episode=episode,
+            existingTitle=defaultTitle,
+            existingScore=defaultComment,
+            homeTeam=homeTeam,
+        )
+        awayTeam = teamPicker.pick("Away team", knownTeams, context=awayContext)
 
         title = None
         if homeTeam and awayTeam:
