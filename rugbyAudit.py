@@ -324,6 +324,7 @@ class TeamPicker:
         label: str,
         knownTeams: list[str],
         context: FileContext | None = None,
+        default: str | None = None,
     ) -> str | None:
         """Return a team name chosen interactively.
 
@@ -334,18 +335,21 @@ class TeamPicker:
         window showing the current file, season, episode, existing title,
         score, and already-chosen home team.
 
+        *default* pre-positions the cursor on the matching entry so the user
+        can accept it immediately by pressing Enter.
+
         - Raises *UserQuitRequested* if the user presses ``q``.
         - Returns ``None`` if the user presses Escape (skip / leave blank).
         - Appends any new name to *knownTeams* (sorted in place) so that
           subsequent calls benefit from it immediately.
         """
         try:
-            return curses.wrapper(self._cursesPick, label, knownTeams, context)
+            return curses.wrapper(self._cursesPick, label, knownTeams, context, default)
         except UserQuitRequested:
             raise
         except Exception as exc:
             logger.debug("...curses picker unavailable (%s), using text fallback", exc)
-            return self._fallbackPick(label, knownTeams, context)
+            return self._fallbackPick(label, knownTeams, context, default)
 
     # ------------------------------------------------------------------
     # Curses implementation
@@ -357,6 +361,7 @@ class TeamPicker:
         label: str,
         knownTeams: list[str],
         context: FileContext | None,
+        default: str | None,
     ) -> str | None:
 
         curses.curs_set(0)
@@ -365,7 +370,16 @@ class TeamPicker:
         except curses.error:
             pass
 
-        selected = 0
+        # Pre-position the cursor on the default team when one is supplied.
+        if default:
+            lower = default.casefold()
+            defaultIdx = next(
+                (i for i, t in enumerate(knownTeams) if t.casefold() == lower), 0
+            )
+        else:
+            defaultIdx = 0
+
+        selected = defaultIdx
         filterText = ""
 
         while True:
@@ -534,7 +548,11 @@ class TeamPicker:
     # ------------------------------------------------------------------
 
     def _fallbackPick(
-        self, label: str, knownTeams: list[str], context: FileContext | None = None
+        self,
+        label: str,
+        knownTeams: list[str],
+        context: FileContext | None = None,
+        default: str | None = None,
     ) -> str | None:
         """Numbered plain-text list used when curses is unavailable."""
         if context is not None:
@@ -544,13 +562,18 @@ class TeamPicker:
         if knownTeams:
             print(f"\n{label}:")
             for i, team in enumerate(knownTeams, start=1):
-                print(f"  {i:2}. {team}")
+                marker = " *" if default and team.casefold() == default.casefold() else ""
+                print(f"  {i:2}. {team}{marker}")
             print()
 
+        defaultHint = f" Enter={default}" if default else " Enter=skip"
         while True:
-            prompt = f"{label} [number, new name, g=Gloucester, q=quit, Enter=skip]: "
+            prompt = f"{label} [number, new name, g=Gloucester, q=quit,{defaultHint}]: "
             response = input(prompt).strip()
             if not response:
+                if default:
+                    self._addToKnownTeams(default, knownTeams)
+                    return default
                 return None
             if response.lower() == "q":
                 raise UserQuitRequested()
@@ -724,6 +747,14 @@ def promptForFile(
         title = defaultTitle
         comment = defaultComment
     else:
+        # Derive default team names from the filename stem so the picker can
+        # pre-position the cursor and the user can simply press Enter.
+        fileHomeTeam, fileAwayTeam = parser.parseTitle(filePath.stem)
+        if fileHomeTeam:
+            fileHomeTeam = _cleanTeamName(fileHomeTeam)
+        if fileAwayTeam:
+            fileAwayTeam = _cleanTeamName(fileAwayTeam)
+
         baseContext = FileContext(
             filePath=filePath,
             seasonLabel=seasonInfo.seasonLabel if seasonInfo else None,
@@ -731,7 +762,9 @@ def promptForFile(
             existingTitle=defaultTitle,
             existingScore=defaultComment,
         )
-        homeTeam = teamPicker.pick("Home team", knownTeams, context=baseContext)
+        homeTeam = teamPicker.pick(
+            "Home team", knownTeams, context=baseContext, default=fileHomeTeam
+        )
         awayContext = FileContext(
             filePath=filePath,
             seasonLabel=seasonInfo.seasonLabel if seasonInfo else None,
@@ -740,7 +773,9 @@ def promptForFile(
             existingScore=defaultComment,
             homeTeam=homeTeam,
         )
-        awayTeam = teamPicker.pick("Away team", knownTeams, context=awayContext)
+        awayTeam = teamPicker.pick(
+            "Away team", knownTeams, context=awayContext, default=fileAwayTeam
+        )
 
         title = None
         if homeTeam and awayTeam:
