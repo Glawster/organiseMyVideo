@@ -647,13 +647,39 @@ def getDefaultText(tags: dict[str, object], fieldName: str) -> str | None:
     return str(value)
 
 
+# Trailing noise that occasionally contaminates team names extracted from file
+# titles (e.g. "Bristol Bears SF", "Gloucester-Hartpury Full Match Allianz…").
+# The pattern is anchored to the end of the string and applied repeatedly until
+# no further match is found, so stacked suffixes are stripped cleanly.
+_TEAM_NOISE_RE = re.compile(
+    r"\s+(?:SF|Final|Full\s+Match\b.*|Allianz\b.*)$",
+    re.IGNORECASE,
+)
+
+
+def _cleanTeamName(name: str) -> str:
+    """Strip known trailing noise from a raw team name extracted from a title tag.
+
+    Applies *_TEAM_NOISE_RE* repeatedly until the name stabilises, so that
+    compound suffixes such as "Full Match Allianz Premi-01" are fully removed
+    in one call.
+    """
+    while True:
+        cleaned = _TEAM_NOISE_RE.sub("", name).strip()
+        if cleaned == name:
+            return cleaned
+        name = cleaned
+
+
 def buildKnownTeams(
     inputRoot: Path, tagHelper: Mp4TagHelper, parser: MatchParser
 ) -> list[str]:
     """Pre-scan media files and extract unique team names from existing title tags.
 
     Returns a case-insensitively sorted list of distinct team names found in
-    the ``title`` atoms of all media files under *inputRoot*.
+    the ``title`` atoms of all media files under *inputRoot*.  Known trailing
+    noise (e.g. "SF", "Final", "Full Match …") is stripped before the name is
+    added to the list.
     """
     teamSet: set[str] = set()
     for filePath in iterMediaFiles(inputRoot):
@@ -661,9 +687,9 @@ def buildKnownTeams(
         title = getDefaultText(tags, "title")
         homeTeam, awayTeam = parser.parseTitle(title)
         if homeTeam:
-            teamSet.add(homeTeam.strip())
+            teamSet.add(_cleanTeamName(homeTeam.strip()))
         if awayTeam:
-            teamSet.add(awayTeam.strip())
+            teamSet.add(_cleanTeamName(awayTeam.strip()))
     return sorted(teamSet, key=str.casefold)
 
 
