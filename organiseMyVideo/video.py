@@ -230,7 +230,16 @@ class VideoMixin:
         return bestDir
 
     def _collectMatchingFiles(self, sourceDir: Path, patterns: Iterable[str]) -> List[Path]:
-        """Return sorted files in *sourceDir* matching any of the supplied glob patterns."""
+        """
+        Return unique files in *sourceDir* matching the supplied glob patterns.
+
+        Args:
+            sourceDir: Directory to scan for companion metadata files.
+            patterns: Glob patterns to evaluate within *sourceDir*.
+
+        Returns:
+            Sorted matching files with duplicates removed while preserving pattern order.
+        """
         if not sourceDir.exists() or not sourceDir.is_dir():
             return []
 
@@ -245,7 +254,13 @@ class VideoMixin:
         return matches
 
     def _copyFilesIntoDir(self, sourceFiles: Iterable[Path], destDir: Path) -> None:
-        """Copy companion files into *destDir* when they exist."""
+        """
+        Copy pre-filtered companion files into *destDir*.
+
+        Args:
+            sourceFiles: Existing files selected by the caller for replication.
+            destDir: Destination directory that should receive the copied files.
+        """
         for sourcePath in sourceFiles:
             destPath = destDir / sourcePath.name
             logger.action(f"copy metadata: {sourcePath} -> {destPath}")
@@ -259,7 +274,7 @@ class VideoMixin:
         try:
             root = ET.fromstring(metadataFile.read_text(encoding="utf-8"))
         except (ET.ParseError, OSError, UnicodeDecodeError) as e:
-            logger.warning(f"could not parse metadata XML {metadataFile}: {e}")
+            logger.warning("could not parse metadata XML %s: %s", metadataFile, e)
             return None
 
         filename = root.findtext("filename")
