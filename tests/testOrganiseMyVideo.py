@@ -76,6 +76,14 @@ def testParseTvFilenameHighSeasonEpisode(organizer: VideoOrganizer):
     assert result["episode"] == 25
 
 
+def testParseTvFilenameWithoutEpisodeTitle(organizer: VideoOrganizer):
+    result = organizer.parseTvFilename("Virgin.River.S06E01.mkv")
+    assert result is not None
+    assert result["showName"] == "Virgin River"
+    assert result["season"] == 6
+    assert result["episode"] == 1
+
+
 def testParseTvFilenameReturnsNoneForMovie(organizer: VideoOrganizer):
     assert organizer.parseTvFilename("Inception (2010).mp4") is None
 
@@ -182,6 +190,37 @@ def testReadMcmHintsReturnsTvMetadata(sourceDir: Path, organizer: VideoOrganizer
         "imdbId": "tt21357478",
         "seriesId": "347507",
         "episodeId": "10751471",
+        "metadataSource": "mcm",
+    }
+
+
+def testReadMcmHintsInfersTvSeasonFromSeriesAndPath(sourceDir: Path, organizer: VideoOrganizer):
+    showDir = sourceDir / "Virgin River"
+    seasonDir = showDir / "Season 6"
+    seasonDir.mkdir(parents=True)
+    videoFile = seasonDir / "new-episode.mkv"
+    videoFile.write_bytes(b"x" * 50)
+    (showDir / "series.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Series>
+    <SeriesName>Virgin River</SeriesName>
+    <SeriesID>117581</SeriesID>
+</Series>
+""",
+        encoding="utf-8",
+    )
+
+    hints = organizer._readMcmHints(videoFile)
+
+    assert hints == {
+        "type": "tv",
+        "showName": "Virgin River",
+        "season": 6,
+        "episode": None,
+        "episodeTitle": None,
+        "imdbId": None,
+        "seriesId": "117581",
+        "episodeId": None,
         "metadataSource": "mcm",
     }
 
@@ -608,6 +647,42 @@ def testProcessFilesUsesTvMcmHintsWhenFilenameCannotBeParsed(tmp_path: Path, con
     destFile = tvStorage / "After Life" / "Season 01" / "episode.mkv"
     assert destFile.exists()
     assert not srcFile.exists()
+
+
+def testProcessFilesUsesSeriesMcmHintsForNewEpisodeWithoutEpisodeXml(tmp_path: Path, confirmedOrganizer: VideoOrganizer):
+    showDir = confirmedOrganizer.sourceDir / "Virgin River"
+    seasonDir = showDir / "Season 6"
+    seasonDir.mkdir(parents=True)
+    srcFile = seasonDir / "Virgin.River.S06E01.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    (showDir / "series.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Series>
+    <SeriesName>Virgin River</SeriesName>
+    <SeriesID>117581</SeriesID>
+</Series>
+""",
+        encoding="utf-8",
+    )
+
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    with patch.object(confirmedOrganizer, "scanStorageLocations", return_value=([movieStorage], [tvStorage])):
+        confirmedOrganizer.processFiles(interactive=False)
+
+    destSeasonDir = tvStorage / "Virgin River" / "Season 06"
+    destFile = destSeasonDir / "Virgin.River.S06E01.mkv"
+    episodeXml = destSeasonDir / "metadata" / "Virgin.River.S06E01.xml"
+    assert destFile.exists()
+    assert not srcFile.exists()
+    assert episodeXml.exists()
+    xmlText = episodeXml.read_text(encoding="utf-8")
+    assert "<EpisodeNumber>1</EpisodeNumber>" in xmlText
+    assert "<SeasonNumber>6</SeasonNumber>" in xmlText
+    assert "<seriesid>117581</seriesid>" in xmlText
 
 
 # ---------------------------------------------------------------------------

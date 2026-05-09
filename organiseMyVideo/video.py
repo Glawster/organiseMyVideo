@@ -14,6 +14,7 @@ from organiseMyProjects.logUtils import getLogger  # type: ignore
 from .constants import VIDEO_EXTENSIONS, _PREFIX_REGEX
 
 logger = getLogger("organiseMyVideo")
+UNKNOWN_YEAR = "Unknown"
 
 
 class VideoMixin:
@@ -72,7 +73,7 @@ class VideoMixin:
             Dictionary with parsed info or None if parsing failed
         """
         # Pattern for SnnEnn format
-        pattern = r"^(.+?)\.S(\d+)E(\d+)\..*\.(\w+)$"
+        pattern = r"^(.+?)\.S(\d+)E(\d+)(?:\..*)?\.(\w+)$"
         match = re.match(pattern, filename, re.IGNORECASE)
         
         if match:
@@ -314,6 +315,13 @@ class VideoMixin:
             return int(value)
         return None
 
+    def _inferSeasonFromPath(self, seasonDir: Path) -> Optional[int]:
+        """Return the season number inferred from a season directory name."""
+        match = re.search(r"(?:season\s*|s)(\d+)", seasonDir.name, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+        return None
+
     def _readMovieMcmHints(self, sourceFile: Path) -> Optional[dict]:
         """
         Return standardised movie hints from nearby MCM XML files.
@@ -331,7 +339,7 @@ class VideoMixin:
         imdbId = self._readFirstXmlText(movieRoot, ("IMDbId", "IMDB", "IMDB_ID"))
         tmdbId = self._readFirstXmlText(movieRoot, ("TMDbId", "TMDBId"))
 
-        if not title and not year and not imdbId and not tmdbId:
+        if not self._hasAnyMovieMetadata(title=title, year=year, imdbId=imdbId, tmdbId=tmdbId):
             return None
 
         return {
@@ -357,14 +365,22 @@ class VideoMixin:
         episodeRoot = self._readXmlRoot(sourceSeasonDir / "metadata" / f"{sourceFile.stem}.xml")
 
         showName = self._readFirstXmlText(seriesRoot, ("LocalTitle", "SeriesName"))
-        season = self._readIntXmlText(episodeRoot, ("SeasonNumber",))
+        season = self._readIntXmlText(episodeRoot, ("SeasonNumber",)) or self._inferSeasonFromPath(sourceSeasonDir)
         episode = self._readIntXmlText(episodeRoot, ("EpisodeNumber", "ID"))
         episodeTitle = self._readFirstXmlText(episodeRoot, ("EpisodeName",))
         imdbId = self._readFirstXmlText(episodeRoot, ("IMDB_ID", "IMDbId"))
         seriesId = self._readFirstXmlText(seriesRoot, ("SeriesID", "id"))
         episodeId = self._readFirstXmlText(episodeRoot, ("EpisodeID",))
 
-        if not showName and season is None and episode is None and not episodeTitle and not imdbId and not seriesId and not episodeId:
+        if not self._hasAnyTvMetadata(
+            showName=showName,
+            season=season,
+            episode=episode,
+            episodeTitle=episodeTitle,
+            imdbId=imdbId,
+            seriesId=seriesId,
+            episodeId=episodeId,
+        ):
             return None
 
         return {
@@ -397,7 +413,7 @@ class VideoMixin:
 
         merged = dict(movieInfo or {})
         merged["title"] = mcmHints.get("title") or merged.get("title")
-        merged["year"] = mcmHints.get("year") or merged.get("year") or "Unknown"
+        merged["year"] = mcmHints.get("year") or merged.get("year") or UNKNOWN_YEAR
         merged["extension"] = merged.get("extension") or sourceFile.suffix
         merged["type"] = "movie"
         for key in ("imdbId", "tmdbId", "metadataSource"):
@@ -414,7 +430,7 @@ class VideoMixin:
         merged = dict(tvInfo or {})
         merged["showName"] = mcmHints.get("showName") or merged.get("showName")
         merged["season"] = mcmHints.get("season") or merged.get("season")
-        merged["episode"] = mcmHints.get("episode") or merged.get("episode") or 0
+        merged["episode"] = mcmHints.get("episode") or merged.get("episode")
         merged["extension"] = merged.get("extension") or sourceFile.suffix
         merged["type"] = "tv"
         for key in ("episodeTitle", "imdbId", "seriesId", "episodeId", "metadataSource"):
@@ -424,6 +440,14 @@ class VideoMixin:
             return merged
         return tvInfo
 
+    def _hasAnyMovieMetadata(self, **metadataValues) -> bool:
+        """Return True when any movie metadata hint has a usable value."""
+        return any(value for value in metadataValues.values())
+
+    def _hasAnyTvMetadata(self, **metadataValues) -> bool:
+        """Return True when any TV metadata hint has a usable value."""
+        return any(value is not None and value != "" for value in metadataValues.values())
+
     def _replicateMovieMetadata(self, sourceFile: Path, destDir: Path) -> None:
         """Copy supported MCM movie companion files into the destination folder."""
         if sourceFile.parent == self.sourceDir:
@@ -432,7 +456,43 @@ class VideoMixin:
         movieMetadataFiles = self._collectMatchingFiles(sourceFile.parent, self._MOVIE_MCM_PATTERNS)
         self._copyFilesIntoDir(movieMetadataFiles, destDir)
 
-    def _replicateTvMetadata(self, sourceFile: Path, showDir: Path, seasonDir: Path) -> None:
+    def _writeEpisodeMcmTemplate(self, sourceFile: Path, destMetadataDir: Path, tvInfo: dict) -> None:
+        """Create a starter MCM episode XML file when only show-level metadata is available."""
+        mcmHints = self._readTvMcmHints(sourceFile) or {}
+        season = tvInfo.get("season") or mcmHints.get("season")
+        episode = tvInfo.get("episode")
+        if season is None or episode is None:
+            return
+
+        seriesId = mcmHints.get("seriesId") or ""
+        imdbId = mcmHints.get("imdbId") or ""
+        episodeId = mcmHints.get("episodeId") or ""
+        episodeTitle = mcmHints.get("episodeTitle") or ""
+
+        item = ET.Element("Item")
+        fields = {
+            "ID": str(episode),
+            "EpisodeID": episodeId,
+            "EpisodeNumber": str(episode),
+            "SeasonNumber": str(season),
+            "seriesid": seriesId,
+            "IMDB_ID": imdbId,
+            "EpisodeName": episodeTitle,
+            "Type": "",
+        }
+        for key, value in fields.items():
+            child = ET.SubElement(item, key)
+            child.text = value
+
+        destFile = destMetadataDir / f"{sourceFile.stem}.xml"
+        logger.action(f"create metadata: {destFile}")
+        if self.dryRun:
+            return
+
+        destMetadataDir.mkdir(parents=True, exist_ok=True)
+        ET.ElementTree(item).write(destFile, encoding="utf-8", xml_declaration=True)
+
+    def _replicateTvMetadata(self, sourceFile: Path, showDir: Path, seasonDir: Path, tvInfo: dict) -> None:
         """Copy supported MCM TV-show companion files into show and season folders."""
         sourceSeasonDir = sourceFile.parent
         if sourceSeasonDir == self.sourceDir or not sourceSeasonDir.is_dir():
@@ -449,10 +509,11 @@ class VideoMixin:
 
         metadataDir = sourceSeasonDir / "metadata"
         episodeMetadataFile = metadataDir / f"{sourceFile.stem}.xml"
+        destMetadataDir = seasonDir / "metadata"
         if not episodeMetadataFile.exists():
+            self._writeEpisodeMcmTemplate(sourceFile, destMetadataDir, tvInfo)
             return
 
-        destMetadataDir = seasonDir / "metadata"
         self._copyFilesIntoDir([episodeMetadataFile], destMetadataDir)
 
         imageName = self._extractEpisodeMetadataImage(episodeMetadataFile)
@@ -688,7 +749,7 @@ class VideoMixin:
         try:
             seasonDir.mkdir(parents=True, exist_ok=True)
             shutil.move(str(sourceFile), str(destFile))
-            self._replicateTvMetadata(sourceFile, showDir, seasonDir)
+            self._replicateTvMetadata(sourceFile, showDir, seasonDir, tvInfo)
             logger.action(f"TV show moved successfully: {destFile}")
             return True
         except Exception as e: 
