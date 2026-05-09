@@ -332,6 +332,15 @@ class VideoMixin:
         The returned structure is designed for both current move-time decisions
         and future scraper output, so it carries stable IDs in addition to the
         title/year values used today.
+
+        Args:
+            sourceFile: Video file whose parent directory may contain movie.xml.
+
+        Returns:
+            ``None`` when no usable movie metadata exists, otherwise a dict with
+            ``type`` (str), ``title`` (Optional[str]), ``year`` (Optional[str]),
+            ``imdbId`` (Optional[str]), ``tmdbId`` (Optional[str]), and
+            ``metadataSource`` (str).
         """
         movieRoot = self._readXmlRoot(sourceFile.parent / "movie.xml")
         if movieRoot is None:
@@ -361,6 +370,18 @@ class VideoMixin:
         The shape matches the future scraper-oriented metadata model so that
         move logic can consume the same keys whether the files already exist on
         disk or are generated later by organiseMyVideo.
+
+        Args:
+            sourceFile: Episode file whose show/season structure may contain
+                        ``series.xml`` and episode metadata XML.
+
+        Returns:
+            ``None`` when no usable TV metadata exists, otherwise a dict with
+            ``type`` (str), ``showName`` (Optional[str]), ``season``
+            (Optional[int]), ``episode`` (Optional[int]), ``episodeTitle``
+            (Optional[str]), ``imdbId`` (Optional[str]), ``seriesId``
+            (Optional[str]), ``episodeId`` (Optional[str]), and
+            ``metadataSource`` (str).
         """
         sourceSeasonDir = sourceFile.parent
         sourceShowDir = None
@@ -407,12 +428,34 @@ class VideoMixin:
         These hints help current move-time classification and naming decisions,
         and they also define the metadata shape future scraping code should
         populate when organiseMyVideo starts generating MCM-style files itself.
+
+        TV hints are attempted first, then movie hints.
+
+        Args:
+            sourceFile: Video file whose nearby MCM files should be inspected.
+
+        Returns:
+            ``None`` when no usable hints exist, otherwise either the TV hint
+            dict returned by :meth:`_readTvMcmHints` or the movie hint dict
+            returned by :meth:`_readMovieMcmHints`.
         """
         return self._readTvMcmHints(sourceFile) or self._readMovieMcmHints(sourceFile)
 
     def _applyMovieMcmHints(self, movieInfo: Optional[dict], mcmHints: Optional[dict],
                             sourceFile: Path) -> Optional[dict]:
-        """Merge movie-specific MCM hints into filename-derived movie info."""
+        """
+        Merge movie-specific MCM hints into filename-derived movie info.
+
+        Args:
+            movieInfo: Filename-derived movie info, or ``None`` when filename
+                       parsing failed.
+            mcmHints: Standardised MCM hints, which may describe another type.
+            sourceFile: Source file used to supply a fallback extension.
+
+        Returns:
+            A merged movie info dict when a usable title is available,
+            otherwise the original ``movieInfo`` value.
+        """
         if not mcmHints or mcmHints.get("type") != "movie":
             return movieInfo
 
@@ -428,7 +471,19 @@ class VideoMixin:
 
     def _applyTvMcmHints(self, tvInfo: Optional[dict], mcmHints: Optional[dict],
                          sourceFile: Path) -> Optional[dict]:
-        """Merge TV-specific MCM hints into filename-derived TV info."""
+        """
+        Merge TV-specific MCM hints into filename-derived TV info.
+
+        Args:
+            tvInfo: Filename-derived TV info, or ``None`` when filename parsing
+                    failed.
+            mcmHints: Standardised MCM hints, which may describe another type.
+            sourceFile: Source file used to supply a fallback extension.
+
+        Returns:
+            A merged TV info dict when show name and season are known,
+            otherwise the original ``tvInfo`` value.
+        """
         if not mcmHints or mcmHints.get("type") != "tv":
             return tvInfo
 
@@ -458,7 +513,15 @@ class VideoMixin:
         self._copyFilesIntoDir(movieMetadataFiles, destDir)
 
     def _writeEpisodeMcmTemplate(self, sourceFile: Path, destMetadataDir: Path, tvInfo: dict) -> None:
-        """Create a starter MCM episode XML file when only show-level metadata is available."""
+        """
+        Create a starter MCM episode XML file when only show-level metadata is available.
+
+        Args:
+            sourceFile: Episode file being moved.
+            destMetadataDir: Destination metadata directory for the generated XML.
+            tvInfo: Parsed or inferred TV metadata.  When season or episode is
+                    missing, the method returns without writing a template.
+        """
         mcmHints = self._readTvMcmHints(sourceFile) or {}
         season = tvInfo.get("season") or mcmHints.get("season")
         episode = tvInfo.get("episode")
