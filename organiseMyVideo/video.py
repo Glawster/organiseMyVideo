@@ -73,7 +73,7 @@ class VideoMixin:
             Dictionary with parsed info or None if parsing failed
         """
         # Pattern for SnnEnn format
-        pattern = r"^(.+?)\.S(\d+)E(\d+)(?:\..*)?\.(\w+)$"
+        pattern = r"^(.+?)\.S(\d+)E(\d+)(?:\..+)?\.(\w+)$"
         match = re.match(pattern, filename, re.IGNORECASE)
         
         if match:
@@ -442,7 +442,7 @@ class VideoMixin:
 
     def _hasAnyMovieMetadata(self, **metadataValues) -> bool:
         """Return True when any movie metadata hint has a usable value."""
-        return any(value for value in metadataValues.values())
+        return any(value is not None and value != "" for value in metadataValues.values())
 
     def _hasAnyTvMetadata(self, **metadataValues) -> bool:
         """Return True when any TV metadata hint has a usable value."""
@@ -485,7 +485,7 @@ class VideoMixin:
             child.text = value
 
         destFile = destMetadataDir / f"{sourceFile.stem}.xml"
-        logger.action(f"create metadata: {destFile}")
+        logger.action("create metadata: %s", destFile)
         if self.dryRun:
             return
 
