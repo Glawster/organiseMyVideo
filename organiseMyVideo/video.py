@@ -311,9 +311,12 @@ class VideoMixin:
     def _readIntXmlText(self, root: Optional[ET.Element], tags: Iterable[str]) -> Optional[int]:
         """Return the first tag value that can be converted to an integer."""
         value = self._readFirstXmlText(root, tags)
-        if value and value.isdigit():
+        if value is None:
+            return None
+        try:
             return int(value)
-        return None
+        except ValueError:
+            return None
 
     def _inferSeasonFromPath(self, seasonDir: Path) -> Optional[int]:
         """Return the season number inferred from a season directory name."""
@@ -339,7 +342,7 @@ class VideoMixin:
         imdbId = self._readFirstXmlText(movieRoot, ("IMDbId", "IMDB", "IMDB_ID"))
         tmdbId = self._readFirstXmlText(movieRoot, ("TMDbId", "TMDBId"))
 
-        if not self._hasAnyMovieMetadata(title=title, year=year, imdbId=imdbId, tmdbId=tmdbId):
+        if not self._hasAnyMetadata(title=title, year=year, imdbId=imdbId, tmdbId=tmdbId):
             return None
 
         return {
@@ -360,7 +363,9 @@ class VideoMixin:
         disk or are generated later by organiseMyVideo.
         """
         sourceSeasonDir = sourceFile.parent
-        sourceShowDir = sourceSeasonDir.parent if sourceSeasonDir != self.sourceDir else None
+        sourceShowDir = None
+        if sourceSeasonDir != self.sourceDir and sourceSeasonDir.parent != self.sourceDir:
+            sourceShowDir = sourceSeasonDir.parent
         seriesRoot = self._readXmlRoot(sourceShowDir / "series.xml") if sourceShowDir else None
         episodeRoot = self._readXmlRoot(sourceSeasonDir / "metadata" / f"{sourceFile.stem}.xml")
 
@@ -372,7 +377,7 @@ class VideoMixin:
         seriesId = self._readFirstXmlText(seriesRoot, ("SeriesID", "id"))
         episodeId = self._readFirstXmlText(episodeRoot, ("EpisodeID",))
 
-        if not self._hasAnyTvMetadata(
+        if not self._hasAnyMetadata(
             showName=showName,
             season=season,
             episode=episode,
@@ -440,12 +445,8 @@ class VideoMixin:
             return merged
         return tvInfo
 
-    def _hasAnyMovieMetadata(self, **metadataValues) -> bool:
-        """Return True when any movie metadata hint has a usable value."""
-        return any(value is not None and value != "" for value in metadataValues.values())
-
-    def _hasAnyTvMetadata(self, **metadataValues) -> bool:
-        """Return True when any TV metadata hint has a usable value."""
+    def _hasAnyMetadata(self, **metadataValues) -> bool:
+        """Return True when any metadata hint has a usable value."""
         return any(value is not None and value != "" for value in metadataValues.values())
 
     def _replicateMovieMetadata(self, sourceFile: Path, destDir: Path) -> None:
@@ -493,7 +494,16 @@ class VideoMixin:
         ET.ElementTree(item).write(destFile, encoding="utf-8", xml_declaration=True)
 
     def _replicateTvMetadata(self, sourceFile: Path, showDir: Path, seasonDir: Path, tvInfo: dict) -> None:
-        """Copy supported MCM TV-show companion files into show and season folders."""
+        """
+        Copy supported MCM TV-show companion files into show and season folders.
+
+        Args:
+            sourceFile: Episode file being moved.
+            showDir: Destination show directory.
+            seasonDir: Destination season directory.
+            tvInfo: Parsed or inferred TV metadata used for template creation
+                    when no episode XML exists yet.
+        """
         sourceSeasonDir = sourceFile.parent
         if sourceSeasonDir == self.sourceDir or not sourceSeasonDir.is_dir():
             return
@@ -511,6 +521,7 @@ class VideoMixin:
         episodeMetadataFile = metadataDir / f"{sourceFile.stem}.xml"
         destMetadataDir = seasonDir / "metadata"
         if not episodeMetadataFile.exists():
+            # New episodes generate a starter XML instead of copying an existing file.
             self._writeEpisodeMcmTemplate(sourceFile, destMetadataDir, tvInfo)
             return
 
