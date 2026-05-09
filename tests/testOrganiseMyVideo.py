@@ -109,6 +109,84 @@ def testParseMovieFilenameReturnsNoneForUnparseable(organizer: VideoOrganizer):
 
 
 # ---------------------------------------------------------------------------
+# MCM metadata hints
+# ---------------------------------------------------------------------------
+
+
+def testReadMcmHintsReturnsMovieMetadata(sourceDir: Path, organizer: VideoOrganizer):
+    movieDir = sourceDir / "3 from Hell (2019)"
+    movieDir.mkdir()
+    movieFile = movieDir / "clip.mp4"
+    movieFile.write_bytes(b"x" * 50)
+    (movieDir / "movie.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Title>
+    <LocalTitle>3 from Hell</LocalTitle>
+    <ProductionYear>2019</ProductionYear>
+    <IMDbId>tt8134742</IMDbId>
+    <TMDbId>489064</TMDbId>
+</Title>
+""",
+        encoding="utf-8",
+    )
+
+    hints = organizer._readMcmHints(movieFile)
+
+    assert hints == {
+        "type": "movie",
+        "title": "3 from Hell",
+        "year": "2019",
+        "imdbId": "tt8134742",
+        "tmdbId": "489064",
+        "metadataSource": "mcm",
+    }
+
+
+def testReadMcmHintsReturnsTvMetadata(sourceDir: Path, organizer: VideoOrganizer):
+    showDir = sourceDir / "After Life"
+    seasonDir = showDir / "Season 1"
+    metadataDir = seasonDir / "metadata"
+    metadataDir.mkdir(parents=True)
+    videoFile = seasonDir / "episode.mkv"
+    videoFile.write_bytes(b"x" * 50)
+    (showDir / "series.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Series>
+    <SeriesName>After Life</SeriesName>
+    <SeriesID>347507</SeriesID>
+</Series>
+""",
+        encoding="utf-8",
+    )
+    (metadataDir / "episode.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Item>
+    <EpisodeID>10751471</EpisodeID>
+    <EpisodeNumber>4</EpisodeNumber>
+    <SeasonNumber>1</SeasonNumber>
+    <EpisodeName>Sic Semper Systema</EpisodeName>
+    <IMDB_ID>tt21357478</IMDB_ID>
+</Item>
+""",
+        encoding="utf-8",
+    )
+
+    hints = organizer._readMcmHints(videoFile)
+
+    assert hints == {
+        "type": "tv",
+        "showName": "After Life",
+        "season": 1,
+        "episode": 4,
+        "episodeTitle": "Sic Semper Systema",
+        "imdbId": "tt21357478",
+        "seriesId": "347507",
+        "episodeId": "10751471",
+        "metadataSource": "mcm",
+    }
+
+
+# ---------------------------------------------------------------------------
 # scanStorageLocations
 # ---------------------------------------------------------------------------
 
@@ -459,6 +537,75 @@ def testProcessFilesFindsVideoInSubdirectory(tmp_path: Path, confirmedOrganizer:
             confirmedOrganizer.processFiles(interactive=True)
 
     destFile = movieStorage / "One Mile (2026)" / "One.Mile.2026.1080p.WEBRip.x264.mp4"
+    assert destFile.exists()
+    assert not srcFile.exists()
+
+
+def testProcessFilesUsesMovieMcmHintsWhenFilenameCannotBeParsed(tmp_path: Path, confirmedOrganizer: VideoOrganizer):
+    movieSourceDir = confirmedOrganizer.sourceDir / "3 from Hell (2019)"
+    movieSourceDir.mkdir()
+    srcFile = movieSourceDir / "clip.mp4"
+    srcFile.write_bytes(b"x" * 100)
+    (movieSourceDir / "movie.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Title>
+    <LocalTitle>3 from Hell</LocalTitle>
+    <ProductionYear>2019</ProductionYear>
+</Title>
+""",
+        encoding="utf-8",
+    )
+
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    with patch.object(confirmedOrganizer, "scanStorageLocations", return_value=([movieStorage], [tvStorage])):
+        confirmedOrganizer.processFiles(interactive=False)
+
+    destFile = movieStorage / "3 from Hell (2019)" / "clip.mp4"
+    assert destFile.exists()
+    assert not srcFile.exists()
+
+
+def testProcessFilesUsesTvMcmHintsWhenFilenameCannotBeParsed(tmp_path: Path, confirmedOrganizer: VideoOrganizer):
+    showDir = confirmedOrganizer.sourceDir / "After Life"
+    seasonDir = showDir / "Season 1"
+    metadataDir = seasonDir / "metadata"
+    metadataDir.mkdir(parents=True)
+    srcFile = seasonDir / "episode.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    (showDir / "series.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Series>
+    <SeriesName>After Life</SeriesName>
+    <SeriesID>347507</SeriesID>
+</Series>
+""",
+        encoding="utf-8",
+    )
+    (metadataDir / "episode.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Item>
+    <EpisodeID>10751471</EpisodeID>
+    <EpisodeNumber>4</EpisodeNumber>
+    <SeasonNumber>1</SeasonNumber>
+    <EpisodeName>Sic Semper Systema</EpisodeName>
+</Item>
+""",
+        encoding="utf-8",
+    )
+
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    with patch.object(confirmedOrganizer, "scanStorageLocations", return_value=([movieStorage], [tvStorage])):
+        confirmedOrganizer.processFiles(interactive=False)
+
+    destFile = tvStorage / "After Life" / "Season 01" / "episode.mkv"
     assert destFile.exists()
     assert not srcFile.exists()
 

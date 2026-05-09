@@ -284,6 +284,146 @@ class VideoMixin:
         imageName = Path(filename.strip().lstrip("/\\")).name
         return imageName or None
 
+    def _readXmlRoot(self, xmlFile: Path) -> Optional[ET.Element]:
+        """Return the parsed XML root for *xmlFile*, or None if it cannot be read."""
+        if not xmlFile.exists() or not xmlFile.is_file():
+            return None
+
+        try:
+            return ET.fromstring(xmlFile.read_text(encoding="utf-8"))
+        except (ET.ParseError, OSError, UnicodeDecodeError) as e:
+            logger.warning("could not parse metadata XML %s: %s", xmlFile, e)
+            return None
+
+    def _readFirstXmlText(self, root: Optional[ET.Element], tags: Iterable[str]) -> Optional[str]:
+        """Return the first non-empty text value for any tag in *tags*."""
+        if root is None:
+            return None
+
+        for tag in tags:
+            value = root.findtext(tag)
+            if value and value.strip():
+                return value.strip()
+
+        return None
+
+    def _readIntXmlText(self, root: Optional[ET.Element], tags: Iterable[str]) -> Optional[int]:
+        """Return the first tag value that can be converted to an integer."""
+        value = self._readFirstXmlText(root, tags)
+        if value and value.isdigit():
+            return int(value)
+        return None
+
+    def _readMovieMcmHints(self, sourceFile: Path) -> Optional[dict]:
+        """
+        Return standardised movie hints from nearby MCM XML files.
+
+        The returned structure is designed for both current move-time decisions
+        and future scraper output, so it carries stable IDs in addition to the
+        title/year values used today.
+        """
+        movieRoot = self._readXmlRoot(sourceFile.parent / "movie.xml")
+        if movieRoot is None:
+            return None
+
+        title = self._readFirstXmlText(movieRoot, ("LocalTitle", "OriginalTitle"))
+        year = self._readFirstXmlText(movieRoot, ("ProductionYear", "Year"))
+        imdbId = self._readFirstXmlText(movieRoot, ("IMDbId", "IMDB", "IMDB_ID"))
+        tmdbId = self._readFirstXmlText(movieRoot, ("TMDbId", "TMDBId"))
+
+        if not title and not year and not imdbId and not tmdbId:
+            return None
+
+        return {
+            "type": "movie",
+            "title": title,
+            "year": year,
+            "imdbId": imdbId,
+            "tmdbId": tmdbId,
+            "metadataSource": "mcm",
+        }
+
+    def _readTvMcmHints(self, sourceFile: Path) -> Optional[dict]:
+        """
+        Return standardised TV hints from nearby MCM XML files.
+
+        The shape matches the future scraper-oriented metadata model so that
+        move logic can consume the same keys whether the files already exist on
+        disk or are generated later by organiseMyVideo.
+        """
+        sourceSeasonDir = sourceFile.parent
+        sourceShowDir = sourceSeasonDir.parent if sourceSeasonDir != self.sourceDir else None
+        seriesRoot = self._readXmlRoot(sourceShowDir / "series.xml") if sourceShowDir else None
+        episodeRoot = self._readXmlRoot(sourceSeasonDir / "metadata" / f"{sourceFile.stem}.xml")
+
+        showName = self._readFirstXmlText(seriesRoot, ("LocalTitle", "SeriesName"))
+        season = self._readIntXmlText(episodeRoot, ("SeasonNumber",))
+        episode = self._readIntXmlText(episodeRoot, ("EpisodeNumber", "ID"))
+        episodeTitle = self._readFirstXmlText(episodeRoot, ("EpisodeName",))
+        imdbId = self._readFirstXmlText(episodeRoot, ("IMDB_ID", "IMDbId"))
+        seriesId = self._readFirstXmlText(seriesRoot, ("SeriesID", "id"))
+        episodeId = self._readFirstXmlText(episodeRoot, ("EpisodeID",))
+
+        if not showName and season is None and episode is None and not episodeTitle and not imdbId and not seriesId and not episodeId:
+            return None
+
+        return {
+            "type": "tv",
+            "showName": showName,
+            "season": season,
+            "episode": episode,
+            "episodeTitle": episodeTitle,
+            "imdbId": imdbId,
+            "seriesId": seriesId,
+            "episodeId": episodeId,
+            "metadataSource": "mcm",
+        }
+
+    def _readMcmHints(self, sourceFile: Path) -> Optional[dict]:
+        """
+        Return standardised MCM metadata hints for *sourceFile*.
+
+        These hints help current move-time classification and naming decisions,
+        and they also define the metadata shape future scraping code should
+        populate when organiseMyVideo starts generating MCM-style files itself.
+        """
+        return self._readTvMcmHints(sourceFile) or self._readMovieMcmHints(sourceFile)
+
+    def _applyMovieMcmHints(self, movieInfo: Optional[dict], mcmHints: Optional[dict],
+                            sourceFile: Path) -> Optional[dict]:
+        """Merge movie-specific MCM hints into filename-derived movie info."""
+        if not mcmHints or mcmHints.get("type") != "movie":
+            return movieInfo
+
+        merged = dict(movieInfo or {})
+        merged["title"] = mcmHints.get("title") or merged.get("title")
+        merged["year"] = mcmHints.get("year") or merged.get("year") or "Unknown"
+        merged["extension"] = merged.get("extension") or sourceFile.suffix
+        merged["type"] = "movie"
+        for key in ("imdbId", "tmdbId", "metadataSource"):
+            if mcmHints.get(key):
+                merged[key] = mcmHints[key]
+        return merged if merged.get("title") else movieInfo
+
+    def _applyTvMcmHints(self, tvInfo: Optional[dict], mcmHints: Optional[dict],
+                         sourceFile: Path) -> Optional[dict]:
+        """Merge TV-specific MCM hints into filename-derived TV info."""
+        if not mcmHints or mcmHints.get("type") != "tv":
+            return tvInfo
+
+        merged = dict(tvInfo or {})
+        merged["showName"] = mcmHints.get("showName") or merged.get("showName")
+        merged["season"] = mcmHints.get("season") or merged.get("season")
+        merged["episode"] = mcmHints.get("episode") or merged.get("episode") or 0
+        merged["extension"] = merged.get("extension") or sourceFile.suffix
+        merged["type"] = "tv"
+        for key in ("episodeTitle", "imdbId", "seriesId", "episodeId", "metadataSource"):
+            if mcmHints.get(key):
+                merged[key] = mcmHints[key]
+        if merged.get("showName") and merged.get("season") is not None:
+            return merged
+        return tvInfo
+
     def _replicateMovieMetadata(self, sourceFile: Path, destDir: Path) -> None:
         """Copy supported MCM movie companion files into the destination folder."""
         if sourceFile.parent == self.sourceDir:
@@ -716,8 +856,10 @@ class VideoMixin:
         stats = {"movies": 0, "tv": 0, "skipped": 0, "errors":  0}
         
         for videoFile in videoFiles:
+            mcmHints = self._readMcmHints(videoFile)
+
             # Try parsing as TV show first
-            tvInfo = self.parseTvFilename(videoFile.name)
+            tvInfo = self._applyTvMcmHints(self.parseTvFilename(videoFile.name), mcmHints, videoFile)
             if tvInfo and videoDirs:
                 if self.moveTvShow(videoFile, tvInfo, videoDirs, movieDirs=movieDirs, interactive=interactive):
                     stats["tv"] += 1
@@ -726,7 +868,7 @@ class VideoMixin:
                 continue
             
             # Try parsing as movie
-            movieInfo = self.parseMovieFilename(videoFile.name)
+            movieInfo = self._applyMovieMcmHints(self.parseMovieFilename(videoFile.name), mcmHints, videoFile)
             if movieInfo and movieDirs:
                 if self.moveMovie(videoFile, movieInfo, movieDirs, videoDirs=videoDirs, interactive=interactive):
                     stats["movies"] += 1
