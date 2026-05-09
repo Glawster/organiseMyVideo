@@ -43,3 +43,6 @@ Thumbs.db
 .pytest_cache/
 . coverage
 htmlcov/
+mp4_match_audit.csv
+mp4_match_audit.json
+mp4_match_prompt_audit.csv
