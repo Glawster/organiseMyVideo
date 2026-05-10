@@ -14,6 +14,7 @@ from organiseMyProjects.logUtils import getLogger  # type: ignore
 from .constants import METADATA_LIBRARY_FILE, TVDB_API_BASE_URL
 
 logger = getLogger()
+_METADATA_SCAN_PLACEHOLDER = "__metadata_scan__.mkv"
 
 
 class MetadataMixin:
@@ -280,19 +281,23 @@ class MetadataMixin:
             logger.value("movie metadata storage", movieDir)
             for movieXml in sorted(movieDir.rglob("movie.xml")):
                 self._updateMetadataLibraryFromHints(
-                    self._readMovieMcmHints(movieXml.parent / "__metadata_scan__.mkv")
+                    self._readMovieMcmHints(
+                        movieXml.parent / _METADATA_SCAN_PLACEHOLDER
+                    )
                 )
 
         for tvDir in videoDirs:
             if not tvDir.exists() or not tvDir.is_dir():
                 continue
             logger.value("TV metadata storage", tvDir)
-            for showDir in sorted(path for path in tvDir.iterdir() if path.is_dir()):
+            showDirs = sorted(path for path in tvDir.iterdir() if path.is_dir())
+            for showDir in showDirs:
                 self._updateMetadataLibraryFromHints(self._readTvSeriesMcmHints(showDir))
                 for episodeXml in sorted(showDir.rglob("metadata/*.xml")):
                     self._updateMetadataLibraryFromHints(
                         self._readTvMcmHints(
-                            episodeXml.parent.parent / f"{episodeXml.stem}.mkv"
+                            episodeXml.parent.parent
+                            / f"{episodeXml.stem}{Path(_METADATA_SCAN_PLACEHOLDER).suffix}"
                         )
                     )
 

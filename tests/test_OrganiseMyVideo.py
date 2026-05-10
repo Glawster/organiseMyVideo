@@ -1052,9 +1052,16 @@ def testProcessFilesBuildsMetadataLibraryFromStorageBeforeSourceProcessing(
     mockFetch.assert_not_called()
     assert "building metadata library from storage" in caplog.text
     assert "adding shows to library" in caplog.text
-    assert caplog.text.index("building metadata library from storage") < caplog.text.index(
-        "found 1 video file(s) to process"
+    messages = [record.getMessage() for record in caplog.records]
+    buildIndex = next(
+        i
+        for i, message in enumerate(messages)
+        if "building metadata library from storage" in message
     )
+    processIndex = next(
+        i for i, message in enumerate(messages) if "found 1 video file(s) to process" in message
+    )
+    assert buildIndex < processIndex
 
     library = json.loads(libraryPath.read_text(encoding="utf-8"))
     assert library["tv"]["series"]["series:347507"]["showName"] == "After Life"
