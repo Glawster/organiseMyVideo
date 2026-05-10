@@ -295,7 +295,11 @@ class MetadataMixin:
             if not tvDir.exists() or not tvDir.is_dir():
                 continue
             logger.value("TV metadata storage", tvDir)
-            showDirs = sorted(path for path in tvDir.iterdir() if path.is_dir())
+            try:
+                showDirs = sorted(path for path in tvDir.iterdir() if path.is_dir())
+            except OSError as error:
+                logger.warning("could not read TV metadata storage %s: %s", tvDir, error)
+                continue
             for showDir in showDirs:
                 self._updateMetadataLibraryFromHints(self._readTvSeriesMcmHints(showDir))
                 for episodeXml in sorted(showDir.rglob("metadata/*.xml")):

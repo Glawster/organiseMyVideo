@@ -1069,8 +1069,12 @@ def testProcessFilesBuildsMetadataLibraryFromStorageBeforeSourceProcessing(
         ),
         None,
     )
-    assert buildIndex is not None, messages
-    assert processIndex is not None, messages
+    assert (
+        buildIndex is not None
+    ), f'Expected "building metadata library from storage" in logs: {messages}'
+    assert (
+        processIndex is not None
+    ), f'Expected "found 1 video file(s) to process" in logs: {messages}'
     assert buildIndex < processIndex
 
     library = json.loads(libraryPath.read_text(encoding="utf-8"))
