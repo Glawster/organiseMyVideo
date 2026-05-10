@@ -12,7 +12,6 @@ import pytest
 import organiseMyVideo as omv
 from organiseMyVideo import VideoOrganizer
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -194,7 +193,9 @@ def testReadMcmHintsReturnsTvMetadata(sourceDir: Path, organizer: VideoOrganizer
     }
 
 
-def testReadMcmHintsInfersTvSeasonFromSeriesAndPath(sourceDir: Path, organizer: VideoOrganizer):
+def testReadMcmHintsInfersTvSeasonFromSeriesAndPath(
+    sourceDir: Path, organizer: VideoOrganizer
+):
     showDir = sourceDir / "Virgin River"
     seasonDir = showDir / "Season 6"
     seasonDir.mkdir(parents=True)
@@ -242,7 +243,9 @@ def testScanStorageLocationsFindsMovieDirs(tmp_path: Path, organizer: VideoOrgan
     assert len(videoDirs) == 0
 
 
-def testScanStorageLocationsFindsMyPicturesAsMovieStorage(tmp_path: Path, organizer: VideoOrganizer):
+def testScanStorageLocationsFindsMyPicturesAsMovieStorage(
+    tmp_path: Path, organizer: VideoOrganizer
+):
     """/mnt/myPictures root is used as movie storage when no Movies subdir exists."""
     mnt = tmp_path / "mnt"
     (mnt / "myPictures").mkdir(parents=True)
@@ -253,7 +256,9 @@ def testScanStorageLocationsFindsMyPicturesAsMovieStorage(tmp_path: Path, organi
     assert len(videoDirs) == 0
 
 
-def testScanStorageLocationsUsesMyPicturesMoviesSubdir(tmp_path: Path, organizer: VideoOrganizer):
+def testScanStorageLocationsUsesMyPicturesMoviesSubdir(
+    tmp_path: Path, organizer: VideoOrganizer
+):
     """/mnt/myPictures/Movies is used as movie storage when the Movies subdir exists."""
     mnt = tmp_path / "mnt"
     (mnt / "myPictures" / "Movies").mkdir(parents=True)
@@ -264,7 +269,9 @@ def testScanStorageLocationsUsesMyPicturesMoviesSubdir(tmp_path: Path, organizer
     assert len(videoDirs) == 0
 
 
-def testScanStorageLocationsFindsMyVideoAsTvStorage(tmp_path: Path, organizer: VideoOrganizer):
+def testScanStorageLocationsFindsMyVideoAsTvStorage(
+    tmp_path: Path, organizer: VideoOrganizer
+):
     """/mnt/myVideo/TV is detected as TV storage."""
     mnt = tmp_path / "mnt"
     tvDir = mnt / "myVideo" / "TV"
@@ -276,7 +283,9 @@ def testScanStorageLocationsFindsMyVideoAsTvStorage(tmp_path: Path, organizer: V
     assert any(d.name == "TV" for d in videoDirs)
 
 
-def testScanStorageLocationsFindsAllLocationTypes(tmp_path: Path, organizer: VideoOrganizer):
+def testScanStorageLocationsFindsAllLocationTypes(
+    tmp_path: Path, organizer: VideoOrganizer
+):
     """movie<n>, myPictures, video<n>/TV, and myVideo/TV are all detected."""
     mnt = tmp_path / "mnt"
     (mnt / "movie1").mkdir(parents=True)
@@ -357,17 +366,23 @@ def testFindBestMatchingTvShowExactMatch(tmp_path: Path, organizer: VideoOrganiz
     assert result == "Breaking Bad"
 
 
-def testFindBestMatchingTvShowFuzzyMatchReturnsFolder(tmp_path: Path, organizer: VideoOrganizer):
+def testFindBestMatchingTvShowFuzzyMatchReturnsFolder(
+    tmp_path: Path, organizer: VideoOrganizer
+):
     """Folder name is returned even when the parsed show name differs slightly."""
     tvRoot = tmp_path / "TV"
     tvRoot.mkdir()
     (tvRoot / "Law and Order Special Victims Unit").mkdir()
     # Simulates a parsed show name that omits the trailing word
-    result = organizer.findBestMatchingTvShow("Law and Order Special Victims Unit", [tvRoot])
+    result = organizer.findBestMatchingTvShow(
+        "Law and Order Special Victims Unit", [tvRoot]
+    )
     assert result == "Law and Order Special Victims Unit"
 
 
-def testFindBestMatchingTvShowCaseInsensitive(tmp_path: Path, organizer: VideoOrganizer):
+def testFindBestMatchingTvShowCaseInsensitive(
+    tmp_path: Path, organizer: VideoOrganizer
+):
     """Fuzzy matching is case-insensitive enough to match mixed-case folder names."""
     tvRoot = tmp_path / "TV"
     tvRoot.mkdir()
@@ -457,7 +472,9 @@ def testHasRealVideoContentNonVideoFilesOnly(tmp_path: Path, organizer: VideoOrg
 # ---------------------------------------------------------------------------
 
 
-def testCleanEmptyFoldersDryRunDoesNotRemove(sourceDir: Path, organizer: VideoOrganizer):
+def testCleanEmptyFoldersDryRunDoesNotRemove(
+    sourceDir: Path, organizer: VideoOrganizer
+):
     emptyDir = sourceDir / "EmptyDir"
     emptyDir.mkdir()
     stats = organizer.cleanEmptyFolders()
@@ -466,7 +483,9 @@ def testCleanEmptyFoldersDryRunDoesNotRemove(sourceDir: Path, organizer: VideoOr
     assert stats["errors"] == 0
 
 
-def testCleanEmptyFoldersDryRunKeepsRealContent(sourceDir: Path, organizer: VideoOrganizer):
+def testCleanEmptyFoldersDryRunKeepsRealContent(
+    sourceDir: Path, organizer: VideoOrganizer
+):
     realDir = sourceDir / "MovieA"
     realDir.mkdir()
     (realDir / "MovieA.mkv").write_bytes(b"x" * 100)
@@ -476,7 +495,9 @@ def testCleanEmptyFoldersDryRunKeepsRealContent(sourceDir: Path, organizer: Vide
     assert stats["removed"] == 0
 
 
-def testCleanEmptyFoldersDryRunSampleOnlyCountedAsRemoved(sourceDir: Path, organizer: VideoOrganizer):
+def testCleanEmptyFoldersDryRunSampleOnlyCountedAsRemoved(
+    sourceDir: Path, organizer: VideoOrganizer
+):
     sampleDir = sourceDir / "MovieB"
     (sampleDir / "Sample").mkdir(parents=True)
     (sampleDir / "Sample" / "sample.mkv").write_bytes(b"x" * 50)
@@ -490,7 +511,9 @@ def testCleanEmptyFoldersDryRunSampleOnlyCountedAsRemoved(sourceDir: Path, organ
 # ---------------------------------------------------------------------------
 
 
-def testCleanEmptyFoldersRemovesEmptyDir(sourceDir: Path, confirmedOrganizer: VideoOrganizer):
+def testCleanEmptyFoldersRemovesEmptyDir(
+    sourceDir: Path, confirmedOrganizer: VideoOrganizer
+):
     emptyDir = sourceDir / "EmptyDir"
     emptyDir.mkdir()
     stats = confirmedOrganizer.cleanEmptyFolders()
@@ -498,7 +521,9 @@ def testCleanEmptyFoldersRemovesEmptyDir(sourceDir: Path, confirmedOrganizer: Vi
     assert stats["removed"] == 1
 
 
-def testCleanEmptyFoldersRemovesSampleOnlyDir(sourceDir: Path, confirmedOrganizer: VideoOrganizer):
+def testCleanEmptyFoldersRemovesSampleOnlyDir(
+    sourceDir: Path, confirmedOrganizer: VideoOrganizer
+):
     sampleDir = sourceDir / "MovieB"
     (sampleDir / "Sample").mkdir(parents=True)
     (sampleDir / "Sample" / "sample.mkv").write_bytes(b"x" * 50)
@@ -507,7 +532,9 @@ def testCleanEmptyFoldersRemovesSampleOnlyDir(sourceDir: Path, confirmedOrganize
     assert stats["removed"] == 1
 
 
-def testCleanEmptyFoldersKeepsRealContentDir(sourceDir: Path, confirmedOrganizer: VideoOrganizer):
+def testCleanEmptyFoldersKeepsRealContentDir(
+    sourceDir: Path, confirmedOrganizer: VideoOrganizer
+):
     realDir = sourceDir / "MovieA"
     realDir.mkdir()
     (realDir / "MovieA.mkv").write_bytes(b"x" * 100)
@@ -542,7 +569,9 @@ def testCleanEmptyFoldersMixedDirs(sourceDir: Path, confirmedOrganizer: VideoOrg
     assert not sampleDir.exists()
 
 
-def testCleanEmptyFoldersRemovesNestedEmptyDir(sourceDir: Path, confirmedOrganizer: VideoOrganizer):
+def testCleanEmptyFoldersRemovesNestedEmptyDir(
+    sourceDir: Path, confirmedOrganizer: VideoOrganizer
+):
     """An empty subdirectory nested inside a real-content dir is removed."""
     realDir = sourceDir / "MovieA"
     realDir.mkdir()
@@ -560,7 +589,9 @@ def testCleanEmptyFoldersRemovesNestedEmptyDir(sourceDir: Path, confirmedOrganiz
 # ---------------------------------------------------------------------------
 
 
-def testProcessFilesFindsVideoInSubdirectory(tmp_path: Path, confirmedOrganizer: VideoOrganizer):
+def testProcessFilesFindsVideoInSubdirectory(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
     """Files inside a subdirectory of sourceDir are found and moved."""
     subDir = confirmedOrganizer.sourceDir / "One Mile (2026)"
     subDir.mkdir(parents=True)
@@ -570,9 +601,16 @@ def testProcessFilesFindsVideoInSubdirectory(tmp_path: Path, confirmedOrganizer:
     movieStorage = tmp_path / "movie1"
     movieStorage.mkdir()
 
-    with patch.object(confirmedOrganizer, "scanStorageLocations", return_value=([movieStorage], [tmp_path / "TV"])):
-        with patch.object(confirmedOrganizer, "promptUserConfirmation",
-                          return_value={"name": "One Mile (2026)", "type": "movie"}):
+    with patch.object(
+        confirmedOrganizer,
+        "scanStorageLocations",
+        return_value=([movieStorage], [tmp_path / "TV"]),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "promptUserConfirmation",
+            return_value={"name": "One Mile (2026)", "type": "movie"},
+        ):
             confirmedOrganizer.processFiles(interactive=True)
 
     destFile = movieStorage / "One Mile (2026)" / "One.Mile.2026.1080p.WEBRip.x264.mp4"
@@ -580,7 +618,9 @@ def testProcessFilesFindsVideoInSubdirectory(tmp_path: Path, confirmedOrganizer:
     assert not srcFile.exists()
 
 
-def testProcessFilesUsesMovieMcmHintsWhenFilenameCannotBeParsed(tmp_path: Path, confirmedOrganizer: VideoOrganizer):
+def testProcessFilesUsesMovieMcmHintsWhenFilenameCannotBeParsed(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
     movieSourceDir = confirmedOrganizer.sourceDir / "3 from Hell (2019)"
     movieSourceDir.mkdir()
     srcFile = movieSourceDir / "clip.mp4"
@@ -600,7 +640,11 @@ def testProcessFilesUsesMovieMcmHintsWhenFilenameCannotBeParsed(tmp_path: Path, 
     tvStorage = tmp_path / "video1" / "TV"
     tvStorage.mkdir(parents=True)
 
-    with patch.object(confirmedOrganizer, "scanStorageLocations", return_value=([movieStorage], [tvStorage])):
+    with patch.object(
+        confirmedOrganizer,
+        "scanStorageLocations",
+        return_value=([movieStorage], [tvStorage]),
+    ):
         confirmedOrganizer.processFiles(interactive=False)
 
     destFile = movieStorage / "3 from Hell (2019)" / "clip.mp4"
@@ -608,7 +652,9 @@ def testProcessFilesUsesMovieMcmHintsWhenFilenameCannotBeParsed(tmp_path: Path, 
     assert not srcFile.exists()
 
 
-def testProcessFilesUsesTvMcmHintsWhenFilenameCannotBeParsed(tmp_path: Path, confirmedOrganizer: VideoOrganizer):
+def testProcessFilesUsesTvMcmHintsWhenFilenameCannotBeParsed(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
     showDir = confirmedOrganizer.sourceDir / "After Life"
     seasonDir = showDir / "Season 1"
     metadataDir = seasonDir / "metadata"
@@ -641,15 +687,26 @@ def testProcessFilesUsesTvMcmHintsWhenFilenameCannotBeParsed(tmp_path: Path, con
     tvStorage = tmp_path / "video1" / "TV"
     tvStorage.mkdir(parents=True)
 
-    with patch.object(confirmedOrganizer, "scanStorageLocations", return_value=([movieStorage], [tvStorage])):
+    with patch.object(
+        confirmedOrganizer,
+        "scanStorageLocations",
+        return_value=([movieStorage], [tvStorage]),
+    ):
         confirmedOrganizer.processFiles(interactive=False)
 
-    destFile = tvStorage / "After Life" / "Season 01" / "episode.mkv"
+    destFile = (
+        tvStorage
+        / "After Life"
+        / "Season 01"
+        / "After.Life.S01E04.Sic.Semper.Systema.mkv"
+    )
     assert destFile.exists()
     assert not srcFile.exists()
 
 
-def testProcessFilesUsesSeriesMcmHintsForNewEpisodeWithoutEpisodeXml(tmp_path: Path, confirmedOrganizer: VideoOrganizer):
+def testProcessFilesUsesSeriesMcmHintsForNewEpisodeWithoutEpisodeXml(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
     showDir = confirmedOrganizer.sourceDir / "Virgin River"
     seasonDir = showDir / "Season 6"
     seasonDir.mkdir(parents=True)
@@ -670,7 +727,11 @@ def testProcessFilesUsesSeriesMcmHintsForNewEpisodeWithoutEpisodeXml(tmp_path: P
     tvStorage = tmp_path / "video1" / "TV"
     tvStorage.mkdir(parents=True)
 
-    with patch.object(confirmedOrganizer, "scanStorageLocations", return_value=([movieStorage], [tvStorage])):
+    with patch.object(
+        confirmedOrganizer,
+        "scanStorageLocations",
+        return_value=([movieStorage], [tvStorage]),
+    ):
         confirmedOrganizer.processFiles(interactive=False)
 
     destSeasonDir = tvStorage / "Virgin River" / "Season 06"
@@ -685,22 +746,213 @@ def testProcessFilesUsesSeriesMcmHintsForNewEpisodeWithoutEpisodeXml(tmp_path: P
     assert "<seriesid>117581</seriesid>" in xmlText
 
 
+def testProcessFilesUsesMetadataLibraryToRenameLaterScan(tmp_path: Path):
+    libraryPath = tmp_path / "metadataLibrary.json"
+
+    firstSource = tmp_path / "source1"
+    firstSource.mkdir()
+    firstOrganizer = VideoOrganizer(sourceDir=str(firstSource), dryRun=False)
+    showDir = firstOrganizer.sourceDir / "After Life"
+    seasonDir = showDir / "Season 1"
+    metadataDir = seasonDir / "metadata"
+    metadataDir.mkdir(parents=True)
+    firstFile = seasonDir / "episode.mkv"
+    firstFile.write_bytes(b"x" * 100)
+    (showDir / "series.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Series>
+    <SeriesName>After Life</SeriesName>
+    <SeriesID>347507</SeriesID>
+</Series>
+""",
+        encoding="utf-8",
+    )
+    (metadataDir / "episode.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Item>
+    <EpisodeID>10751471</EpisodeID>
+    <EpisodeNumber>4</EpisodeNumber>
+    <SeasonNumber>1</SeasonNumber>
+    <EpisodeName>Sic Semper Systema</EpisodeName>
+</Item>
+""",
+        encoding="utf-8",
+    )
+
+    secondSource = tmp_path / "source2"
+    secondSource.mkdir()
+    secondOrganizer = VideoOrganizer(sourceDir=str(secondSource), dryRun=False)
+    secondFile = secondOrganizer.sourceDir / "After.Life.S01E04.mkv"
+    secondFile.write_bytes(b"x" * 100)
+
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    with patch.object(
+        firstOrganizer, "_getMetadataLibraryPath", return_value=libraryPath
+    ):
+        with patch.object(
+            firstOrganizer,
+            "scanStorageLocations",
+            return_value=([movieStorage], [tvStorage]),
+        ):
+            firstOrganizer.processFiles(interactive=False)
+
+    with patch.object(
+        secondOrganizer, "_getMetadataLibraryPath", return_value=libraryPath
+    ):
+        with patch.object(
+            secondOrganizer,
+            "scanStorageLocations",
+            return_value=([movieStorage], [tvStorage]),
+        ):
+            with patch.object(
+                secondOrganizer, "_fetchTvMetadataFromScraper"
+            ) as mockFetch:
+                secondOrganizer.processFiles(interactive=False)
+
+    destFile = (
+        tvStorage
+        / "After Life"
+        / "Season 01"
+        / "After.Life.S01E04.Sic.Semper.Systema.mkv"
+    )
+    assert destFile.exists()
+    assert not secondFile.exists()
+    mockFetch.assert_not_called()
+
+
+def testProcessFilesScrapesMissingEpisodeTitleAndWritesItBack(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    libraryPath = tmp_path / "metadataLibrary.json"
+    showDir = confirmedOrganizer.sourceDir / "Virgin River"
+    seasonDir = showDir / "Season 6"
+    seasonDir.mkdir(parents=True)
+    srcFile = seasonDir / "Virgin.River.S06E01.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    (showDir / "series.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Series>
+    <SeriesName>Virgin River</SeriesName>
+    <SeriesID>117581</SeriesID>
+</Series>
+""",
+        encoding="utf-8",
+    )
+
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    scraped = {
+        "type": "tv",
+        "showName": "Virgin River",
+        "season": 6,
+        "episode": 1,
+        "episodeTitle": "The Beginning",
+        "seriesId": "117581",
+        "episodeId": "9999",
+        "metadataSource": "tvdb",
+    }
+
+    with patch.object(
+        confirmedOrganizer, "_getMetadataLibraryPath", return_value=libraryPath
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([movieStorage], [tvStorage]),
+        ):
+            with patch.object(
+                confirmedOrganizer, "_fetchTvMetadataFromScraper", return_value=scraped
+            ) as mockFetch:
+                confirmedOrganizer.processFiles(interactive=False)
+
+    destSeasonDir = tvStorage / "Virgin River" / "Season 06"
+    destFile = destSeasonDir / "Virgin.River.S06E01.The.Beginning.mkv"
+    episodeXml = destSeasonDir / "metadata" / "Virgin.River.S06E01.The.Beginning.xml"
+    assert destFile.exists()
+    assert not srcFile.exists()
+    assert episodeXml.exists()
+    assert "<EpisodeName>The Beginning</EpisodeName>" in episodeXml.read_text(
+        encoding="utf-8"
+    )
+    library = json.loads(libraryPath.read_text(encoding="utf-8"))
+    assert "series:117581:s06e01" in library["tv"]["episodes"]
+    assert (
+        library["tv"]["episodes"]["series:117581:s06e01"]["episodeTitle"]
+        == "The Beginning"
+    )
+    mockFetch.assert_called_once()
+
+
+def testProcessFilesKeepsSourceNameWhenScraperCannotFillEpisodeTitle(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    showDir = confirmedOrganizer.sourceDir / "Virgin River"
+    seasonDir = showDir / "Season 6"
+    seasonDir.mkdir(parents=True)
+    srcFile = seasonDir / "Virgin.River.S06E01.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    (showDir / "series.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Series>
+    <SeriesName>Virgin River</SeriesName>
+    <SeriesID>117581</SeriesID>
+</Series>
+""",
+        encoding="utf-8",
+    )
+
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    with patch.object(
+        confirmedOrganizer,
+        "scanStorageLocations",
+        return_value=([movieStorage], [tvStorage]),
+    ):
+        with patch.object(
+            confirmedOrganizer, "_fetchTvMetadataFromScraper", return_value=None
+        ):
+            confirmedOrganizer.processFiles(interactive=False)
+
+    destFile = tvStorage / "Virgin River" / "Season 06" / "Virgin.River.S06E01.mkv"
+    assert destFile.exists()
+    assert not srcFile.exists()
+
+
 # ---------------------------------------------------------------------------
 # moveMovie — dry-run
 # ---------------------------------------------------------------------------
 
 
-def testMoveMovieDryRunReturnsTrueWithoutMoving(tmp_path: Path, organizer: VideoOrganizer):
+def testMoveMovieDryRunReturnsTrueWithoutMoving(
+    tmp_path: Path, organizer: VideoOrganizer
+):
     srcFile = organizer.sourceDir / "Inception (2010).mp4"
     srcFile.write_bytes(b"x" * 100)
 
     movieStorage = tmp_path / "movie1"
     movieStorage.mkdir()
 
-    movieInfo = {"title": "Inception", "year": "2010", "extension": ".mp4", "type": "movie"}
+    movieInfo = {
+        "title": "Inception",
+        "year": "2010",
+        "extension": ".mp4",
+        "type": "movie",
+    }
 
     with patch("organiseMyVideo.video.shutil.move") as mockMove:
-        result = organizer.moveMovie(srcFile, movieInfo, [movieStorage], interactive=False)
+        result = organizer.moveMovie(
+            srcFile, movieInfo, [movieStorage], interactive=False
+        )
 
     assert result is True
     mockMove.assert_not_called()
@@ -719,8 +971,15 @@ def testMoveMovieConfirmMovesFile(tmp_path: Path, confirmedOrganizer: VideoOrgan
     movieStorage = tmp_path / "movie1"
     movieStorage.mkdir()
 
-    movieInfo = {"title": "Inception", "year": "2010", "extension": ".mp4", "type": "movie"}
-    result = confirmedOrganizer.moveMovie(srcFile, movieInfo, [movieStorage], interactive=False)
+    movieInfo = {
+        "title": "Inception",
+        "year": "2010",
+        "extension": ".mp4",
+        "type": "movie",
+    }
+    result = confirmedOrganizer.moveMovie(
+        srcFile, movieInfo, [movieStorage], interactive=False
+    )
 
     assert result is True
     destFile = movieStorage / "Inception (2010)" / "Inception (2010).mp4"
@@ -728,7 +987,9 @@ def testMoveMovieConfirmMovesFile(tmp_path: Path, confirmedOrganizer: VideoOrgan
     assert not srcFile.exists()
 
 
-def testMoveMovieReplicatesMcmCompanionFiles(tmp_path: Path, confirmedOrganizer: VideoOrganizer):
+def testMoveMovieReplicatesMcmCompanionFiles(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
     movieSourceDir = confirmedOrganizer.sourceDir / "3 from Hell (2019)"
     movieSourceDir.mkdir()
     srcFile = movieSourceDir / "3 from Hell (2019).mp4"
@@ -737,13 +998,22 @@ def testMoveMovieReplicatesMcmCompanionFiles(tmp_path: Path, confirmedOrganizer:
     (movieSourceDir / "backdrop.jpg").write_bytes(b"backdrop")
     (movieSourceDir / "backdrop2.jpg").write_bytes(b"backdrop2")
     (movieSourceDir / "movie.xml").write_text("<Title />", encoding="utf-8")
-    (movieSourceDir / "mcm_id__tt8134742-489064.dvdid.xml").write_text("<Disc />", encoding="utf-8")
+    (movieSourceDir / "mcm_id__tt8134742-489064.dvdid.xml").write_text(
+        "<Disc />", encoding="utf-8"
+    )
 
     movieStorage = tmp_path / "movie1"
     movieStorage.mkdir()
 
-    movieInfo = {"title": "3 from Hell", "year": "2019", "extension": ".mp4", "type": "movie"}
-    result = confirmedOrganizer.moveMovie(srcFile, movieInfo, [movieStorage], interactive=False)
+    movieInfo = {
+        "title": "3 from Hell",
+        "year": "2019",
+        "extension": ".mp4",
+        "type": "movie",
+    }
+    result = confirmedOrganizer.moveMovie(
+        srcFile, movieInfo, [movieStorage], interactive=False
+    )
 
     assert result is True
     destDir = movieStorage / "3 from Hell (2019)"
@@ -752,7 +1022,9 @@ def testMoveMovieReplicatesMcmCompanionFiles(tmp_path: Path, confirmedOrganizer:
     assert (destDir / "backdrop.jpg").read_bytes() == b"backdrop"
     assert (destDir / "backdrop2.jpg").read_bytes() == b"backdrop2"
     assert (destDir / "movie.xml").read_text(encoding="utf-8") == "<Title />"
-    assert (destDir / "mcm_id__tt8134742-489064.dvdid.xml").read_text(encoding="utf-8") == "<Disc />"
+    assert (destDir / "mcm_id__tt8134742-489064.dvdid.xml").read_text(
+        encoding="utf-8"
+    ) == "<Disc />"
 
 
 def testMoveMovieUsesExistingDir(tmp_path: Path, confirmedOrganizer: VideoOrganizer):
@@ -763,8 +1035,15 @@ def testMoveMovieUsesExistingDir(tmp_path: Path, confirmedOrganizer: VideoOrgani
     existingDir = movieStorage / "Inception (2010)"
     existingDir.mkdir(parents=True)
 
-    movieInfo = {"title": "Inception", "year": "2010", "extension": ".mp4", "type": "movie"}
-    result = confirmedOrganizer.moveMovie(srcFile, movieInfo, [movieStorage], interactive=False)
+    movieInfo = {
+        "title": "Inception",
+        "year": "2010",
+        "extension": ".mp4",
+        "type": "movie",
+    }
+    result = confirmedOrganizer.moveMovie(
+        srcFile, movieInfo, [movieStorage], interactive=False
+    )
 
     assert result is True
     assert (existingDir / "Inception (2010).mp4").exists()
@@ -773,7 +1052,12 @@ def testMoveMovieUsesExistingDir(tmp_path: Path, confirmedOrganizer: VideoOrgani
 def testMoveMovieNoStorageReturnsFalse(organizer: VideoOrganizer):
     srcFile = organizer.sourceDir / "Inception (2010).mp4"
     srcFile.write_bytes(b"x" * 100)
-    movieInfo = {"title": "Inception", "year": "2010", "extension": ".mp4", "type": "movie"}
+    movieInfo = {
+        "title": "Inception",
+        "year": "2010",
+        "extension": ".mp4",
+        "type": "movie",
+    }
     # Pass no storage dirs and disable dry-run so it reaches the "no storage" branch
     org = VideoOrganizer(sourceDir=str(organizer.sourceDir), dryRun=False)
     result = org.moveMovie(srcFile, movieInfo, [], interactive=False)
@@ -785,15 +1069,22 @@ def testMoveMovieNoStorageReturnsFalse(organizer: VideoOrganizer):
 # ---------------------------------------------------------------------------
 
 
-def testMoveTvShowDryRunReturnsTrueWithoutMoving(tmp_path: Path, organizer: VideoOrganizer):
+def testMoveTvShowDryRunReturnsTrueWithoutMoving(
+    tmp_path: Path, organizer: VideoOrganizer
+):
     srcFile = organizer.sourceDir / "Breaking.Bad.S01E01.Pilot.mkv"
     srcFile.write_bytes(b"x" * 100)
 
     tvStorage = tmp_path / "video1" / "TV"
     tvStorage.mkdir(parents=True)
 
-    tvInfo = {"showName": "Breaking Bad", "season": 1, "episode": 1,
-              "extension": ".mkv", "type": "tv"}
+    tvInfo = {
+        "showName": "Breaking Bad",
+        "season": 1,
+        "episode": 1,
+        "extension": ".mkv",
+        "type": "tv",
+    }
 
     with patch("organiseMyVideo.video.shutil.move") as mockMove:
         result = organizer.moveTvShow(srcFile, tvInfo, [tvStorage], interactive=False)
@@ -815,17 +1106,28 @@ def testMoveTvShowConfirmMovesFile(tmp_path: Path, confirmedOrganizer: VideoOrga
     tvStorage = tmp_path / "video1" / "TV"
     tvStorage.mkdir(parents=True)
 
-    tvInfo = {"showName": "Breaking Bad", "season": 1, "episode": 1,
-              "extension": ".mkv", "type": "tv"}
-    result = confirmedOrganizer.moveTvShow(srcFile, tvInfo, [tvStorage], interactive=False)
+    tvInfo = {
+        "showName": "Breaking Bad",
+        "season": 1,
+        "episode": 1,
+        "extension": ".mkv",
+        "type": "tv",
+    }
+    result = confirmedOrganizer.moveTvShow(
+        srcFile, tvInfo, [tvStorage], interactive=False
+    )
 
     assert result is True
-    destFile = tvStorage / "Breaking Bad" / "Season 01" / "Breaking.Bad.S01E01.Pilot.mkv"
+    destFile = (
+        tvStorage / "Breaking Bad" / "Season 01" / "Breaking.Bad.S01E01.Pilot.mkv"
+    )
     assert destFile.exists()
     assert not srcFile.exists()
 
 
-def testMoveTvShowReplicatesMcmCompanionFiles(tmp_path: Path, confirmedOrganizer: VideoOrganizer):
+def testMoveTvShowReplicatesMcmCompanionFiles(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
     showSourceDir = confirmedOrganizer.sourceDir / "Daredevil, Born Again"
     seasonSourceDir = showSourceDir / "Season 1"
     metadataSourceDir = seasonSourceDir / "metadata"
@@ -841,7 +1143,9 @@ def testMoveTvShowReplicatesMcmCompanionFiles(tmp_path: Path, confirmedOrganizer
     (showSourceDir / "mcm_id__show.dvdid.xml").write_text("<Disc />", encoding="utf-8")
     (seasonSourceDir / "folder.jpg").write_bytes(b"season-cover")
 
-    episodeXml = metadataSourceDir / "Daredevil.Born.Again.S01E04.Sic.Semper.Systema.xml"
+    episodeXml = (
+        metadataSourceDir / "Daredevil.Born.Again.S01E04.Sic.Semper.Systema.xml"
+    )
     episodeXml.write_text(
         "<?xml version='1.0' encoding='utf-8'?><Item><filename>/67da18725f220.jpg</filename></Item>",
         encoding="utf-8",
@@ -851,32 +1155,84 @@ def testMoveTvShowReplicatesMcmCompanionFiles(tmp_path: Path, confirmedOrganizer
     tvStorage = tmp_path / "video1" / "TV"
     tvStorage.mkdir(parents=True)
 
-    tvInfo = {"showName": "Daredevil, Born Again", "season": 1, "episode": 4,
-              "extension": ".mkv", "type": "tv"}
-    result = confirmedOrganizer.moveTvShow(srcFile, tvInfo, [tvStorage], interactive=False)
+    tvInfo = {
+        "showName": "Daredevil, Born Again",
+        "season": 1,
+        "episode": 4,
+        "extension": ".mkv",
+        "type": "tv",
+    }
+    result = confirmedOrganizer.moveTvShow(
+        srcFile, tvInfo, [tvStorage], interactive=False
+    )
 
     assert result is True
     showDestDir = tvStorage / "Daredevil, Born Again"
     seasonDestDir = showDestDir / "Season 01"
-    assert (seasonDestDir / "Daredevil.Born.Again.S01E04.Sic.Semper.Systema.mkv").exists()
+    assert (
+        seasonDestDir / "Daredevil.Born.Again.S01E04.Sic.Semper.Systema.mkv"
+    ).exists()
     assert (showDestDir / "banner.jpg").read_bytes() == b"banner"
     assert (showDestDir / "folder.jpg").read_bytes() == b"show-cover"
     assert (showDestDir / "backdrop.jpg").read_bytes() == b"backdrop"
     assert (showDestDir / "backdrop2.jpg").read_bytes() == b"backdrop2"
     assert (showDestDir / "series.xml").read_text(encoding="utf-8") == "<Series />"
-    assert (showDestDir / "mcm_id__show.dvdid.xml").read_text(encoding="utf-8") == "<Disc />"
+    assert (showDestDir / "mcm_id__show.dvdid.xml").read_text(
+        encoding="utf-8"
+    ) == "<Disc />"
     assert (seasonDestDir / "folder.jpg").read_bytes() == b"season-cover"
     assert (
-        seasonDestDir / "metadata" / "Daredevil.Born.Again.S01E04.Sic.Semper.Systema.xml"
+        seasonDestDir
+        / "metadata"
+        / "Daredevil.Born.Again.S01E04.Sic.Semper.Systema.xml"
     ).read_text(encoding="utf-8") == episodeXml.read_text(encoding="utf-8")
-    assert (seasonDestDir / "metadata" / "67da18725f220.jpg").read_bytes() == b"episode-thumb"
+    assert (
+        seasonDestDir / "metadata" / "67da18725f220.jpg"
+    ).read_bytes() == b"episode-thumb"
+
+
+def testMoveTvShowUsesCanonicalEpisodeTitleFilename(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "episode.mkv"
+    srcFile.write_bytes(b"x" * 100)
+
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    tvInfo = {
+        "showName": "Law & Order: SVU",
+        "season": 3,
+        "episode": 2,
+        "episodeTitle": "What's Next?: Finale!",
+        "extension": ".mkv",
+        "type": "tv",
+    }
+    result = confirmedOrganizer.moveTvShow(
+        srcFile, tvInfo, [tvStorage], interactive=False
+    )
+
+    assert result is True
+    destFile = (
+        tvStorage
+        / "Law & Order: SVU"
+        / "Season 03"
+        / "Law.Order.SVU.S03E02.Whats.Next.Finale.mkv"
+    )
+    assert destFile.exists()
+    assert not srcFile.exists()
 
 
 def testMoveTvShowNoStorageReturnsFalse(confirmedOrganizer: VideoOrganizer):
     srcFile = confirmedOrganizer.sourceDir / "Breaking.Bad.S01E01.Pilot.mkv"
     srcFile.write_bytes(b"x" * 100)
-    tvInfo = {"showName": "Breaking Bad", "season": 1, "episode": 1,
-              "extension": ".mkv", "type": "tv"}
+    tvInfo = {
+        "showName": "Breaking Bad",
+        "season": 1,
+        "episode": 1,
+        "extension": ".mkv",
+        "type": "tv",
+    }
     result = confirmedOrganizer.moveTvShow(srcFile, tvInfo, [], interactive=False)
     assert result is False
 
@@ -930,46 +1286,71 @@ def testPromptUserConfirmationNThenNewNameReturnsName(organizer: VideoOrganizer)
 
 def testPromptUserConfirmationTSwitchesToTv(organizer: VideoOrganizer):
     with patch("builtins.input", side_effect=["t", "Breaking Bad"]):
-        result = organizer.promptUserConfirmation("file.mkv", "Inception (2010)", "movie")
+        result = organizer.promptUserConfirmation(
+            "file.mkv", "Inception (2010)", "movie"
+        )
     assert result == {"name": "Breaking Bad", "type": "tv"}
 
 
 def testPromptUserConfirmationTDefaultsToCurrentName(organizer: VideoOrganizer):
     with patch("builtins.input", side_effect=["t", ""]):
-        result = organizer.promptUserConfirmation("file.mkv", "Inception (2010)", "movie")
+        result = organizer.promptUserConfirmation(
+            "file.mkv", "Inception (2010)", "movie"
+        )
     assert result == {"name": "Inception (2010)", "type": "tv"}
 
 
-def testPromptUserConfirmationTUsesMatchingTvFolderAsDefault(tmp_path: Path, organizer: VideoOrganizer):
+def testPromptUserConfirmationTUsesMatchingTvFolderAsDefault(
+    tmp_path: Path, organizer: VideoOrganizer
+):
     """When videoDirs is provided and a folder matches the parsed show name, use it as default."""
     tvDir = tmp_path / "TV"
     tvDir.mkdir()
     (tvDir / "Law and Order Special Victims Unit").mkdir()
     filename = "Law.and.Order.Special.Victims.Unit.S27E13.Corrosive.1080p.mkv"
     with patch("builtins.input", side_effect=["t", ""]):
-        result = organizer.promptUserConfirmation(filename, "Law and Order Special Victims Unit S27E13 Corrosive (1080)", "movie", videoDirs=[tvDir])
+        result = organizer.promptUserConfirmation(
+            filename,
+            "Law and Order Special Victims Unit S27E13 Corrosive (1080)",
+            "movie",
+            videoDirs=[tvDir],
+        )
     assert result == {"name": "Law and Order Special Victims Unit", "type": "tv"}
 
 
-def testPromptUserConfirmationTFallsBackToDefaultWhenNoTvFolderMatch(tmp_path: Path, organizer: VideoOrganizer):
+def testPromptUserConfirmationTFallsBackToDefaultWhenNoTvFolderMatch(
+    tmp_path: Path, organizer: VideoOrganizer
+):
     """When videoDirs has no matching folder, fall back to the original defaultName."""
     tvDir = tmp_path / "TV"
     tvDir.mkdir()
     (tvDir / "Breaking Bad").mkdir()
     filename = "Law.and.Order.Special.Victims.Unit.S27E13.Corrosive.1080p.mkv"
     with patch("builtins.input", side_effect=["t", ""]):
-        result = organizer.promptUserConfirmation(filename, "Law and Order Special Victims Unit S27E13 Corrosive (1080)", "movie", videoDirs=[tvDir])
-    assert result == {"name": "Law and Order Special Victims Unit S27E13 Corrosive (1080)", "type": "tv"}
+        result = organizer.promptUserConfirmation(
+            filename,
+            "Law and Order Special Victims Unit S27E13 Corrosive (1080)",
+            "movie",
+            videoDirs=[tvDir],
+        )
+    assert result == {
+        "name": "Law and Order Special Victims Unit S27E13 Corrosive (1080)",
+        "type": "tv",
+    }
 
 
-def testPromptUserConfirmationTUserCanOverrideSuggestedTvFolder(tmp_path: Path, organizer: VideoOrganizer):
+def testPromptUserConfirmationTUserCanOverrideSuggestedTvFolder(
+    tmp_path: Path, organizer: VideoOrganizer
+):
     """User can override the suggested TV folder name by typing a custom name."""
     tvDir = tmp_path / "TV"
     tvDir.mkdir()
     (tvDir / "Law and Order Special Victims Unit").mkdir()
     filename = "Law.and.Order.Special.Victims.Unit.S27E13.Corrosive.1080p.mkv"
     with patch("builtins.input", side_effect=["t", "My Custom Show"]):
-        result = organizer.promptUserConfirmation(filename, "Some Movie (2024)", "movie", videoDirs=[tvDir])
+        result = organizer.promptUserConfirmation(
+            filename, "Some Movie (2024)", "movie", videoDirs=[tvDir]
+        )
     assert result == {"name": "My Custom Show", "type": "tv"}
 
 
@@ -987,8 +1368,10 @@ def testPromptUserConfirmationMDefaultsToCurrentName(organizer: VideoOrganizer):
 
 def testPromptUserConfirmationPrintsLegendOnFirstCall(organizer: VideoOrganizer):
     """Key legend is printed exactly once, on the first call."""
-    with patch("builtins.input", return_value="y"), \
-         patch("builtins.print") as mockPrint:
+    with (
+        patch("builtins.input", return_value="y"),
+        patch("builtins.print") as mockPrint,
+    ):
         result = organizer.promptUserConfirmation("file.mkv", "My Show", "tv")
     assert result == {"name": "My Show", "type": "tv"}
     assert mockPrint.call_count == 1
@@ -1002,8 +1385,10 @@ def testPromptUserConfirmationPrintsLegendOnFirstCall(organizer: VideoOrganizer)
 
 def testPromptUserConfirmationLegendNotPrintedOnSecondCall(organizer: VideoOrganizer):
     """Key legend is suppressed after the first prompt has been shown."""
-    with patch("builtins.input", return_value="y"), \
-         patch("builtins.print") as mockPrint:
+    with (
+        patch("builtins.input", return_value="y"),
+        patch("builtins.print") as mockPrint,
+    ):
         organizer.promptUserConfirmation("file.mkv", "Show One", "tv")
         mockPrint.reset_mock()
         result = organizer.promptUserConfirmation("file.mkv", "Show Two", "tv")
@@ -1016,12 +1401,19 @@ def testPromptUserConfirmationLegendNotPrintedOnSecondCall(organizer: VideoOrgan
 # ---------------------------------------------------------------------------
 
 
-def testMoveMovieUsesDefaultWhenUserEntersBlank(tmp_path: Path, confirmedOrganizer: VideoOrganizer):
+def testMoveMovieUsesDefaultWhenUserEntersBlank(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
     srcFile = confirmedOrganizer.sourceDir / "Inception (2010).mp4"
     srcFile.write_bytes(b"x" * 100)
     movieStorage = tmp_path / "movie1"
     movieStorage.mkdir()
-    movieInfo = {"title": "Inception", "year": "2010", "extension": ".mp4", "type": "movie"}
+    movieInfo = {
+        "title": "Inception",
+        "year": "2010",
+        "extension": ".mp4",
+        "type": "movie",
+    }
     with patch("builtins.input", side_effect=["n", ""]):
         result = confirmedOrganizer.moveMovie(srcFile, movieInfo, [movieStorage])
     assert result is True
@@ -1037,7 +1429,12 @@ def testMoveMovieSwitchesToTv(tmp_path: Path, confirmedOrganizer: VideoOrganizer
     movieStorage.mkdir()
     tvStorage = tmp_path / "tv1"
     tvStorage.mkdir()
-    movieInfo = {"title": "Inception", "year": "2010", "extension": ".mp4", "type": "movie"}
+    movieInfo = {
+        "title": "Inception",
+        "year": "2010",
+        "extension": ".mp4",
+        "type": "movie",
+    }
     # user says 't', enters show name "Inception Show", season 2
     with patch("builtins.input", side_effect=["t", "Inception Show", "2"]):
         result = confirmedOrganizer.moveMovie(
@@ -1054,18 +1451,27 @@ def testMoveMovieSwitchesToTv(tmp_path: Path, confirmedOrganizer: VideoOrganizer
 # ---------------------------------------------------------------------------
 
 
-def testMoveTvShowUsesDefaultWhenUserEntersBlank(tmp_path: Path, confirmedOrganizer: VideoOrganizer):
+def testMoveTvShowUsesDefaultWhenUserEntersBlank(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
     srcFile = confirmedOrganizer.sourceDir / "Breaking.Bad.S01E01.Pilot.mkv"
     srcFile.write_bytes(b"x" * 100)
     tvStorage = tmp_path / "tv1"
     tvStorage.mkdir()
-    tvInfo = {"showName": "Breaking Bad", "season": 1, "episode": 1,
-              "extension": ".mkv", "type": "tv"}
+    tvInfo = {
+        "showName": "Breaking Bad",
+        "season": 1,
+        "episode": 1,
+        "extension": ".mkv",
+        "type": "tv",
+    }
     with patch("builtins.input", side_effect=["n", ""]):
         result = confirmedOrganizer.moveTvShow(srcFile, tvInfo, [tvStorage])
     assert result is True
     assert not srcFile.exists()
-    destFile = tvStorage / "Breaking Bad" / "Season 01" / "Breaking.Bad.S01E01.Pilot.mkv"
+    destFile = (
+        tvStorage / "Breaking Bad" / "Season 01" / "Breaking.Bad.S01E01.Pilot.mkv"
+    )
     assert destFile.exists()
 
 
@@ -1076,15 +1482,22 @@ def testMoveTvShowSwitchesToMovie(tmp_path: Path, confirmedOrganizer: VideoOrgan
     tvStorage.mkdir()
     movieStorage = tmp_path / "movie1"
     movieStorage.mkdir()
-    tvInfo = {"showName": "Breaking Bad", "season": 1, "episode": 1,
-              "extension": ".mkv", "type": "tv"}
+    tvInfo = {
+        "showName": "Breaking Bad",
+        "season": 1,
+        "episode": 1,
+        "extension": ".mkv",
+        "type": "tv",
+    }
     # user says 'm', enters movie title "Breaking Bad Movie", year 2013
     with patch("builtins.input", side_effect=["m", "Breaking Bad Movie", "2013"]):
         result = confirmedOrganizer.moveTvShow(
             srcFile, tvInfo, [tvStorage], movieDirs=[movieStorage]
         )
     assert result is True
-    destFile = movieStorage / "Breaking Bad Movie (2013)" / "Breaking.Bad.S01E01.Pilot.mkv"
+    destFile = (
+        movieStorage / "Breaking Bad Movie (2013)" / "Breaking.Bad.S01E01.Pilot.mkv"
+    )
     assert destFile.exists()
     assert not srcFile.exists()
 
@@ -1125,7 +1538,9 @@ def testCleanNamesDryRunTorrentingPrefix(sourceDir: Path, organizer: VideoOrgani
 # ---------------------------------------------------------------------------
 
 
-def testCleanNamesConfirmRenamesFolder(sourceDir: Path, confirmedOrganizer: VideoOrganizer):
+def testCleanNamesConfirmRenamesFolder(
+    sourceDir: Path, confirmedOrganizer: VideoOrganizer
+):
     original = sourceDir / "www.UIndex.org - Some Movie (2020)"
     original.mkdir()
     stats = confirmedOrganizer.cleanNames()
@@ -1136,7 +1551,9 @@ def testCleanNamesConfirmRenamesFolder(sourceDir: Path, confirmedOrganizer: Vide
     assert stats["errors"] == 0
 
 
-def testCleanNamesConfirmRenamesFile(sourceDir: Path, confirmedOrganizer: VideoOrganizer):
+def testCleanNamesConfirmRenamesFile(
+    sourceDir: Path, confirmedOrganizer: VideoOrganizer
+):
     original = sourceDir / "www.Torrenting.com - Great Show S01E01.mkv"
     original.write_bytes(b"x" * 50)
     stats = confirmedOrganizer.cleanNames()
@@ -1146,7 +1563,9 @@ def testCleanNamesConfirmRenamesFile(sourceDir: Path, confirmedOrganizer: VideoO
     assert stats["renamed"] == 1
 
 
-def testCleanNamesConfirmCaseInsensitive(sourceDir: Path, confirmedOrganizer: VideoOrganizer):
+def testCleanNamesConfirmCaseInsensitive(
+    sourceDir: Path, confirmedOrganizer: VideoOrganizer
+):
     original = sourceDir / "WWW.UINDEX.ORG - Movie Title (2021)"
     original.mkdir()
     stats = confirmedOrganizer.cleanNames()
@@ -1161,7 +1580,9 @@ def testCleanNamesMissingSrcReturnsZeroStats(tmp_path: Path):
     assert stats == {"renamed": 0, "skipped": 0, "errors": 0}
 
 
-def testCleanNamesLeavesNonMatchingUntouched(sourceDir: Path, confirmedOrganizer: VideoOrganizer):
+def testCleanNamesLeavesNonMatchingUntouched(
+    sourceDir: Path, confirmedOrganizer: VideoOrganizer
+):
     keep = sourceDir / "Normal Movie (2019)"
     keep.mkdir()
     original = sourceDir / "www.UIndex.org - Prefixed Movie (2020)"
@@ -1171,7 +1592,9 @@ def testCleanNamesLeavesNonMatchingUntouched(sourceDir: Path, confirmedOrganizer
     assert stats["renamed"] == 1
 
 
-def testCleanNamesSkippedCounterWhenResultIsEmpty(sourceDir: Path, confirmedOrganizer: VideoOrganizer):
+def testCleanNamesSkippedCounterWhenResultIsEmpty(
+    sourceDir: Path, confirmedOrganizer: VideoOrganizer
+):
     """A name that is only the prefix should be skipped (stripped result is empty)."""
     prefixOnly = sourceDir / "www.UIndex.org - "
     prefixOnly.mkdir()
@@ -1186,7 +1609,9 @@ def testCleanNamesSkippedCounterWhenResultIsEmpty(sourceDir: Path, confirmedOrga
 # ---------------------------------------------------------------------------
 
 
-def testRemoveTorrentsInLibraryMissingDirReturnsZeroStats(organizer: VideoOrganizer, tmp_path: Path):
+def testRemoveTorrentsInLibraryMissingDirReturnsZeroStats(
+    organizer: VideoOrganizer, tmp_path: Path
+):
     """Non-existent torrent directory returns zero counts."""
     stats = organizer.removeTorrentsInLibrary(torrentDir=str(tmp_path / "nonexistent"))
     assert stats == {"deleted": 0, "skipped": 0, "errors": 0}
@@ -1364,7 +1789,9 @@ def testRemoveTorrentsInLibraryStripsKnownPrefixBeforeMatching(tmp_path: Path):
     with patch.object(org, "scanStorageLocations", return_value=([movieRoot], [])):
         stats = org.removeTorrentsInLibrary(torrentDir=str(downloadDir))
 
-    assert not torrentFile.exists(), "prefixed torrent should be deleted when matched after prefix strip"
+    assert (
+        not torrentFile.exists()
+    ), "prefixed torrent should be deleted when matched after prefix strip"
     assert stats["deleted"] == 1
     assert stats["errors"] == 0
 
@@ -1374,7 +1801,9 @@ def testRemoveTorrentsInLibraryStripsKnownPrefixBeforeMatching(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def testCleanTorrentNamesMissingDirReturnsZeroStats(organizer: VideoOrganizer, tmp_path: Path):
+def testCleanTorrentNamesMissingDirReturnsZeroStats(
+    organizer: VideoOrganizer, tmp_path: Path
+):
     """Non-existent torrent directory returns zero counts."""
     stats = organizer.cleanTorrentNames(torrentDir=str(tmp_path / "nonexistent"))
     assert stats == {"renamed": 0, "skipped": 0, "errors": 0}
@@ -1449,9 +1878,14 @@ def testCleanTorrentNamesHandlesUIndexPrefix(tmp_path: Path):
 def testRemoveTorrentsInLibraryDryRunCountsMatchingDownloadFolder(tmp_path: Path):
     """Dry-run: a matching download folder is counted but not actually removed."""
     downloadDir = tmp_path / "Download"
-    prefixedDir = downloadDir / "www.Torrenting.com - Silent.Witness.S28E09.720p.x265-TiPEX"
+    prefixedDir = (
+        downloadDir / "www.Torrenting.com - Silent.Witness.S28E09.720p.x265-TiPEX"
+    )
     prefixedDir.mkdir(parents=True)
-    torrentFile = prefixedDir / "www.Torrenting.com - Silent.Witness.S28E09.720p.x265-TiPEX.torrent"
+    torrentFile = (
+        prefixedDir
+        / "www.Torrenting.com - Silent.Witness.S28E09.720p.x265-TiPEX.torrent"
+    )
     torrentFile.write_bytes(b"torrent data")
 
     tvRoot = tmp_path / "TV"
@@ -1467,12 +1901,20 @@ def testRemoveTorrentsInLibraryDryRunCountsMatchingDownloadFolder(tmp_path: Path
     assert stats["errors"] == 0
 
 
-def testRemoveTorrentsInLibraryDeletesMatchingDownloadFolderWithPrefixedTorrent(tmp_path: Path):
+def testRemoveTorrentsInLibraryDeletesMatchingDownloadFolderWithPrefixedTorrent(
+    tmp_path: Path,
+):
     """Confirm mode: a matching download folder is removed when it contains a prefixed torrent."""
     downloadDir = tmp_path / "Download"
-    prefixedDir = downloadDir / "www.UIndex.org    -    FBI Most Wanted S06E13 Greek Tragedy 1080p"
+    prefixedDir = (
+        downloadDir
+        / "www.UIndex.org    -    FBI Most Wanted S06E13 Greek Tragedy 1080p"
+    )
     prefixedDir.mkdir(parents=True)
-    torrentFile = prefixedDir / "www.UIndex.org    -    FBI.Most.Wanted.S06E04.MULTi.1080p.WEB.x264-AMB3R.torrent"
+    torrentFile = (
+        prefixedDir
+        / "www.UIndex.org    -    FBI.Most.Wanted.S06E04.MULTi.1080p.WEB.x264-AMB3R.torrent"
+    )
     torrentFile.write_bytes(b"torrent data")
 
     tvRoot = tmp_path / "TV"
@@ -1518,7 +1960,9 @@ def testExtractMediaUrlsFromHtmlFindsSupportedExtensions(organizer: VideoOrganiz
 def testExtractMediaUrlsFromPageFiltersToUserContentDomains(organizer: VideoOrganizer):
     """Only URLs from known Grok user-content CDN domains are returned."""
     userImage = "https://imagine-public.x.ai/imagine-public/images/abc123.png"
-    userImageFromImagesPublic = "https://images-public.x.ai/xai-images-public/mj/images/def456.jpg"
+    userImageFromImagesPublic = (
+        "https://images-public.x.ai/xai-images-public/mj/images/def456.jpg"
+    )
     systemImage = "https://x.ai/images/news/grok-4-1.webp"
     promoVideo = "https://data.x.ai/grok-4-fast-side-by-side.mp4"
     nonMedia = "https://imagine-public.x.ai/imagine-public/images/page.html"
@@ -1608,25 +2052,41 @@ def testIsGrokMediaResponseMatchesByContentType(organizer: VideoOrganizer):
         assert organizer._isGrokMediaResponse(f"https://{domain}/image", "image/jpeg")
         assert organizer._isGrokMediaResponse(f"https://{domain}/video", "video/mp4")
         assert organizer._isGrokMediaResponse(f"https://{domain}/video", "video/webm")
-        assert not organizer._isGrokMediaResponse(f"https://{domain}/api", "application/json")
-        assert not organizer._isGrokMediaResponse(f"https://{domain}/js", "text/javascript")
+        assert not organizer._isGrokMediaResponse(
+            f"https://{domain}/api", "application/json"
+        )
+        assert not organizer._isGrokMediaResponse(
+            f"https://{domain}/js", "text/javascript"
+        )
 
 
 def testIsGrokMediaResponseExcludesGrokComDomain(organizer: VideoOrganizer):
     """Responses from grok.com itself are never captured — it is not a user-content CDN."""
-    assert not organizer._isGrokMediaResponse("https://grok.com/images/logo.png", "image/png")
-    assert not organizer._isGrokMediaResponse("https://www.grok.com/promo.jpg", "image/jpeg")
+    assert not organizer._isGrokMediaResponse(
+        "https://grok.com/images/logo.png", "image/png"
+    )
+    assert not organizer._isGrokMediaResponse(
+        "https://www.grok.com/promo.jpg", "image/jpeg"
+    )
     assert not organizer._isGrokMediaResponse("https://grok.com/clip.mp4", "video/mp4")
 
 
 def testIsGrokMediaResponseExcludesUnknownCdnDomains(organizer: VideoOrganizer):
     """Images from third-party or unknown CDN domains are excluded by the allowlist."""
     # Profile pictures, analytics pixels, ad networks, etc. must all be rejected.
-    assert not organizer._isGrokMediaResponse("https://cdn.example.ai/user/abc.png", "image/png")
-    assert not organizer._isGrokMediaResponse("https://pbs.twimg.com/profile_img/photo.jpg", "image/jpeg")
-    assert not organizer._isGrokMediaResponse("https://ads.tracker.com/pixel.gif", "image/gif")
+    assert not organizer._isGrokMediaResponse(
+        "https://cdn.example.ai/user/abc.png", "image/png"
+    )
+    assert not organizer._isGrokMediaResponse(
+        "https://pbs.twimg.com/profile_img/photo.jpg", "image/jpeg"
+    )
+    assert not organizer._isGrokMediaResponse(
+        "https://ads.tracker.com/pixel.gif", "image/gif"
+    )
     # Only the known user-content CDN domain should pass through.
-    assert organizer._isGrokMediaResponse("https://imagine-public.x.ai/user/abc.png", "image/png")
+    assert organizer._isGrokMediaResponse(
+        "https://imagine-public.x.ai/user/abc.png", "image/png"
+    )
 
 
 def testDownloadMediaFilesDryRunDoesNotWrite(organizer: VideoOrganizer, tmp_path: Path):
@@ -1637,17 +2097,23 @@ def testDownloadMediaFilesDryRunDoesNotWrite(organizer: VideoOrganizer, tmp_path
     assert not (destDir / "image01.png").exists()
 
 
-def testDownloadMediaFilesSkipsExisting(confirmedOrganizer: VideoOrganizer, tmp_path: Path):
+def testDownloadMediaFilesSkipsExisting(
+    confirmedOrganizer: VideoOrganizer, tmp_path: Path
+):
     destDir = tmp_path / "Downloads" / "Grok"
     destDir.mkdir(parents=True)
     target = destDir / "image01.png"
     target.write_bytes(b"exists")
     with patch("organiseMyVideo.Path.home", return_value=tmp_path):
-        stats = confirmedOrganizer._downloadMediaFiles(["https://example.com/image01.png"])
+        stats = confirmedOrganizer._downloadMediaFiles(
+            ["https://example.com/image01.png"]
+        )
     assert stats == {"downloaded": 0, "skipped": 1, "errors": 0}
 
 
-def testDownloadMediaFilesUsesPlaywrightContext(confirmedOrganizer: VideoOrganizer, tmp_path: Path):
+def testDownloadMediaFilesUsesPlaywrightContext(
+    confirmedOrganizer: VideoOrganizer, tmp_path: Path
+):
     """When a playwright context is supplied the authenticated request path is used."""
     fakeResponse = MagicMock()
     fakeResponse.ok = True
@@ -1665,10 +2131,14 @@ def testDownloadMediaFilesUsesPlaywrightContext(confirmedOrganizer: VideoOrganiz
     fakeContext.request.get.assert_called_once_with(
         "https://example.com/image01.png", headers={"Referer": "https://grok.com/"}
     )
-    assert (tmp_path / "Downloads" / "Grok" / "image01.png").read_bytes() == b"image-data"
+    assert (
+        tmp_path / "Downloads" / "Grok" / "image01.png"
+    ).read_bytes() == b"image-data"
 
 
-def testDownloadMediaFilesPlaywrightContextNonOkResponse(confirmedOrganizer: VideoOrganizer, tmp_path: Path):
+def testDownloadMediaFilesPlaywrightContextNonOkResponse(
+    confirmedOrganizer: VideoOrganizer, tmp_path: Path
+):
     """A non-OK playwright response is counted as an error."""
     fakeResponse = MagicMock()
     fakeResponse.ok = False
@@ -1691,7 +2161,9 @@ def testDownloadMediaFilesPlaywrightContextNonOkResponse(confirmedOrganizer: Vid
 # ---------------------------------------------------------------------------
 
 
-def testSanitizeStorageStateConvertsZeroExpiresToMinusOne(tmp_path, organizer: VideoOrganizer):
+def testSanitizeStorageStateConvertsZeroExpiresToMinusOne(
+    tmp_path, organizer: VideoOrganizer
+):
     """expires: 0 must be normalised to -1 (Playwright rejects 0)."""
     f = tmp_path / "session.json"
     f.write_text(json.dumps({"cookies": [{"name": "a", "expires": 0}], "origins": []}))
@@ -1700,19 +2172,27 @@ def testSanitizeStorageStateConvertsZeroExpiresToMinusOne(tmp_path, organizer: V
     assert data["cookies"][0]["expires"] == -1
 
 
-def testSanitizeStorageStateConvertsNullExpiresToMinusOne(tmp_path, organizer: VideoOrganizer):
+def testSanitizeStorageStateConvertsNullExpiresToMinusOne(
+    tmp_path, organizer: VideoOrganizer
+):
     """expires: null must be normalised to -1."""
     f = tmp_path / "session.json"
-    f.write_text(json.dumps({"cookies": [{"name": "a", "expires": None}], "origins": []}))
+    f.write_text(
+        json.dumps({"cookies": [{"name": "a", "expires": None}], "origins": []})
+    )
     organizer._sanitizeStorageState(f)
     data = json.loads(f.read_text())
     assert data["cookies"][0]["expires"] == -1
 
 
-def testSanitizeStorageStateConvertsNegativeExpiresToMinusOne(tmp_path, organizer: VideoOrganizer):
+def testSanitizeStorageStateConvertsNegativeExpiresToMinusOne(
+    tmp_path, organizer: VideoOrganizer
+):
     """expires: -999 must be normalised to -1 (only -1 is a valid sentinel)."""
     f = tmp_path / "session.json"
-    f.write_text(json.dumps({"cookies": [{"name": "a", "expires": -999}], "origins": []}))
+    f.write_text(
+        json.dumps({"cookies": [{"name": "a", "expires": -999}], "origins": []})
+    )
     organizer._sanitizeStorageState(f)
     data = json.loads(f.read_text())
     assert data["cookies"][0]["expires"] == -1
@@ -1721,13 +2201,17 @@ def testSanitizeStorageStateConvertsNegativeExpiresToMinusOne(tmp_path, organize
 def testSanitizeStorageStateTruncatesFloatExpires(tmp_path, organizer: VideoOrganizer):
     """expires with a fractional part should be truncated to int."""
     f = tmp_path / "session.json"
-    f.write_text(json.dumps({"cookies": [{"name": "a", "expires": 1700000000.9}], "origins": []}))
+    f.write_text(
+        json.dumps({"cookies": [{"name": "a", "expires": 1700000000.9}], "origins": []})
+    )
     organizer._sanitizeStorageState(f)
     data = json.loads(f.read_text())
     assert data["cookies"][0]["expires"] == 1700000000
 
 
-def testSanitizeStorageStateConvertsWholeNumberFloatToInt(tmp_path, organizer: VideoOrganizer):
+def testSanitizeStorageStateConvertsWholeNumberFloatToInt(
+    tmp_path, organizer: VideoOrganizer
+):
     """expires as a whole-number float (e.g. 1742000000.0) must be converted to int.
 
     SQLite may return INTEGER columns as Python floats; json.dumps then writes
@@ -1746,18 +2230,32 @@ def testSanitizeStorageStateConvertsWholeNumberFloatToInt(tmp_path, organizer: V
 def testSanitizeStorageStatePreservesValidExpires(tmp_path, organizer: VideoOrganizer):
     """Valid expires (-1 or positive integer) must be left unchanged."""
     f = tmp_path / "session.json"
-    f.write_text(json.dumps({"cookies": [{"name": "a", "expires": -1}, {"name": "b", "expires": 1700000000}], "origins": []}))
+    f.write_text(
+        json.dumps(
+            {
+                "cookies": [
+                    {"name": "a", "expires": -1},
+                    {"name": "b", "expires": 1700000000},
+                ],
+                "origins": [],
+            }
+        )
+    )
     organizer._sanitizeStorageState(f)
     data = json.loads(f.read_text())
     assert data["cookies"][0]["expires"] == -1
     assert data["cookies"][1]["expires"] == 1700000000
 
 
-def testSanitizeStorageStatePreservesExpiresAtMaxLimit(tmp_path, organizer: VideoOrganizer):
+def testSanitizeStorageStatePreservesExpiresAtMaxLimit(
+    tmp_path, organizer: VideoOrganizer
+):
     """An expires exactly equal to kMaxCookieExpiresDateInSeconds (253402300799) is valid
     and must be left unchanged."""
     f = tmp_path / "session.json"
-    f.write_text(json.dumps({"cookies": [{"name": "a", "expires": 253402300799}], "origins": []}))
+    f.write_text(
+        json.dumps({"cookies": [{"name": "a", "expires": 253402300799}], "origins": []})
+    )
     organizer._sanitizeStorageState(f)
     data = json.loads(f.read_text())
     assert data["cookies"][0]["expires"] == 253402300799
@@ -1770,7 +2268,11 @@ def testSanitizeStorageStateClampsOverLimitInt(tmp_path, organizer: VideoOrganiz
     exceed Playwright's internal kMaxCookieExpiresDateInSeconds limit.
     """
     f = tmp_path / "session.json"
-    f.write_text(json.dumps({"cookies": [{"name": "a", "expires": 9999999999999}], "origins": []}))
+    f.write_text(
+        json.dumps(
+            {"cookies": [{"name": "a", "expires": 9999999999999}], "origins": []}
+        )
+    )
     organizer._sanitizeStorageState(f)
     data = json.loads(f.read_text())
     assert data["cookies"][0]["expires"] == 253402300799
@@ -1780,13 +2282,17 @@ def testSanitizeStorageStateClampsOverLimitFloat(tmp_path, organizer: VideoOrgan
     """A float expires that exceeds the max limit must also be clamped to 253402300799."""
     f = tmp_path / "session.json"
     # Write raw float string so json.loads returns a float
-    f.write_text('{"cookies": [{"name": "a", "expires": 9999999999999.0}], "origins": []}')
+    f.write_text(
+        '{"cookies": [{"name": "a", "expires": 9999999999999.0}], "origins": []}'
+    )
     organizer._sanitizeStorageState(f)
     data = json.loads(f.read_text())
     assert data["cookies"][0]["expires"] == 253402300799
 
 
-def testSanitizeStorageStateConvertsBooleanToMinusOne(tmp_path, organizer: VideoOrganizer):
+def testSanitizeStorageStateConvertsBooleanToMinusOne(
+    tmp_path, organizer: VideoOrganizer
+):
     """expires: True (Python bool) serialises to JSON true which Playwright cannot use
     as a numeric expires.  It must be normalised to -1."""
     f = tmp_path / "session.json"
@@ -1831,7 +2337,9 @@ def testFirefoxLaunchConvertsNotInstalledErrorToRuntimeError(organizer: VideoOrg
         organizer._firefoxLaunch(fakePW)
 
 
-def testFirefoxLaunchConvertsPlaywrightInstallHintToRuntimeError(organizer: VideoOrganizer):
+def testFirefoxLaunchConvertsPlaywrightInstallHintToRuntimeError(
+    organizer: VideoOrganizer,
+):
     """Error messages containing the 'playwright install' hint are also converted."""
     fakePW = MagicMock()
     fakePW.firefox.launch.side_effect = Exception(
@@ -1925,6 +2433,7 @@ def testFindFirefoxProfilePrefersProfileWithCookies(
     """When multiple candidate bases exist, the profile that has cookies.sqlite
     is preferred over one without — even when the empty profile is the 'default'."""
     import configparser as cp
+
     home = tmp_path
 
     # Traditional install: has profiles.ini + default profile, but NO cookies.sqlite.
@@ -1969,6 +2478,7 @@ def testFindFirefoxProfileFallsBackToFirstCandidateWhenNoCookies(
     tradBase = home / ".mozilla" / "firefox"
     tradBase.mkdir(parents=True, exist_ok=True)
     import configparser as cp
+
     ini = cp.ConfigParser()
     ini["Profile0"] = {"Path": "default-profile", "IsRelative": "1", "Default": "1"}
     profileDir = tradBase / "default-profile"
@@ -2001,6 +2511,7 @@ def testFindFirefoxProfilePicksMostRecentCookies(
     import os
     import time
     import configparser as cp
+
     home = tmp_path
 
     def _makeInstall(base: Path, profile_name: str, cookies_mtime: float) -> Path:
@@ -2017,7 +2528,7 @@ def testFindFirefoxProfilePicksMostRecentCookies(
         return profileDir
 
     old_time = time.time() - 3600  # 1 hour ago
-    new_time = time.time()         # now
+    new_time = time.time()  # now
 
     tradBase = home / ".mozilla" / "firefox"
     snapBase = home / "snap" / "firefox" / "common" / ".mozilla" / "firefox"
@@ -2028,7 +2539,9 @@ def testFindFirefoxProfilePicksMostRecentCookies(
     with patch("organiseMyVideo.grok.Path.home", return_value=home):
         result = organizer._findFirefoxProfile()
 
-    assert result == snapProfile, "should pick the install with the newer cookies.sqlite"
+    assert (
+        result == snapProfile
+    ), "should pick the install with the newer cookies.sqlite"
 
 
 # ---------------------------------------------------------------------------
@@ -2044,14 +2557,12 @@ def _make_firefox_cookies_db(profile_dir: Path, cookies: list) -> None:
     """
     db_path = profile_dir / "cookies.sqlite"
     conn = sqlite3.connect(str(db_path))
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE moz_cookies (
             name TEXT, value TEXT, host TEXT, path TEXT,
             expiry INTEGER, isSecure INTEGER, isHttpOnly INTEGER, sameSite INTEGER
         )
-        """
-    )
+        """)
     conn.executemany("INSERT INTO moz_cookies VALUES (?,?,?,?,?,?,?,?)", cookies)
     conn.commit()
     conn.close()
@@ -2072,7 +2583,9 @@ def testImportFirefoxSessionWritesStorageState(
     )
     sessionFile = tmp_path / "session.json"
 
-    result = organizer.importFirefoxSession(sessionFile=sessionFile, profilePath=profileDir)
+    result = organizer.importFirefoxSession(
+        sessionFile=sessionFile, profilePath=profileDir
+    )
 
     assert result is True
     assert sessionFile.exists()
@@ -2103,7 +2616,9 @@ def testImportFirefoxSessionMapsZeroExpiryToMinusOne(
     )
     sessionFile = tmp_path / "session.json"
 
-    result = organizer.importFirefoxSession(sessionFile=sessionFile, profilePath=profileDir)
+    result = organizer.importFirefoxSession(
+        sessionFile=sessionFile, profilePath=profileDir
+    )
 
     assert result is True
     state = json.loads(sessionFile.read_text())
@@ -2135,14 +2650,16 @@ def testImportFirefoxSessionClampsOverLimitExpiry(
     )
     sessionFile = tmp_path / "session.json"
 
-    result = organizer.importFirefoxSession(sessionFile=sessionFile, profilePath=profileDir)
+    result = organizer.importFirefoxSession(
+        sessionFile=sessionFile, profilePath=profileDir
+    )
 
     assert result is True
     state = json.loads(sessionFile.read_text())
     cookie = state["cookies"][0]
-    assert cookie["expires"] == 253402300799, (
-        "far-future expiry must be clamped to kMaxCookieExpiresDateInSeconds"
-    )
+    assert (
+        cookie["expires"] == 253402300799
+    ), "far-future expiry must be clamped to kMaxCookieExpiresDateInSeconds"
 
 
 def testImportFirefoxSessionConvertsFloatExpiryToInt(
@@ -2161,14 +2678,12 @@ def testImportFirefoxSessionConvertsFloatExpiryToInt(
     # SQLite's dynamic typing.  This reproduces the bug where json.dumps writes
     # '1742000000.0' instead of '1742000000', which Playwright rejects.
     conn = sqlite3.connect(str(db_path))
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE moz_cookies (
             name TEXT, value TEXT, host TEXT, path TEXT,
             expiry REAL, isSecure INTEGER, isHttpOnly INTEGER, sameSite INTEGER
         )
-        """
-    )
+        """)
     conn.execute(
         "INSERT INTO moz_cookies VALUES (?,?,?,?,?,?,?,?)",
         ("float_cookie", "v", "grok.com", "/", 1742000000.0, 1, 0, 0),
@@ -2177,12 +2692,16 @@ def testImportFirefoxSessionConvertsFloatExpiryToInt(
     conn.close()
 
     sessionFile = tmp_path / "session.json"
-    result = organizer.importFirefoxSession(sessionFile=sessionFile, profilePath=profileDir)
+    result = organizer.importFirefoxSession(
+        sessionFile=sessionFile, profilePath=profileDir
+    )
 
     assert result is True
     state = json.loads(sessionFile.read_text())
     cookie = state["cookies"][0]
-    assert isinstance(cookie["expires"], int), "expires must be a plain int, not a float"
+    assert isinstance(
+        cookie["expires"], int
+    ), "expires must be a plain int, not a float"
     assert cookie["expires"] == 1742000000
 
 
@@ -2194,7 +2713,9 @@ def testImportFirefoxSessionReturnsFalseWhenNoCookiesDbFile(
     profileDir.mkdir()
     sessionFile = tmp_path / "session.json"
 
-    result = organizer.importFirefoxSession(sessionFile=sessionFile, profilePath=profileDir)
+    result = organizer.importFirefoxSession(
+        sessionFile=sessionFile, profilePath=profileDir
+    )
 
     assert result is False
     assert not sessionFile.exists()
@@ -2212,7 +2733,9 @@ def testImportFirefoxSessionReturnsFalseWhenNoGrokCookies(
     )
     sessionFile = tmp_path / "session.json"
 
-    result = organizer.importFirefoxSession(sessionFile=sessionFile, profilePath=profileDir)
+    result = organizer.importFirefoxSession(
+        sessionFile=sessionFile, profilePath=profileDir
+    )
 
     assert result is False
     assert not sessionFile.exists()
@@ -2265,7 +2788,9 @@ def testScrapeGrokSavedMediaUsesFirefoxSessionWhenAvailable(
 
     with (
         patch("organiseMyVideo.grok.sync_playwright") as mockPW,
-        patch.object(confirmedOrganizer, "importFirefoxSession", side_effect=_fake_import),
+        patch.object(
+            confirmedOrganizer, "importFirefoxSession", side_effect=_fake_import
+        ),
         patch.object(confirmedOrganizer, "_openFirefoxWindow") as mockOpenFF,
     ):
         mockPW.return_value.__enter__.return_value = fakePW
@@ -2292,7 +2817,9 @@ def testScrapeGrokSavedMediaUsesSessionFileWhenPresent(
     sessionFile.write_text("{}")  # minimal valid storage-state
 
     fakePage = MagicMock()
-    fakePage.url = "https://grok.com/imagine/saved"  # valid session → stays on saved page
+    fakePage.url = (
+        "https://grok.com/imagine/saved"  # valid session → stays on saved page
+    )
     fakePage.eval_on_selector_all.return_value = []  # empty gallery → 0 posts
 
     fakeContext = MagicMock()
@@ -2347,7 +2874,9 @@ def testScrapeGrokSavedMediaOpensFirefoxAndImportsCookiesWhenNoSession(
     fakePW = MagicMock()
     fakePW.firefox.launch.return_value = fakeBrowser
 
-    _import_calls = [False]  # first call returns False; subsequent calls create file and return True
+    _import_calls = [
+        False
+    ]  # first call returns False; subsequent calls create file and return True
 
     def _fake_import(sessionFile=None, profilePath=None):
         if _import_calls:
@@ -2358,7 +2887,9 @@ def testScrapeGrokSavedMediaOpensFirefoxAndImportsCookiesWhenNoSession(
     with (
         patch("organiseMyVideo.grok.sync_playwright") as mockPW,
         patch.object(confirmedOrganizer, "_openFirefoxWindow") as mockOpenFF,
-        patch.object(confirmedOrganizer, "importFirefoxSession", side_effect=_fake_import),
+        patch.object(
+            confirmedOrganizer, "importFirefoxSession", side_effect=_fake_import
+        ),
         patch("builtins.input", return_value=""),
     ):
         mockPW.return_value.__enter__.return_value = fakePW
@@ -2434,7 +2965,9 @@ def testScrapeGrokSavedMediaOpensFirefoxWhenSessionExpired(
     with (
         patch("organiseMyVideo.grok.sync_playwright") as mockPW,
         patch.object(confirmedOrganizer, "_openFirefoxWindow") as mockOpenFF,
-        patch.object(confirmedOrganizer, "importFirefoxSession", side_effect=_fake_import),
+        patch.object(
+            confirmedOrganizer, "importFirefoxSession", side_effect=_fake_import
+        ),
         patch("builtins.input", return_value=""),
     ):
         mockPW.return_value.__enter__.return_value = fakePW
@@ -2501,7 +3034,9 @@ def testScrapeGrokSavedMediaRaisesRuntimeErrorWhenFirefoxNotInstalled(
     with (
         patch("organiseMyVideo.grok.sync_playwright") as mockPW,
         patch.object(confirmedOrganizer, "_openFirefoxWindow"),
-        patch.object(confirmedOrganizer, "importFirefoxSession", side_effect=_fake_import),
+        patch.object(
+            confirmedOrganizer, "importFirefoxSession", side_effect=_fake_import
+        ),
         patch("builtins.input", return_value=""),
     ):
         mockPW.return_value.__enter__.return_value = fakePW
@@ -2514,14 +3049,18 @@ def testScrapeGrokSavedMediaRaisesRuntimeErrorWhenFirefoxNotInstalled(
 # ---------------------------------------------------------------------------
 
 
-def testResetGrokConfigDeletesBothFiles(confirmedOrganizer: VideoOrganizer, tmp_path: Path):
+def testResetGrokConfigDeletesBothFiles(
+    confirmedOrganizer: VideoOrganizer, tmp_path: Path
+):
     """Both session and credentials files are deleted when they exist."""
     sessionFile = tmp_path / "grokSession.json"
     credFile = tmp_path / "grokCredentials.json"
     sessionFile.write_text("{}")
     credFile.write_text(json.dumps({"username": "u", "password": "p"}))
 
-    result = confirmedOrganizer.resetGrokConfig(sessionFile=sessionFile, credentialsFile=credFile)
+    result = confirmedOrganizer.resetGrokConfig(
+        sessionFile=sessionFile, credentialsFile=credFile
+    )
 
     assert not sessionFile.exists()
     assert not credFile.exists()
@@ -2530,12 +3069,16 @@ def testResetGrokConfigDeletesBothFiles(confirmedOrganizer: VideoOrganizer, tmp_
     assert result["notFound"] == []
 
 
-def testResetGrokConfigReportsNotFoundWhenFilesAbsent(confirmedOrganizer: VideoOrganizer, tmp_path: Path):
+def testResetGrokConfigReportsNotFoundWhenFilesAbsent(
+    confirmedOrganizer: VideoOrganizer, tmp_path: Path
+):
     """Files that don't exist are reported in notFound, nothing is deleted."""
     sessionFile = tmp_path / "grokSession.json"
     credFile = tmp_path / "grokCredentials.json"
 
-    result = confirmedOrganizer.resetGrokConfig(sessionFile=sessionFile, credentialsFile=credFile)
+    result = confirmedOrganizer.resetGrokConfig(
+        sessionFile=sessionFile, credentialsFile=credFile
+    )
 
     assert result["deleted"] == []
     assert str(sessionFile) in result["notFound"]
@@ -2549,7 +3092,9 @@ def testResetGrokConfigDryRunDoesNotDelete(organizer: VideoOrganizer, tmp_path: 
     sessionFile.write_text("{}")
     credFile.write_text(json.dumps({"username": "u", "password": "p"}))
 
-    result = organizer.resetGrokConfig(sessionFile=sessionFile, credentialsFile=credFile)
+    result = organizer.resetGrokConfig(
+        sessionFile=sessionFile, credentialsFile=credFile
+    )
 
     # Files must still exist in dry-run mode
     assert sessionFile.exists()
@@ -2559,13 +3104,17 @@ def testResetGrokConfigDryRunDoesNotDelete(organizer: VideoOrganizer, tmp_path: 
     assert str(credFile) in result["deleted"]
 
 
-def testResetGrokConfigDeletesOnlyExistingFiles(confirmedOrganizer: VideoOrganizer, tmp_path: Path):
+def testResetGrokConfigDeletesOnlyExistingFiles(
+    confirmedOrganizer: VideoOrganizer, tmp_path: Path
+):
     """Only the session file exists — only it is deleted; credentials go to notFound."""
     sessionFile = tmp_path / "grokSession.json"
     credFile = tmp_path / "grokCredentials.json"
     sessionFile.write_text("{}")
 
-    result = confirmedOrganizer.resetGrokConfig(sessionFile=sessionFile, credentialsFile=credFile)
+    result = confirmedOrganizer.resetGrokConfig(
+        sessionFile=sessionFile, credentialsFile=credFile
+    )
 
     assert not sessionFile.exists()
     assert str(sessionFile) in result["deleted"]

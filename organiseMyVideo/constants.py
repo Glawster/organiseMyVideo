@@ -4,10 +4,35 @@ import re
 from pathlib import Path
 
 # Video file extensions to process
-VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".m4v", ".mpg", ".mpeg"}
-GROK_MEDIA_EXTENSIONS = {".mp4", ".mov", ".webm", ".png", ".jpg", ".jpeg", ".gif", ".webp"}
+VIDEO_EXTENSIONS = {
+    ".mp4",
+    ".mkv",
+    ".avi",
+    ".mov",
+    ".wmv",
+    ".flv",
+    ".m4v",
+    ".mpg",
+    ".mpeg",
+}
+GROK_MEDIA_EXTENSIONS = {
+    ".mp4",
+    ".mov",
+    ".webm",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+}
 GROK_USER_CONTENT_DOMAINS = {"imagine-public.x.ai", "images-public.x.ai"}
-GROK_CREDENTIALS_FILE = Path.home() / ".config" / "organiseMyVideo" / "grokCredentials.json"
+GROK_CREDENTIALS_FILE = (
+    Path.home() / ".config" / "organiseMyVideo" / "grokCredentials.json"
+)
+METADATA_LIBRARY_FILE = (
+    Path.home() / ".config" / "organiseMyVideo" / "metadataLibrary.json"
+)
+TVDB_API_BASE_URL = "https://api4.thetvdb.com/v4"
 
 # JavaScript snippet injected into every page of every context to remove the
 # navigator.webdriver property that Playwright exposes by default.

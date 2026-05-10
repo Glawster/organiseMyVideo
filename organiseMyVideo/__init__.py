@@ -12,7 +12,9 @@ top-level package.
 """
 
 import shutil  # re-exported so patch("organiseMyVideo.shutil.move") still works in tests
-from pathlib import Path  # re-exported so patch("organiseMyVideo.Path") still works in tests
+from pathlib import (
+    Path,
+)  # re-exported so patch("organiseMyVideo.Path") still works in tests
 
 from organiseMyProjects.logUtils import getLogger  # type: ignore
 
@@ -22,18 +24,21 @@ from .constants import (
     GROK_USER_CONTENT_DOMAINS,
     GROK_CREDENTIALS_FILE,
     GROK_SESSION_FILE,
+    METADATA_LIBRARY_FILE,
+    TVDB_API_BASE_URL,
     _PLAYWRIGHT_INIT_SCRIPT,
     PREFIX_PATTERNS,
     _PREFIX_REGEX,
 )
 from .grok import GrokMixin, sync_playwright  # noqa: F401 — re-exported for tests
+from .metadata import MetadataMixin
 from .torrent import TorrentMixin
 from .video import VideoMixin
 
 logger = getLogger()
 
 
-class VideoOrganizer(VideoMixin, TorrentMixin, GrokMixin):
+class VideoOrganizer(MetadataMixin, VideoMixin, TorrentMixin, GrokMixin):
     """Organise video files into structured movie and TV show directories.
 
     Combines all domain-specific mixins into a single class:
@@ -56,3 +61,5 @@ class VideoOrganizer(VideoMixin, TorrentMixin, GrokMixin):
         self.sourceDir = Path(sourceDir)
         self.dryRun = dryRun
         self._promptHelpDisplayed = False
+        self._metadataLibraryCache = None
+        self._tvMetadataFetcher = None
