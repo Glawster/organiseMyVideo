@@ -89,6 +89,7 @@ class VideoMixin:
             Dictionary with parsed info or None if parsing failed
         """
         stem, extension = os.path.splitext(filename)
+        # TV parsing expects a real media filename so the extension must be present.
         if not extension:
             return None
 
@@ -97,11 +98,10 @@ class VideoMixin:
 
         if match:
             showName = re.sub(r"[\.\s_]+", " ", match.group(1)).strip()
-            showName = " ".join(showName.split())
             season = int(match.group(2))
             episode = int(match.group(3))
             episodeTitle = (
-                " ".join(re.sub(r"[\.\s_]+", " ", match.group(4)).strip().split())
+                re.sub(r"[\.\s_]+", " ", match.group(4)).strip()
                 if match.group(4)
                 else None
             )
@@ -564,22 +564,14 @@ class VideoMixin:
         """Return ``(tvInfo, movieInfo)`` while preferring metadata hints first."""
         hintType = mcmHints.get("type") if mcmHints else None
 
-        def _resolvedTvInfo(tvInfo: Optional[dict]) -> Optional[dict]:
-            """Return enriched TV metadata when *tvInfo* is usable."""
-            if not tvInfo:
-                return None
-            return self._enrichTvMetadata(tvInfo) or tvInfo
-
         if hintType == "tv":
             tvInfo = self._applyTvMcmHints(None, mcmHints, sourceFile)
             if tvInfo:
-                return _resolvedTvInfo(tvInfo), None
+                return self._resolveAndEnrichTvInfo(tvInfo), None
 
-            tvInfo = self._applyTvMcmHints(
-                self.parseTvFilename(sourceFile.name), mcmHints, sourceFile
-            )
+            tvInfo = self._parseAndResolveTvInfo(sourceFile, mcmHints)
             if tvInfo:
-                return _resolvedTvInfo(tvInfo), None
+                return tvInfo, None
 
         if hintType == "movie":
             movieInfo = self._applyMovieMcmHints(None, mcmHints, sourceFile)
@@ -592,11 +584,7 @@ class VideoMixin:
             if movieInfo:
                 return None, movieInfo
 
-        tvInfo = _resolvedTvInfo(
-            self._applyTvMcmHints(
-                self.parseTvFilename(sourceFile.name), mcmHints, sourceFile
-            )
-        )
+        tvInfo = self._parseAndResolveTvInfo(sourceFile, mcmHints)
         if tvInfo:
             return tvInfo, None
 
@@ -604,6 +592,22 @@ class VideoMixin:
             self.parseMovieFilename(sourceFile.name), mcmHints, sourceFile
         )
         return None, movieInfo
+
+    def _resolveAndEnrichTvInfo(self, tvInfo: Optional[dict]) -> Optional[dict]:
+        """Return scraped/library-enriched TV info, or the original parsed info if enrichment fails."""
+        if not tvInfo:
+            return None
+        return self._enrichTvMetadata(tvInfo) or tvInfo
+
+    def _parseAndResolveTvInfo(
+        self, sourceFile: Path, mcmHints: Optional[dict]
+    ) -> Optional[dict]:
+        """Return resolved TV info from the filename plus any matching hints."""
+        return self._resolveAndEnrichTvInfo(
+            self._applyTvMcmHints(
+                self.parseTvFilename(sourceFile.name), mcmHints, sourceFile
+            )
+        )
 
     def _hasAnyMetadata(self, **metadataValues) -> bool:
         """Return True when any metadata hint has a usable value."""

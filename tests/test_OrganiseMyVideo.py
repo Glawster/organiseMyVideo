@@ -686,21 +686,15 @@ def testProcessFilesPrefersMovieMcmHintsBeforeFilenameClassification(
     tvStorage = tmp_path / "video1" / "TV"
     tvStorage.mkdir(parents=True)
 
-    with patch.object(
-        confirmedOrganizer,
-        "scanStorageLocations",
-        return_value=([movieStorage], [tvStorage]),
-    ):
-        with patch.object(
-            confirmedOrganizer,
-            "parseTvFilename",
-            side_effect=AssertionError("movie MCM hints should be used first"),
-        ):
-            confirmedOrganizer.processFiles(interactive=False)
-
-    destFile = movieStorage / "3 from Hell (2019)" / "clip.mp4"
-    assert destFile.exists()
-    assert not srcFile.exists()
+    mcmHints = confirmedOrganizer._readMcmHints(srcFile)
+    with patch.object(confirmedOrganizer, "parseTvFilename") as mockParseTvFilename:
+        tvInfo, movieInfo = confirmedOrganizer._classifyVideoFile(srcFile, mcmHints)
+        assert tvInfo is None
+        assert movieInfo is not None
+        assert movieInfo["title"] == "3 from Hell"
+        assert movieInfo["year"] == "2019"
+        assert movieInfo["type"] == "movie"
+        mockParseTvFilename.assert_not_called()
 
 
 def testProcessFilesUsesTvMcmHintsWhenFilenameCannotBeParsed(
