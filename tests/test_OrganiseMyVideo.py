@@ -993,6 +993,77 @@ def testUpdateMetadataLibraryLogsMovieAddition(
     assert library["movies"]["title:inception:2010"]["title"] == "Inception"
 
 
+def testProcessFilesBuildsMetadataLibraryFromStorageBeforeSourceProcessing(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
+):
+    libraryPath = tmp_path / "metadataLibrary.json"
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+    tvStorage = tmp_path / "video1" / "TV"
+    showDir = tvStorage / "After Life"
+    metadataDir = showDir / "Season 01" / "metadata"
+    metadataDir.mkdir(parents=True)
+    (showDir / "series.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Series>
+    <SeriesName>After Life</SeriesName>
+    <SeriesID>347507</SeriesID>
+</Series>
+""",
+        encoding="utf-8",
+    )
+    (metadataDir / "After.Life.S01E04.Sic.Semper.Systema.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Item>
+    <EpisodeID>10751471</EpisodeID>
+    <SeasonNumber>1</SeasonNumber>
+    <EpisodeNumber>4</EpisodeNumber>
+    <EpisodeName>Sic Semper Systema</EpisodeName>
+</Item>
+""",
+        encoding="utf-8",
+    )
+
+    srcFile = confirmedOrganizer.sourceDir / "After.Life.S01E04.mkv"
+    srcFile.write_bytes(b"x" * 100)
+
+    with patch.object(
+        confirmedOrganizer, "_getMetadataLibraryPath", return_value=libraryPath
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([movieStorage], [tvStorage]),
+        ):
+            with patch.object(
+                confirmedOrganizer, "_fetchTvMetadataFromScraper"
+            ) as mockFetch:
+                with caplog.at_level("INFO"):
+                    confirmedOrganizer.processFiles(interactive=False)
+
+    destFile = (
+        tvStorage
+        / "After Life"
+        / "Season 01"
+        / "After.Life.S01E04.Sic.Semper.Systema.mkv"
+    )
+    assert destFile.exists()
+    assert not srcFile.exists()
+    mockFetch.assert_not_called()
+    assert "building metadata library from storage" in caplog.text
+    assert "adding shows to library" in caplog.text
+    assert caplog.text.index("building metadata library from storage") < caplog.text.index(
+        "found 1 video file(s) to process"
+    )
+
+    library = json.loads(libraryPath.read_text(encoding="utf-8"))
+    assert library["tv"]["series"]["series:347507"]["showName"] == "After Life"
+    assert (
+        library["tv"]["episodes"]["series:347507:s01e04"]["episodeTitle"]
+        == "Sic Semper Systema"
+    )
+
+
 def testProcessFilesKeepsSourceNameWhenScraperCannotFillEpisodeTitle(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer
 ):

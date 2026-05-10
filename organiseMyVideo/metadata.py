@@ -248,6 +248,52 @@ class MetadataMixin:
             self._saveMetadataLibrary()
         return metadata
 
+    def _readTvSeriesMcmHints(self, showDir: Path) -> Optional[dict]:
+        """Return show-level TV metadata hints from a library show's ``series.xml``."""
+        seriesRoot = self._readXmlRoot(showDir / "series.xml")
+        showName = self._readFirstXmlText(seriesRoot, ("LocalTitle", "SeriesName"))
+        imdbId = self._readFirstXmlText(seriesRoot, ("IMDB_ID", "IMDbId"))
+        seriesId = self._readFirstXmlText(seriesRoot, ("SeriesID", "id"))
+
+        if not self._hasAnyMetadata(
+            showName=showName, imdbId=imdbId, seriesId=seriesId
+        ):
+            return None
+
+        return {
+            "type": "tv",
+            "showName": showName,
+            "imdbId": imdbId,
+            "seriesId": seriesId,
+            "metadataSource": "mcm",
+        }
+
+    def _buildMetadataLibraryFromStorage(
+        self, movieDirs: list[Path], videoDirs: list[Path]
+    ) -> None:
+        """Preload the metadata library from existing movie/TV storage MCM files."""
+        logger.doing("building metadata library from storage")
+
+        for movieDir in movieDirs:
+            logger.value("movie metadata storage", movieDir)
+            for movieXml in sorted(movieDir.rglob("movie.xml")):
+                self._updateMetadataLibraryFromHints(
+                    self._readMovieMcmHints(movieXml.parent / "__metadata_scan__.mkv")
+                )
+
+        for tvDir in videoDirs:
+            logger.value("TV metadata storage", tvDir)
+            for showDir in sorted(path for path in tvDir.iterdir() if path.is_dir()):
+                self._updateMetadataLibraryFromHints(self._readTvSeriesMcmHints(showDir))
+                for episodeXml in sorted(showDir.rglob("metadata/*.xml")):
+                    self._updateMetadataLibraryFromHints(
+                        self._readTvMcmHints(
+                            episodeXml.parent.parent / f"{episodeXml.stem}.mkv"
+                        )
+                    )
+
+        logger.done("building metadata library from storage")
+
     def _lookupTvMetadataInLibrary(self, tvInfo: Optional[dict]) -> Optional[dict]:
         """Return the best matching TV metadata record from the library."""
         normalised = self._normaliseTvMetadata(tvInfo)

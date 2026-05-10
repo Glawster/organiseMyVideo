@@ -1209,6 +1209,8 @@ class VideoMixin:
         for d in videoDirs:
             logger.value("  - ", d)
 
+        self._buildMetadataLibraryFromStorage(movieDirs, videoDirs)
+
         if not movieDirs:
             logger.error("No Movie storage locations found")
         if not videoDirs:
