@@ -56,19 +56,19 @@ class VideoMixin:
                 if item.is_dir():
                     if re.match(r"movie\d*$", item.name):
                         movieDirs.append(item)
-                        logger.value("found movie storage", item)
+                        logger.value("movie storage location found", item)
                     elif re.match(r"myPictures$", item.name):
                         # Use Movies subdirectory if present, otherwise use root
                         moviesSubDir = item / "Movies"
                         movieStorage = moviesSubDir if moviesSubDir.exists() else item
                         movieDirs.append(movieStorage)
-                        logger.value("found movie storage", movieStorage)
+                        logger.value("movie storage location found", movieStorage)
                     elif re.match(r"video\d*$|myVideo$", item.name):
                         # Look for TV subdirectory
                         tvDir = item / "TV"
                         if tvDir.exists():
                             videoDirs.append(tvDir)
-                            logger.value("found TV storage", tvDir)
+                            logger.value("TV storage location found", tvDir)
 
         logger.info(
             f"storage scan complete: {len(movieDirs)} movie, {len(videoDirs)} TV locations"

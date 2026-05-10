@@ -295,7 +295,7 @@ def testScanStorageLocationsFindsMyVideoAsTvStorage(
 
 
 def testScanStorageLocationsFindsAllLocationTypes(
-    tmp_path: Path, organizer: VideoOrganizer
+    tmp_path: Path, organizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
 ):
     """movie<n>, myPictures, video<n>/TV, and myVideo/TV are all detected."""
     mnt = tmp_path / "mnt"
@@ -305,9 +305,12 @@ def testScanStorageLocationsFindsAllLocationTypes(
     (mnt / "myVideo" / "TV").mkdir(parents=True)
     with patch("organiseMyVideo.video.Path") as mockPath:
         mockPath.return_value = mnt
-        movieDirs, videoDirs = organizer.scanStorageLocations()
+        with caplog.at_level("INFO"):
+            movieDirs, videoDirs = organizer.scanStorageLocations()
     assert len(movieDirs) == 2
     assert len(videoDirs) == 2
+    assert "movie storage location found" in caplog.text
+    assert "TV storage location found" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -962,7 +965,7 @@ def testUpdateMetadataLibraryLogsShowAddition(
                 }
             )
 
-    assert "adding shows to library" in caplog.text
+    assert "adding show to library" in caplog.text
     assert "show name: After Life" in caplog.text
     library = json.loads(libraryPath.read_text(encoding="utf-8"))
     assert library["tv"]["series"]["series:347507"]["showName"] == "After Life"
@@ -987,7 +990,7 @@ def testUpdateMetadataLibraryLogsMovieAddition(
                 }
             )
 
-    assert "adding movies to library" in caplog.text
+    assert "adding movie to library" in caplog.text
     assert "movie name: Inception" in caplog.text
     library = json.loads(libraryPath.read_text(encoding="utf-8"))
     assert library["movies"]["title:inception:2010"]["title"] == "Inception"
@@ -1051,7 +1054,7 @@ def testProcessFilesBuildsMetadataLibraryFromStorageBeforeSourceProcessing(
     assert not srcFile.exists()
     mockFetch.assert_not_called()
     assert "building metadata library from storage" in caplog.text
-    assert "adding shows to library" in caplog.text
+    assert "adding show to library" in caplog.text
     messages = [record.getMessage() for record in caplog.records]
 
     def _findLogMessageIndex(searchText: str) -> int | None:
