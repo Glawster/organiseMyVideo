@@ -2184,6 +2184,6 @@ def testMainLogsStartupProgressBeforeProcessing(caplog: pytest.LogCaptureFixture
     organizerInstance.processFiles.assert_called_once_with(interactive=True)
     assert "source directory: /tmp/source" in caplog.text
     assert "mode: process" in caplog.text
-    assert "initialising video organizer..." in caplog.text
-    assert "...video organizer initialised" in caplog.text
+    assert "initializing video organizer..." in caplog.text
+    assert "...video organizer initialized" in caplog.text
     assert "running file organisation mode..." in caplog.text

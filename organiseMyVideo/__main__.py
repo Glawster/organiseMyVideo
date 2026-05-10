@@ -70,15 +70,22 @@ def main():
     else:
         logger.info("confirm mode, changes will be made")
 
+    if args.torrent:
+        selectedMode = "torrent"
+    elif args.clean:
+        selectedMode = "clean"
+    else:
+        selectedMode = "process"
+
     logger.value("source directory", args.source)
-    logger.value("mode", "torrent" if args.torrent else "clean" if args.clean else "process")
+    logger.value("mode", selectedMode)
 
     # Create organizer and run the requested mode
-    logger.doing("initialising video organizer")
+    logger.doing("initializing video organizer")
     from . import VideoOrganizer
 
     organizer = VideoOrganizer(sourceDir=args.source, dryRun=dryRun)
-    logger.done("video organizer initialised")
+    logger.done("video organizer initialized")
 
     if args.torrent:
         logger.doing("running torrent maintenance")
