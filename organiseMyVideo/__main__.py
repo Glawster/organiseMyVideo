@@ -7,13 +7,13 @@ from pathlib import Path
 
 from organiseMyProjects.logUtils import getLogger, drawBox, setApplication  # type: ignore
 
-thisApplication = Path(__file__).resolve().parent.name
+thisApplication = Path(__file__).parent.name
 setApplication(thisApplication)
 
 from . import VideoOrganizer
 from .constants import GROK_SESSION_FILE
 
-logger = getLogger()
+logger = getLogger(includeConsole=False)
 
 
 def main():
