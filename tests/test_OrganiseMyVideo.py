@@ -922,6 +922,8 @@ def testUpdateMetadataLibraryLogsShowAddition(
 
     assert "adding shows to library" in caplog.text
     assert "show name: After Life" in caplog.text
+    library = json.loads(libraryPath.read_text(encoding="utf-8"))
+    assert library["tv"]["series"]["series:347507"]["showName"] == "After Life"
 
 
 def testUpdateMetadataLibraryLogsMovieAddition(
@@ -945,6 +947,8 @@ def testUpdateMetadataLibraryLogsMovieAddition(
 
     assert "adding movies to library" in caplog.text
     assert "movie name: Inception" in caplog.text
+    library = json.loads(libraryPath.read_text(encoding="utf-8"))
+    assert library["movies"]["title:inception:2010"]["title"] == "Inception"
 
 
 def testProcessFilesKeepsSourceNameWhenScraperCannotFillEpisodeTitle(
