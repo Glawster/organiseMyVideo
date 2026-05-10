@@ -96,12 +96,12 @@ class VideoMixin:
         match = re.match(pattern, stem, re.IGNORECASE)
 
         if match:
-            showName = re.sub(r"[\._]+", " ", match.group(1)).strip()
+            showName = re.sub(r"[\.\s_]+", " ", match.group(1)).strip()
             showName = " ".join(showName.split())
             season = int(match.group(2))
             episode = int(match.group(3))
             episodeTitle = (
-                " ".join(re.sub(r"[\._]+", " ", match.group(4)).strip().split())
+                " ".join(re.sub(r"[\.\s_]+", " ", match.group(4)).strip().split())
                 if match.group(4)
                 else None
             )
@@ -561,19 +561,25 @@ class VideoMixin:
     def _classifyVideoFile(
         self, sourceFile: Path, mcmHints: Optional[dict]
     ) -> Tuple[Optional[dict], Optional[dict]]:
-        """Return TV/movie classification, preferring metadata hints before parsing."""
+        """Return ``(tvInfo, movieInfo)`` while preferring metadata hints first."""
         hintType = mcmHints.get("type") if mcmHints else None
+
+        def _resolvedTvInfo(tvInfo: Optional[dict]) -> Optional[dict]:
+            """Return enriched TV metadata when *tvInfo* is usable."""
+            if not tvInfo:
+                return None
+            return self._enrichTvMetadata(tvInfo) or tvInfo
 
         if hintType == "tv":
             tvInfo = self._applyTvMcmHints(None, mcmHints, sourceFile)
             if tvInfo:
-                return self._enrichTvMetadata(tvInfo) or tvInfo, None
+                return _resolvedTvInfo(tvInfo), None
 
             tvInfo = self._applyTvMcmHints(
                 self.parseTvFilename(sourceFile.name), mcmHints, sourceFile
             )
             if tvInfo:
-                return self._enrichTvMetadata(tvInfo) or tvInfo, None
+                return _resolvedTvInfo(tvInfo), None
 
         if hintType == "movie":
             movieInfo = self._applyMovieMcmHints(None, mcmHints, sourceFile)
@@ -586,7 +592,7 @@ class VideoMixin:
             if movieInfo:
                 return None, movieInfo
 
-        tvInfo = self._enrichTvMetadata(
+        tvInfo = _resolvedTvInfo(
             self._applyTvMcmHints(
                 self.parseTvFilename(sourceFile.name), mcmHints, sourceFile
             )
