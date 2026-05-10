@@ -10,7 +10,6 @@ from organiseMyProjects.logUtils import getLogger, drawBox, setApplication  # ty
 thisApplication = Path(__file__).parent.name
 setApplication(thisApplication)
 
-from . import VideoOrganizer
 logger = getLogger(includeConsole=False)
 
 
@@ -70,11 +69,19 @@ def main():
         logger.info("entering dry-run mode, use --confirm to execute")
     else:
         logger.info("confirm mode, changes will be made")
-    
+
+    logger.value("source directory", args.source)
+    logger.value("mode", "torrent" if args.torrent else "clean" if args.clean else "process")
+
     # Create organizer and run the requested mode
+    logger.doing("initialising video organizer")
+    from . import VideoOrganizer
+
     organizer = VideoOrganizer(sourceDir=args.source, dryRun=dryRun)
+    logger.done("video organizer initialised")
 
     if args.torrent:
+        logger.doing("running torrent maintenance")
         torrentDir = organizer.sourceDir.parent / "Downloads" if organizer.sourceDir else Path("/mnt/video2/Downloads")
         nameStats = {"renamed": 0, "skipped": 0, "errors": 0}
         if args.clean:
@@ -91,6 +98,7 @@ Rename errors:    {nameStats['errors']}
         drawBox(summary)
 
     elif args.clean:
+        logger.doing("running clean mode")
         nameStats = organizer.cleanNames()
         cleanStats = organizer.cleanEmptyFolders()
         summary = f"""CLEAN SUMMARY
@@ -102,6 +110,7 @@ Folder errors:   {cleanStats['errors']}
 """
         drawBox(summary)
     else:
+        logger.doing("running file organisation mode")
         organizer.processFiles(interactive=not args.non_interactive)
 
     logger.done("organiseMyVideo complete")

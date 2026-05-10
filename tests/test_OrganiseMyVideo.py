@@ -2166,3 +2166,24 @@ def testMainRejectsRemovedGrokOptions(flag: str, capsys):
 
     assert exc_info.value.code == 2
     assert flag in capsys.readouterr().err
+
+
+def testMainLogsStartupProgressBeforeProcessing(caplog: pytest.LogCaptureFixture):
+    """CLI startup should log source/mode progress before processing begins."""
+    organizerInstance = MagicMock()
+
+    with patch("organiseMyVideo.VideoOrganizer", return_value=organizerInstance) as mockOrganizer:
+        with patch(
+            "sys.argv",
+            ["organiseMyVideo", "--source", "/tmp/source"],
+        ):
+            with caplog.at_level("INFO"):
+                omv_main.main()
+
+    mockOrganizer.assert_called_once_with(sourceDir="/tmp/source", dryRun=True)
+    organizerInstance.processFiles.assert_called_once_with(interactive=True)
+    assert "source directory: /tmp/source" in caplog.text
+    assert "mode: process" in caplog.text
+    assert "initialising video organizer..." in caplog.text
+    assert "...video organizer initialised" in caplog.text
+    assert "running file organisation mode..." in caplog.text
