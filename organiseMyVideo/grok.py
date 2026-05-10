@@ -32,7 +32,7 @@ from .constants import (
     _PLAYWRIGHT_INIT_SCRIPT,
 )
 
-logger = getLogger("organiseMyVideo")
+logger = getLogger()
 
 # Playwright's maximum allowed cookie expires value (from kMaxCookieExpiresDateInSeconds
 # in playwright/driver/package/lib/server/network.js).  Any timestamp beyond this

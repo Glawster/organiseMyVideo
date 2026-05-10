@@ -63,6 +63,7 @@ def _stubOrganiseMyProjects() -> None:
     pkg = types.ModuleType("organiseMyProjects")
     logUtils = types.ModuleType("organiseMyProjects.logUtils")
     logUtils.getLogger = _getStubLogger
+    logUtils.setApplication = lambda name, *args, **kwargs: None
     logUtils.drawBox = lambda text: None
 
     pkg.logUtils = logUtils

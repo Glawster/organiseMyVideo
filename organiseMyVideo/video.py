@@ -13,7 +13,7 @@ from organiseMyProjects.logUtils import getLogger  # type: ignore
 
 from .constants import VIDEO_EXTENSIONS, _PREFIX_REGEX
 
-logger = getLogger("organiseMyVideo")
+logger = getLogger()
 UNKNOWN_YEAR = "Unknown"
 
 

@@ -11,7 +11,7 @@ from organiseMyProjects.logUtils import getLogger, drawBox  # type: ignore
 from . import VideoOrganizer
 from .constants import GROK_SESSION_FILE
 
-logger = getLogger("organiseMyVideo")  # __main__.py: use explicit name as stem would be '__main__'
+logger = getLogger()
 
 
 def main():
@@ -78,8 +78,7 @@ def main():
     logDir = Path.home() / ".local" / "state" / "organiseMy" / "logs"
     logDir.mkdir(parents=True, exist_ok=True)
     logFile = logDir / f"organiseMyVideo_{logTimestamp}.log"
-    _name = "organiseMyVideo"  # __main__.py: use explicit name as stem would be '__main__'
-    logger = getLogger(_name, logDir=logDir, includeConsole=True, dryRun=dryRun)
+    logger = getLogger(logDir=logDir, includeConsole=True, dryRun=dryRun)
     if not any(type(h) is logging.StreamHandler for h in logger.logger.handlers):
         _ch = logging.StreamHandler()
         _ch.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))

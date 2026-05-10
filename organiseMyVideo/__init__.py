@@ -14,7 +14,9 @@ top-level package.
 import shutil  # re-exported so patch("organiseMyVideo.shutil.move") still works in tests
 from pathlib import Path  # re-exported so patch("organiseMyVideo.Path") still works in tests
 
-from organiseMyProjects.logUtils import getLogger  # type: ignore
+from organiseMyProjects.logUtils import getLogger, setApplication  # type: ignore
+
+setApplication(Path(__file__).resolve().parent.name)
 
 from .constants import (
     VIDEO_EXTENSIONS,
@@ -30,7 +32,7 @@ from .grok import GrokMixin, sync_playwright  # noqa: F401 — re-exported for t
 from .torrent import TorrentMixin
 from .video import VideoMixin
 
-logger = getLogger("organiseMyVideo")  # __init__.py: use explicit name as stem would be '__init__'
+logger = getLogger()
 
 
 class VideoOrganizer(VideoMixin, TorrentMixin, GrokMixin):
