@@ -11,14 +11,23 @@ The stub mirrors the real _OrganiseLoggerAdapter from organiseMyProjects.logUtil
 import logging
 import sys
 import types
+from pathlib import Path
 
 _DRY_RUN_PREFIX = "[] "
+
+# Ensure the project root is importable during test discovery (VS Code can invoke
+# pytest from a path alias where root isn't first on sys.path).
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 
 class _StubLogger:
     """Lightweight stand-in for organiseMyProjects._OrganiseLoggerAdapter."""
 
-    def __init__(self, name: str = "OrganiseMyTool", dryRun: bool = False, **kwargs) -> None:
+    def __init__(
+        self, name: str = "OrganiseMyTool", dryRun: bool = False, **kwargs
+    ) -> None:
         self._log = logging.getLogger(name)
         self._prefix = _DRY_RUN_PREFIX if dryRun else ""
         # Expose .logger so the console-handler workaround in main() can access
