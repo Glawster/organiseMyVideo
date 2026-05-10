@@ -220,7 +220,7 @@ class MetadataMixin:
                 library["movies"], self._movieLibraryKeys(record), record
             )
             if changed:
-                logger.doing("adding movie to library")
+                logger.action("adding movie to library")
                 logger.value("movie name", record.get("title") or "unknown movie")
         else:
             record = self._normaliseTvMetadata(metadata)
@@ -240,7 +240,7 @@ class MetadataMixin:
                 seriesRecord,
             )
             if seriesChanged:
-                logger.doing("adding show to library")
+                logger.action("adding show to library")
                 logger.value("show name", record.get("showName") or "unknown show")
             changed = seriesChanged or changed
             changed = (
