@@ -3,8 +3,12 @@
 
 import argparse
 import logging
+from pathlib import Path
 
-from organiseMyProjects.logUtils import getLogger, drawBox  # type: ignore
+from organiseMyProjects.logUtils import getLogger, drawBox, setApplication  # type: ignore
+
+thisApplication = Path(__file__).resolve().parent.name
+setApplication(thisApplication)
 
 from . import VideoOrganizer
 from .constants import GROK_SESSION_FILE

@@ -14,9 +14,7 @@ top-level package.
 import shutil  # re-exported so patch("organiseMyVideo.shutil.move") still works in tests
 from pathlib import Path  # re-exported so patch("organiseMyVideo.Path") still works in tests
 
-from organiseMyProjects.logUtils import getLogger, setApplication  # type: ignore
-
-setApplication(Path(__file__).resolve().parent.name)
+from organiseMyProjects.logUtils import getLogger  # type: ignore
 
 from .constants import (
     VIDEO_EXTENSIONS,
