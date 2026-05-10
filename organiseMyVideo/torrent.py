@@ -7,7 +7,7 @@ from organiseMyProjects.logUtils import getLogger  # type: ignore
 
 from .constants import _PREFIX_REGEX
 
-logger = getLogger(Path(__file__).stem)
+logger = getLogger("organiseMyVideo")
 
 
 class TorrentMixin:
