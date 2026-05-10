@@ -85,6 +85,16 @@ def testParseTvFilenameWithoutEpisodeTitle(organizer: VideoOrganizer):
     assert result["episodeTitle"] is None
 
 
+def testParseTvFilenameWithSpaces(organizer: VideoOrganizer):
+    result = organizer.parseTvFilename("The Pitt S01E13 7 00 P M (1080).mkv")
+    assert result is not None
+    assert result["showName"] == "The Pitt"
+    assert result["season"] == 1
+    assert result["episode"] == 13
+    assert result["episodeTitle"] == "7 00 P M (1080)"
+    assert result["type"] == "tv"
+
+
 def testParseTvFilenameReturnsNoneForMovie(organizer: VideoOrganizer):
     assert organizer.parseTvFilename("Inception (2010).mp4") is None
 
@@ -648,6 +658,45 @@ def testProcessFilesUsesMovieMcmHintsWhenFilenameCannotBeParsed(
         return_value=([movieStorage], [tvStorage]),
     ):
         confirmedOrganizer.processFiles(interactive=False)
+
+    destFile = movieStorage / "3 from Hell (2019)" / "clip.mp4"
+    assert destFile.exists()
+    assert not srcFile.exists()
+
+
+def testProcessFilesPrefersMovieMcmHintsBeforeFilenameClassification(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    movieSourceDir = confirmedOrganizer.sourceDir / "3 from Hell (2019)"
+    movieSourceDir.mkdir()
+    srcFile = movieSourceDir / "clip.mp4"
+    srcFile.write_bytes(b"x" * 100)
+    (movieSourceDir / "movie.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Title>
+    <LocalTitle>3 from Hell</LocalTitle>
+    <ProductionYear>2019</ProductionYear>
+</Title>
+""",
+        encoding="utf-8",
+    )
+
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    with patch.object(
+        confirmedOrganizer,
+        "scanStorageLocations",
+        return_value=([movieStorage], [tvStorage]),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "parseTvFilename",
+            side_effect=AssertionError("movie MCM hints should be used first"),
+        ):
+            confirmedOrganizer.processFiles(interactive=False)
 
     destFile = movieStorage / "3 from Hell (2019)" / "clip.mp4"
     assert destFile.exists()

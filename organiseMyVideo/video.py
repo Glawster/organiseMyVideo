@@ -79,7 +79,8 @@ class VideoMixin:
         """
         Parse TV show filename to extract show name, season, and episode.
 
-        Expected format: show. SnnEnn.title.ext
+        Expected format: show.SnnEnn.title.ext, or the same structure with
+        spaces/underscores instead of dots.
 
         Args:
             filename: Name of the file to parse
@@ -87,25 +88,30 @@ class VideoMixin:
         Returns:
             Dictionary with parsed info or None if parsing failed
         """
-        # Pattern for SnnEnn format
-        pattern = r"^(.+?)\.S(\d+)E(\d+)(?:\.(.+?))?\.(\w+)$"
-        match = re.match(pattern, filename, re.IGNORECASE)
+        stem, extension = os.path.splitext(filename)
+        if not extension:
+            return None
+
+        pattern = r"^(.+?)[\.\s_]+S(\d+)E(\d+)(?:[\.\s_]+(.+?))?$"
+        match = re.match(pattern, stem, re.IGNORECASE)
 
         if match:
-            showName = match.group(1).replace(".", " ").strip()
+            showName = re.sub(r"[\._]+", " ", match.group(1)).strip()
+            showName = " ".join(showName.split())
             season = int(match.group(2))
             episode = int(match.group(3))
             episodeTitle = (
-                match.group(4).replace(".", " ").strip() if match.group(4) else None
+                " ".join(re.sub(r"[\._]+", " ", match.group(4)).strip().split())
+                if match.group(4)
+                else None
             )
-            extension = match.group(5)
 
             return {
                 "showName": showName,
                 "season": season,
                 "episode": episode,
                 "episodeTitle": episodeTitle,
-                "extension": extension,
+                "extension": extension.lstrip("."),
                 "type": "tv",
             }
 
@@ -551,6 +557,47 @@ class VideoMixin:
         if merged.get("showName") and merged.get("season") is not None:
             return merged
         return tvInfo
+
+    def _classifyVideoFile(
+        self, sourceFile: Path, mcmHints: Optional[dict]
+    ) -> Tuple[Optional[dict], Optional[dict]]:
+        """Return TV/movie classification, preferring metadata hints before parsing."""
+        hintType = mcmHints.get("type") if mcmHints else None
+
+        if hintType == "tv":
+            tvInfo = self._applyTvMcmHints(None, mcmHints, sourceFile)
+            if tvInfo:
+                return self._enrichTvMetadata(tvInfo) or tvInfo, None
+
+            tvInfo = self._applyTvMcmHints(
+                self.parseTvFilename(sourceFile.name), mcmHints, sourceFile
+            )
+            if tvInfo:
+                return self._enrichTvMetadata(tvInfo) or tvInfo, None
+
+        if hintType == "movie":
+            movieInfo = self._applyMovieMcmHints(None, mcmHints, sourceFile)
+            if movieInfo:
+                return None, movieInfo
+
+            movieInfo = self._applyMovieMcmHints(
+                self.parseMovieFilename(sourceFile.name), mcmHints, sourceFile
+            )
+            if movieInfo:
+                return None, movieInfo
+
+        tvInfo = self._enrichTvMetadata(
+            self._applyTvMcmHints(
+                self.parseTvFilename(sourceFile.name), mcmHints, sourceFile
+            )
+        )
+        if tvInfo:
+            return tvInfo, None
+
+        movieInfo = self._applyMovieMcmHints(
+            self.parseMovieFilename(sourceFile.name), mcmHints, sourceFile
+        )
+        return None, movieInfo
 
     def _hasAnyMetadata(self, **metadataValues) -> bool:
         """Return True when any metadata hint has a usable value."""
@@ -1176,13 +1223,7 @@ class VideoMixin:
 
         for videoFile in videoFiles:
             mcmHints = self._readMcmHints(videoFile)
-
-            # Try parsing as TV show first
-            tvInfo = self._enrichTvMetadata(
-                self._applyTvMcmHints(
-                    self.parseTvFilename(videoFile.name), mcmHints, videoFile
-                )
-            )
+            tvInfo, movieInfo = self._classifyVideoFile(videoFile, mcmHints)
             if tvInfo and videoDirs:
                 if self.moveTvShow(
                     videoFile,
@@ -1196,10 +1237,6 @@ class VideoMixin:
                     stats["errors"] += 1
                 continue
 
-            # Try parsing as movie
-            movieInfo = self._applyMovieMcmHints(
-                self.parseMovieFilename(videoFile.name), mcmHints, videoFile
-            )
             if movieInfo and movieDirs:
                 if self.moveMovie(
                     videoFile,
