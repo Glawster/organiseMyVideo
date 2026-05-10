@@ -275,6 +275,8 @@ class MetadataMixin:
         logger.doing("building metadata library from storage")
 
         for movieDir in movieDirs:
+            if not movieDir.exists() or not movieDir.is_dir():
+                continue
             logger.value("movie metadata storage", movieDir)
             for movieXml in sorted(movieDir.rglob("movie.xml")):
                 self._updateMetadataLibraryFromHints(
@@ -282,6 +284,8 @@ class MetadataMixin:
                 )
 
         for tvDir in videoDirs:
+            if not tvDir.exists() or not tvDir.is_dir():
+                continue
             logger.value("TV metadata storage", tvDir)
             for showDir in sorted(path for path in tvDir.iterdir() if path.is_dir()):
                 self._updateMetadataLibraryFromHints(self._readTvSeriesMcmHints(showDir))
