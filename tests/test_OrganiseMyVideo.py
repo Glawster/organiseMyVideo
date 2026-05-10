@@ -1053,22 +1053,19 @@ def testProcessFilesBuildsMetadataLibraryFromStorageBeforeSourceProcessing(
     assert "building metadata library from storage" in caplog.text
     assert "adding shows to library" in caplog.text
     messages = [record.getMessage() for record in caplog.records]
-    buildIndex = next(
-        (
-            i
-            for i, message in enumerate(messages)
-            if "building metadata library from storage" in message
-        ),
-        None,
-    )
-    processIndex = next(
-        (
-            i
-            for i, message in enumerate(messages)
-            if "found 1 video file(s) to process" in message
-        ),
-        None,
-    )
+
+    def _findLogMessageIndex(searchText: str) -> int | None:
+        return next(
+            (
+                i
+                for i, message in enumerate(messages)
+                if searchText in message
+            ),
+            None,
+        )
+
+    buildIndex = _findLogMessageIndex("building metadata library from storage")
+    processIndex = _findLogMessageIndex("found 1 video file(s) to process")
     assert (
         buildIndex is not None
     ), f'Expected "building metadata library from storage" in logs: {messages}'

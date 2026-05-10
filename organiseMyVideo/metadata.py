@@ -14,7 +14,8 @@ from organiseMyProjects.logUtils import getLogger  # type: ignore
 from .constants import METADATA_LIBRARY_FILE, TVDB_API_BASE_URL
 
 logger = getLogger()
-_METADATA_SCAN_PLACEHOLDER = "__metadata_scan__.mkv"
+_METADATA_SCAN_PLACEHOLDER_FILENAME = "__metadata_scan__.mkv"
+_METADATA_SCAN_SUFFIX = Path(_METADATA_SCAN_PLACEHOLDER_FILENAME).suffix
 
 
 class MetadataMixin:
@@ -26,10 +27,9 @@ class MetadataMixin:
 
     def _metadataScanPath(self, baseDir: Path, stem: Optional[str] = None) -> Path:
         """Return a synthetic media path used to reuse the existing MCM readers."""
-        suffix = Path(_METADATA_SCAN_PLACEHOLDER).suffix
         if stem is None:
-            return baseDir / _METADATA_SCAN_PLACEHOLDER
-        return baseDir / f"{stem}{suffix}"
+            return baseDir / _METADATA_SCAN_PLACEHOLDER_FILENAME
+        return baseDir / f"{stem}{_METADATA_SCAN_SUFFIX}"
 
     def _newMetadataLibrary(self) -> dict:
         """Return an empty metadata-library structure."""
@@ -296,7 +296,7 @@ class MetadataMixin:
                 continue
             logger.value("TV metadata storage", tvDir)
             try:
-                showDirs = sorted(path for path in tvDir.iterdir() if path.is_dir())
+                showDirs = sorted([showDir for showDir in tvDir.iterdir() if showDir.is_dir()])
             except OSError as error:
                 logger.warning("could not read TV metadata storage %s: %s", tvDir, error)
                 continue
