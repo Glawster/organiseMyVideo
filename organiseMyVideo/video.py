@@ -88,19 +88,23 @@ class VideoMixin:
             Dictionary with parsed info or None if parsing failed
         """
         # Pattern for SnnEnn format
-        pattern = r"^(.+?)\.S(\d+)E(\d+)(?:\..+)?\.(\w+)$"
+        pattern = r"^(.+?)\.S(\d+)E(\d+)(?:\.(.+?))?\.(\w+)$"
         match = re.match(pattern, filename, re.IGNORECASE)
 
         if match:
             showName = match.group(1).replace(".", " ").strip()
             season = int(match.group(2))
             episode = int(match.group(3))
-            extension = match.group(4)
+            episodeTitle = (
+                match.group(4).replace(".", " ").strip() if match.group(4) else None
+            )
+            extension = match.group(5)
 
             return {
                 "showName": showName,
                 "season": season,
                 "episode": episode,
+                "episodeTitle": episodeTitle,
                 "extension": extension,
                 "type": "tv",
             }
@@ -566,13 +570,10 @@ class VideoMixin:
 
     def _sanitiseFilenamePart(self, value: str) -> str:
         """Return a dot-separated, filesystem-safe filename fragment."""
-        asciiText = (
-            unicodedata.normalize("NFKD", value)
-            .encode("ascii", "ignore")
-            .decode("ascii")
-        )
-        asciiText = asciiText.replace("'", "")
-        tokens = re.findall(r"[A-Za-z0-9]+", asciiText)
+        normalised = unicodedata.normalize("NFKC", value).replace("'", "")
+        normalised = re.sub(r"[^\w]+", " ", normalised, flags=re.UNICODE)
+        normalised = normalised.replace("_", " ")
+        tokens = normalised.split()
         return ".".join(tokens)
 
     def _buildTvDestinationFilename(self, sourceFile: Path, tvInfo: dict) -> str:
@@ -590,10 +591,13 @@ class VideoMixin:
 
         showPart = self._sanitiseFilenamePart(showName)
         titlePart = self._sanitiseFilenamePart(episodeTitle) if episodeTitle else ""
-        if not showPart or not titlePart:
+        if not showPart:
             return sourceFile.name
 
-        return f"{showPart}.S{season:02d}E{episode:02d}.{titlePart}{extension}"
+        parts = [showPart, f"S{season:02d}E{episode:02d}"]
+        if titlePart:
+            parts.append(titlePart)
+        return f"{'.'.join(parts)}{extension}"
 
     def _writeEpisodeMcmTemplate(
         self,
@@ -724,6 +728,8 @@ class VideoMixin:
             return
 
         if destStem == sourceFile.stem and not tvInfo.get("episodeTitle"):
+            # When the destination stem already matches and no new title exists,
+            # keep the original XML unchanged instead of rewriting it.
             self._copyFilesIntoDir([episodeMetadataFile], destMetadataDir)
         else:
             episodeRoot = self._readXmlRoot(episodeMetadataFile) or ET.Element("Item")
@@ -852,7 +858,7 @@ class VideoMixin:
                 tvInfo = {
                     "showName": result["name"],
                     "season": season,
-                    "episode": 0,
+                    "episode": None,
                     "extension": sourceFile.suffix,
                     "type": "tv",
                 }
@@ -927,6 +933,7 @@ class VideoMixin:
         Returns:
             True if successful, False otherwise
         """
+        tvInfo = self._mergeMetadata(tvInfo, self.parseTvFilename(sourceFile.name))
         tvInfo = self._enrichTvMetadata(tvInfo) or tvInfo
         showName = tvInfo["showName"]
         season = tvInfo["season"]

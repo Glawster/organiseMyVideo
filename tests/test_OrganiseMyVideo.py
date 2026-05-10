@@ -64,6 +64,7 @@ def testParseTvFilenameValid(organizer: VideoOrganizer):
     assert result["showName"] == "Breaking Bad"
     assert result["season"] == 1
     assert result["episode"] == 1
+    assert result["episodeTitle"] == "Pilot"
     assert result["type"] == "tv"
 
 
@@ -81,6 +82,7 @@ def testParseTvFilenameWithoutEpisodeTitle(organizer: VideoOrganizer):
     assert result["showName"] == "Virgin River"
     assert result["season"] == 6
     assert result["episode"] == 1
+    assert result["episodeTitle"] is None
 
 
 def testParseTvFilenameReturnsNoneForMovie(organizer: VideoOrganizer):
@@ -799,6 +801,12 @@ def testProcessFilesUsesMetadataLibraryToRenameLaterScan(tmp_path: Path):
             return_value=([movieStorage], [tvStorage]),
         ):
             firstOrganizer.processFiles(interactive=False)
+    assert libraryPath.exists()
+    firstLibrary = json.loads(libraryPath.read_text(encoding="utf-8"))
+    assert (
+        firstLibrary["tv"]["episodes"]["series:347507:s01e04"]["episodeTitle"]
+        == "Sic Semper Systema"
+    )
 
     with patch.object(
         secondOrganizer, "_getMetadataLibraryPath", return_value=libraryPath
@@ -1181,11 +1189,15 @@ def testMoveTvShowReplicatesMcmCompanionFiles(
         encoding="utf-8"
     ) == "<Disc />"
     assert (seasonDestDir / "folder.jpg").read_bytes() == b"season-cover"
-    assert (
+    destMetadata = (
         seasonDestDir
         / "metadata"
         / "Daredevil.Born.Again.S01E04.Sic.Semper.Systema.xml"
-    ).read_text(encoding="utf-8") == episodeXml.read_text(encoding="utf-8")
+    ).read_text(encoding="utf-8")
+    assert "<filename>/67da18725f220.jpg</filename>" in destMetadata
+    assert "<EpisodeNumber>4</EpisodeNumber>" in destMetadata
+    assert "<SeasonNumber>1</SeasonNumber>" in destMetadata
+    assert "<EpisodeName>Sic Semper Systema</EpisodeName>" in destMetadata
     assert (
         seasonDestDir / "metadata" / "67da18725f220.jpg"
     ).read_bytes() == b"episode-thumb"

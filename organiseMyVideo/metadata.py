@@ -93,6 +93,12 @@ class MetadataMixin:
         except (TypeError, ValueError):
             return None
 
+    def _normaliseIdValue(self, value) -> Optional[str]:
+        """Return *value* as a non-empty string identifier when possible."""
+        if value in (None, ""):
+            return None
+        return str(value)
+
     def _normaliseTvMetadata(self, tvInfo: Optional[dict]) -> Optional[dict]:
         """Return TV metadata in a stable shape."""
         if not tvInfo:
@@ -105,12 +111,8 @@ class MetadataMixin:
         normalised["episode"] = self._normaliseEpisodeValue(normalised.get("episode"))
         normalised["episodeTitle"] = normalised.get("episodeTitle") or None
         normalised["imdbId"] = normalised.get("imdbId") or None
-        normalised["seriesId"] = (
-            str(normalised["seriesId"]) if normalised.get("seriesId") else None
-        )
-        normalised["episodeId"] = (
-            str(normalised["episodeId"]) if normalised.get("episodeId") else None
-        )
+        normalised["seriesId"] = self._normaliseIdValue(normalised.get("seriesId"))
+        normalised["episodeId"] = self._normaliseIdValue(normalised.get("episodeId"))
         normalised["metadataSource"] = normalised.get("metadataSource") or None
         normalised["metadataUpdatedAt"] = (
             normalised.get("metadataUpdatedAt") or self._metadataUpdatedAt()
@@ -304,7 +306,14 @@ class MetadataMixin:
         return self._fetchTvdbMetadata(tvInfo)
 
     def _getTvdbToken(self) -> Optional[str]:
-        """Return a TVDB bearer token from env or by exchanging an API key."""
+        """
+        Return a TVDB bearer token from configured environment variables.
+
+        Supported configuration:
+        - ``ORGANISEMYVIDEO_TVDB_TOKEN`` for a pre-issued bearer token
+        - ``ORGANISEMYVIDEO_TVDB_API_KEY`` for TVDB API login
+        - ``ORGANISEMYVIDEO_TVDB_PIN`` for API logins that also require a PIN
+        """
         envToken = os.environ.get("ORGANISEMYVIDEO_TVDB_TOKEN")
         if envToken:
             return envToken
@@ -341,8 +350,11 @@ class MetadataMixin:
         headers: Optional[dict] = None,
     ) -> Optional[dict]:
         """Return decoded JSON for *url*, or None if the request fails."""
-        if not url.startswith(("https://", "http://")):
-            raise ValueError(f"refusing to fetch non-http URL: {url!r}")
+        if not url.startswith("https://"):
+            raise ValueError(f"refusing to fetch non-https URL: {url!r}")
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise ValueError(f"refusing malformed metadata URL: {url!r}")
 
         requestHeaders = {"Accept": "application/json", "User-Agent": "organiseMyVideo"}
         if headers:
@@ -361,7 +373,15 @@ class MetadataMixin:
         )
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
-                return json.loads(response.read().decode("utf-8"))
+                contentLength = response.headers.get("Content-Length")
+                if contentLength and int(contentLength) > 1_000_000:
+                    logger.warning("TV metadata response too large for %s", url)
+                    return None
+                raw = response.read(1_000_001)
+                if len(raw) > 1_000_000:
+                    logger.warning("TV metadata response too large for %s", url)
+                    return None
+                return json.loads(raw.decode("utf-8"))
         except (
             urllib.error.URLError,
             urllib.error.HTTPError,
@@ -407,7 +427,9 @@ class MetadataMixin:
             seriesId = data["series"].get("id")
 
         episodeTitle = data.get("episodeName") or data.get("name")
-        if episodeTitle == showName:
+        if self._normaliseLookupText(episodeTitle) == self._normaliseLookupText(
+            showName
+        ):
             episodeTitle = None
 
         return self._normaliseTvMetadata(
@@ -464,9 +486,9 @@ class MetadataMixin:
         if not showName:
             return None
 
-        query = urllib.parse.quote(showName)
+        query = urllib.parse.urlencode({"query": showName, "type": "series"})
         searchPayload = self._requestJson(
-            f"{TVDB_API_BASE_URL}/search?query={query}&type=series",
+            f"{TVDB_API_BASE_URL}/search?{query}",
             headers=headers,
         )
         searchResults = (
