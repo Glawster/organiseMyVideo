@@ -1054,13 +1054,23 @@ def testProcessFilesBuildsMetadataLibraryFromStorageBeforeSourceProcessing(
     assert "adding shows to library" in caplog.text
     messages = [record.getMessage() for record in caplog.records]
     buildIndex = next(
-        i
-        for i, message in enumerate(messages)
-        if "building metadata library from storage" in message
+        (
+            i
+            for i, message in enumerate(messages)
+            if "building metadata library from storage" in message
+        ),
+        None,
     )
     processIndex = next(
-        i for i, message in enumerate(messages) if "found 1 video file(s) to process" in message
+        (
+            i
+            for i, message in enumerate(messages)
+            if "found 1 video file(s) to process" in message
+        ),
+        None,
     )
+    assert buildIndex is not None, messages
+    assert processIndex is not None, messages
     assert buildIndex < processIndex
 
     library = json.loads(libraryPath.read_text(encoding="utf-8"))

@@ -24,6 +24,13 @@ class MetadataMixin:
         """Return the persistent metadata-library file path."""
         return METADATA_LIBRARY_FILE
 
+    def _metadataScanPath(self, baseDir: Path, stem: Optional[str] = None) -> Path:
+        """Return a synthetic media path used to reuse the existing MCM readers."""
+        suffix = Path(_METADATA_SCAN_PLACEHOLDER).suffix
+        if stem is None:
+            return baseDir / _METADATA_SCAN_PLACEHOLDER
+        return baseDir / f"{stem}{suffix}"
+
     def _newMetadataLibrary(self) -> dict:
         """Return an empty metadata-library structure."""
         return {
@@ -281,9 +288,7 @@ class MetadataMixin:
             logger.value("movie metadata storage", movieDir)
             for movieXml in sorted(movieDir.rglob("movie.xml")):
                 self._updateMetadataLibraryFromHints(
-                    self._readMovieMcmHints(
-                        movieXml.parent / _METADATA_SCAN_PLACEHOLDER
-                    )
+                    self._readMovieMcmHints(self._metadataScanPath(movieXml.parent))
                 )
 
         for tvDir in videoDirs:
@@ -296,8 +301,9 @@ class MetadataMixin:
                 for episodeXml in sorted(showDir.rglob("metadata/*.xml")):
                     self._updateMetadataLibraryFromHints(
                         self._readTvMcmHints(
-                            episodeXml.parent.parent
-                            / f"{episodeXml.stem}{Path(_METADATA_SCAN_PLACEHOLDER).suffix}"
+                            self._metadataScanPath(
+                                episodeXml.parent.parent, stem=episodeXml.stem
+                            )
                         )
                     )
 
