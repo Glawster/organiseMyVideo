@@ -11,8 +11,6 @@ thisApplication = Path(__file__).parent.name
 setApplication(thisApplication)
 
 from . import VideoOrganizer
-from .constants import GROK_SESSION_FILE
-
 logger = getLogger(includeConsole=False)
 
 
@@ -42,26 +40,6 @@ def main():
         dest="non_interactive",
         action="store_true",
         help="Run without user prompts (skip files that cannot be auto-detected)"
-    )
-    parser.add_argument(
-        "--reset",
-        action="store_true",
-        help="delete saved Grok session and credentials config files to force a fresh login on the next --grok run"
-    )
-    parser.add_argument(
-        "--import-firefox-session",
-        dest="import_firefox_session",
-        action="store_true",
-        help=(
-            "import Grok cookies from your Firefox profile into the saved session file — "
-            "log into grok.com/imagine/saved in Firefox first, then run this to avoid "
-            "the Cloudflare Turnstile challenge during --grok"
-        ),
-    )
-    parser.add_argument(
-        "--grok",
-        action="store_true",
-        help="Log into Grok and download media from saved Imagine items into --source"
     )
     parser.add_argument(
         "--torrent",
@@ -96,49 +74,7 @@ def main():
     # Create organizer and run the requested mode
     organizer = VideoOrganizer(sourceDir=args.source, dryRun=dryRun)
 
-    if args.reset:
-        resetStats = organizer.resetGrokConfig()
-        deleted_list = "\n".join(f"  {p}" for p in resetStats["deleted"]) or "  (none)"
-        not_found_list = "\n".join(f"  {p}" for p in resetStats["notFound"]) or "  (none)"
-        summary = f"""RESET SUMMARY
-Deleted:
-{deleted_list}
-Not found:
-{not_found_list}
-"""
-        drawBox(summary)
-
-    elif args.import_firefox_session:
-        ok = organizer.importFirefoxSession()
-        if ok:
-            summary = (
-                f"FIREFOX SESSION IMPORTED\n"
-                f"  Session file: {GROK_SESSION_FILE}\n\n"
-                f"Run --grok to start scraping."
-            )
-        else:
-            summary = (
-                "FIREFOX SESSION IMPORT FAILED\n\n"
-                "Make sure you are logged into grok.com in Firefox,\n"
-                "then run --import-firefox-session again.\n\n"
-                "Alternatively, run --grok and Firefox will be opened automatically."
-            )
-        drawBox(summary)
-
-    elif args.grok:
-        grokStats = organizer.scrapeGrokSavedMedia()
-        summary = f"""GROK SUMMARY
-Posts found:     {grokStats['postsFound']}
-URLs found:      {grokStats['urlsFound']}
-Files handled:   {grokStats['downloaded']}
-Already present: {grokStats['skipped']}
-Errors:          {grokStats['errors']}
-Session file:    {GROK_SESSION_FILE}
-  (delete to force re-login)
-"""
-        drawBox(summary)
-
-    elif args.torrent:
+    if args.torrent:
         torrentDir = organizer.sourceDir.parent / "Downloads" if organizer.sourceDir else Path("/mnt/video2/Downloads")
         nameStats = {"renamed": 0, "skipped": 0, "errors": 0}
         if args.clean:
