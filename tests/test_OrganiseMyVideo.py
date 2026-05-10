@@ -898,6 +898,55 @@ def testProcessFilesScrapesMissingEpisodeTitleAndWritesItBack(
     mockFetch.assert_called_once()
 
 
+def testUpdateMetadataLibraryLogsShowAddition(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
+):
+    libraryPath = tmp_path / "metadataLibrary.json"
+
+    with patch.object(
+        confirmedOrganizer, "_getMetadataLibraryPath", return_value=libraryPath
+    ):
+        with caplog.at_level("INFO"):
+            confirmedOrganizer._updateMetadataLibraryFromHints(
+                {
+                    "type": "tv",
+                    "showName": "After Life",
+                    "season": 1,
+                    "episode": 4,
+                    "episodeTitle": "Episode 4",
+                    "seriesId": "347507",
+                    "episodeId": "10751471",
+                    "metadataSource": "mcm",
+                }
+            )
+
+    assert "adding shows to library" in caplog.text
+    assert "show name: After Life" in caplog.text
+
+
+def testUpdateMetadataLibraryLogsMovieAddition(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
+):
+    libraryPath = tmp_path / "metadataLibrary.json"
+
+    with patch.object(
+        confirmedOrganizer, "_getMetadataLibraryPath", return_value=libraryPath
+    ):
+        with caplog.at_level("INFO"):
+            confirmedOrganizer._updateMetadataLibraryFromHints(
+                {
+                    "type": "movie",
+                    "title": "Inception",
+                    "year": "2010",
+                    "imdbId": "tt1375666",
+                    "metadataSource": "mcm",
+                }
+            )
+
+    assert "adding movies to library" in caplog.text
+    assert "movie name: Inception" in caplog.text
+
+
 def testProcessFilesKeepsSourceNameWhenScraperCannotFillEpisodeTitle(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer
 ):

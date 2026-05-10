@@ -211,6 +211,9 @@ class MetadataMixin:
             changed = self._storeMetadataRecord(
                 library["movies"], self._movieLibraryKeys(record), record
             )
+            if changed:
+                logger.doing("adding movies to library")
+                logger.value("movie name", record.get("title") or "unknown movie")
         else:
             record = self._normaliseTvMetadata(metadata)
             if record is None:
@@ -223,14 +226,15 @@ class MetadataMixin:
                 "metadataSource": record.get("metadataSource"),
                 "metadataUpdatedAt": record.get("metadataUpdatedAt"),
             }
-            changed = (
-                self._storeMetadataRecord(
-                    library["tv"]["series"],
-                    self._tvSeriesLibraryKeys(record),
-                    seriesRecord,
-                )
-                or changed
+            seriesChanged = self._storeMetadataRecord(
+                library["tv"]["series"],
+                self._tvSeriesLibraryKeys(record),
+                seriesRecord,
             )
+            if seriesChanged:
+                logger.doing("adding shows to library")
+                logger.value("show name", record.get("showName") or "unknown show")
+            changed = seriesChanged or changed
             changed = (
                 self._storeMetadataRecord(
                     library["tv"]["episodes"],
