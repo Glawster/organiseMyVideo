@@ -19,6 +19,7 @@ logger = getLogger()
 UNKNOWN_YEAR = "Unknown"
 _UTF8_BOM = b"\xef\xbb\xbf"
 _XML_BINARY_CHECK_WINDOW = 256
+_CURSES_STATUS_MARGIN = 10
 
 
 class VideoMixin:
@@ -293,7 +294,12 @@ class VideoMixin:
         )
 
     def _shouldUseCursesPrompts(self) -> bool:
-        """Return True when curses single-key prompts can be used safely."""
+        """
+        Return True when curses single-key prompts can be used safely.
+
+        Both stdin and stdout must be attached to a terminal so curses can read
+        keystrokes and redraw the prompt screen reliably.
+        """
         return bool(
             self.useCurses and sys.stdin.isatty() and sys.stdout.isatty()
         )
@@ -312,15 +318,21 @@ class VideoMixin:
         """Read a single menu choice using curses and return the selected key."""
 
         def _inner(stdscr) -> str:
+            """Render the prompt and return one accepted key from the terminal."""
             curses.noecho()
             stdscr.keypad(True)
             stdscr.clear()
 
             lines = prompt.splitlines() or [prompt]
+            maxRows, maxCols = stdscr.getmaxyx()
             row = 0
             for line in lines:
-                stdscr.addstr(row, 0, line)
+                if row >= maxRows - 1:
+                    break
+                if maxCols > 1:
+                    stdscr.addstr(row, 0, str(line)[: maxCols - 1])
                 row += 1
+            statusRow = min(row + 1, maxRows - 1)
             stdscr.refresh()
 
             while True:
@@ -331,6 +343,18 @@ class VideoMixin:
                     lowered = key.lower()
                     if lowered in validChoices:
                         return lowered
+                if statusRow < maxRows:
+                    stdscr.move(statusRow, 0)
+                    stdscr.clrtoeol()
+                    stdscr.addstr(
+                        statusRow,
+                        0,
+                        "Use one of: "
+                        + ", ".join(sorted(validChoices))[
+                            : max(0, maxCols - _CURSES_STATUS_MARGIN)
+                        ],
+                    )
+                    stdscr.refresh()
 
         return curses.wrapper(_inner)
 
@@ -350,7 +374,10 @@ class VideoMixin:
                     defaultChoice=defaultChoice,
                 )
             except curses.error as error:
-                logger.warning("curses prompt failed, falling back to text input: %s", error)
+                logger.warning(
+                    "curses prompt initialization failed, falling back to text input: %s",
+                    error,
+                )
         return self._readTextResponse(prompt)
 
     def getStorageWithMostSpace(self, storageDirs: List[Path]) -> Optional[Path]:
@@ -1023,7 +1050,7 @@ class VideoMixin:
             return result
         elif response.lower() in ["n", "no"]:
             rawName = self._readTextResponse(
-                "Enter new name (blank for default, enter 'quit' to skip): "
+                "Enter new name (blank to keep default, 'quit' to skip): "
             )
             if not rawName:
                 result = {"name": defaultName, "type": fileType}

@@ -17,6 +17,9 @@ logger = getLogger()
 _METADATA_SCAN_PLACEHOLDER_FILENAME = "__metadata_scan__.mkv"
 _METADATA_SCAN_SUFFIX = Path(_METADATA_SCAN_PLACEHOLDER_FILENAME).suffix
 _METADATA_LIBRARY_LOG_CONTINUATION_PREFIX = " "
+_METADATA_LIBRARY_STATE_MISSING = "missing"
+_METADATA_LIBRARY_STATE_INVALID = "invalid"
+_METADATA_LIBRARY_STATE_READY = "ready"
 
 
 class MetadataMixin:
@@ -65,7 +68,7 @@ class MetadataMixin:
 
         libraryPath = self._getMetadataLibraryPath()
         if not libraryPath.exists():
-            self._metadataLibraryLoadState = "missing"
+            self._metadataLibraryLoadState = _METADATA_LIBRARY_STATE_MISSING
             self._metadataLibraryCache = self._newMetadataLibrary()
             return self._metadataLibraryCache
 
@@ -73,11 +76,11 @@ class MetadataMixin:
             loaded = json.loads(libraryPath.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError, UnicodeDecodeError) as error:
             logger.warning("could not read metadata library %s: %s", libraryPath, error)
-            self._metadataLibraryLoadState = "invalid"
+            self._metadataLibraryLoadState = _METADATA_LIBRARY_STATE_INVALID
             loaded = self._newMetadataLibrary()
 
         if not isinstance(loaded, dict):
-            self._metadataLibraryLoadState = "invalid"
+            self._metadataLibraryLoadState = _METADATA_LIBRARY_STATE_INVALID
             loaded = self._newMetadataLibrary()
 
         loaded.setdefault("version", 1)
@@ -85,13 +88,19 @@ class MetadataMixin:
         loaded.setdefault("tv", {})
         loaded["tv"].setdefault("series", {})
         loaded["tv"].setdefault("episodes", {})
-        if getattr(self, "_metadataLibraryLoadState", None) != "invalid":
-            self._metadataLibraryLoadState = "loaded"
+        if self._metadataLibraryLoadState != _METADATA_LIBRARY_STATE_INVALID:
+            self._metadataLibraryLoadState = _METADATA_LIBRARY_STATE_READY
         self._metadataLibraryCache = loaded
         return loaded
 
     def _saveMetadataLibrary(self) -> None:
-        """Persist the in-memory metadata library for reuse on later runs."""
+        """
+        Persist the in-memory metadata library for reuse on later runs.
+
+        The cache is written even in dry-run mode because it is application state
+        used to avoid unnecessary library rescans on subsequent executions. This
+        differs from media-file operations, which still respect dry-run mode.
+        """
         library = self._loadMetadataLibrary()
         libraryPath = self._getMetadataLibraryPath()
         libraryPath.parent.mkdir(parents=True, exist_ok=True)
@@ -99,12 +108,12 @@ class MetadataMixin:
             json.dumps(library, indent=2, sort_keys=True),
             encoding="utf-8",
         )
-        self._metadataLibraryLoadState = "loaded"
+        self._metadataLibraryLoadState = _METADATA_LIBRARY_STATE_READY
 
     def _resetMetadataLibrary(self) -> None:
         """Clear in-memory metadata state before a full rebuild."""
         self._metadataLibraryCache = self._newMetadataLibrary()
-        self._metadataLibraryLoadState = "loaded"
+        self._metadataLibraryLoadState = _METADATA_LIBRARY_STATE_READY
         self._metadataMovieLogStarted = False
         self._metadataShowLogStarted = False
 
@@ -376,9 +385,12 @@ class MetadataMixin:
         """Load cached metadata, or rebuild it from storage when requested."""
         self._loadMetadataLibrary()
         libraryPath = self._getMetadataLibraryPath()
-        loadState = getattr(self, "_metadataLibraryLoadState", "loaded")
+        loadState = self._metadataLibraryLoadState or "missing"
 
-        if self.refreshMetadataLibrary or loadState in {"missing", "invalid"}:
+        if self.refreshMetadataLibrary or loadState in {
+            _METADATA_LIBRARY_STATE_MISSING,
+            _METADATA_LIBRARY_STATE_INVALID,
+        }:
             if self.refreshMetadataLibrary:
                 logger.value("refreshing metadata library", libraryPath)
             self._resetMetadataLibrary()

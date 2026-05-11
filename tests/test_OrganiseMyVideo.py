@@ -53,6 +53,58 @@ def testExplicitDryRunFalse(tmp_path: Path):
     assert org.dryRun is False
 
 
+def _savedAfterLifeMetadataLibrary() -> dict:
+    """Return a minimal saved metadata library for After Life S01E04."""
+    return {
+        "version": 1,
+        "movies": {},
+        "tv": {
+            "series": {
+                "series:347507": {
+                    "type": "tv",
+                    "showName": "After Life",
+                    "seriesId": "347507",
+                    "imdbId": None,
+                    "metadataSource": "mcm",
+                    "metadataUpdatedAt": "2026-05-11T00:00:00+00:00",
+                },
+                "show:afterlife": {
+                    "type": "tv",
+                    "showName": "After Life",
+                    "seriesId": "347507",
+                    "imdbId": None,
+                    "metadataSource": "mcm",
+                    "metadataUpdatedAt": "2026-05-11T00:00:00+00:00",
+                },
+            },
+            "episodes": {
+                "series:347507:s01e04": {
+                    "type": "tv",
+                    "showName": "After Life",
+                    "season": 1,
+                    "episode": 4,
+                    "episodeTitle": "Sic Semper Systema",
+                    "seriesId": "347507",
+                    "episodeId": "10751471",
+                    "metadataSource": "mcm",
+                    "metadataUpdatedAt": "2026-05-11T00:00:00+00:00",
+                },
+                "show:afterlife:s01e04": {
+                    "type": "tv",
+                    "showName": "After Life",
+                    "season": 1,
+                    "episode": 4,
+                    "episodeTitle": "Sic Semper Systema",
+                    "seriesId": "347507",
+                    "episodeId": "10751471",
+                    "metadataSource": "mcm",
+                    "metadataUpdatedAt": "2026-05-11T00:00:00+00:00",
+                },
+            },
+        },
+    }
+
+
 def testOptionalFlagsDefaultFalse():
     org = VideoOrganizer()
     assert org.refreshMetadataLibrary is False
@@ -1302,56 +1354,7 @@ def testProcessFilesUsesSavedMetadataLibraryWithoutStorageRescan(
 ):
     libraryPath = tmp_path / "metadataLibrary.json"
     libraryPath.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "movies": {},
-                "tv": {
-                    "series": {
-                        "series:347507": {
-                            "type": "tv",
-                            "showName": "After Life",
-                            "seriesId": "347507",
-                            "imdbId": None,
-                            "metadataSource": "mcm",
-                            "metadataUpdatedAt": "2026-05-11T00:00:00+00:00",
-                        },
-                        "show:afterlife": {
-                            "type": "tv",
-                            "showName": "After Life",
-                            "seriesId": "347507",
-                            "imdbId": None,
-                            "metadataSource": "mcm",
-                            "metadataUpdatedAt": "2026-05-11T00:00:00+00:00",
-                        },
-                    },
-                    "episodes": {
-                        "series:347507:s01e04": {
-                            "type": "tv",
-                            "showName": "After Life",
-                            "season": 1,
-                            "episode": 4,
-                            "episodeTitle": "Sic Semper Systema",
-                            "seriesId": "347507",
-                            "episodeId": "10751471",
-                            "metadataSource": "mcm",
-                            "metadataUpdatedAt": "2026-05-11T00:00:00+00:00",
-                        },
-                        "show:afterlife:s01e04": {
-                            "type": "tv",
-                            "showName": "After Life",
-                            "season": 1,
-                            "episode": 4,
-                            "episodeTitle": "Sic Semper Systema",
-                            "seriesId": "347507",
-                            "episodeId": "10751471",
-                            "metadataSource": "mcm",
-                            "metadataUpdatedAt": "2026-05-11T00:00:00+00:00",
-                        },
-                    },
-                },
-            }
-        ),
+        json.dumps(_savedAfterLifeMetadataLibrary()),
         encoding="utf-8",
     )
 
