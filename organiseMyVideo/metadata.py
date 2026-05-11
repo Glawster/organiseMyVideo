@@ -20,6 +20,7 @@ _METADATA_LIBRARY_LOG_CONTINUATION_PREFIX = " "
 _METADATA_LIBRARY_STATE_MISSING = "missing"
 _METADATA_LIBRARY_STATE_INVALID = "invalid"
 _METADATA_LIBRARY_STATE_READY = "ready"
+_OMDB_API_BASE_URL = "https://www.omdbapi.com/"
 
 
 class MetadataMixin:
@@ -237,7 +238,9 @@ class MetadataMixin:
                 changed = True
         return changed
 
-    def _firstStoredMetadataRecord(self, bucket: dict, keys: list[str]) -> Optional[dict]:
+    def _firstStoredMetadataRecord(
+        self, bucket: dict, keys: list[str]
+    ) -> Optional[dict]:
         """Return the first record found in `bucket` following the alias order in `keys`."""
         for key in keys:
             existing = bucket.get(key)
@@ -364,12 +367,18 @@ class MetadataMixin:
             logger.value("TV metadata storage", tvDir)
 
             try:
-                showDirs = sorted([showDir for showDir in tvDir.iterdir() if showDir.is_dir()])
+                showDirs = sorted(
+                    [showDir for showDir in tvDir.iterdir() if showDir.is_dir()]
+                )
             except OSError as error:
-                logger.warning("could not read TV metadata storage %s: %s", tvDir, error)
+                logger.warning(
+                    "could not read TV metadata storage %s: %s", tvDir, error
+                )
                 continue
             for showDir in showDirs:
-                self._updateMetadataLibraryFromHints(self._readTvSeriesMcmHints(showDir))
+                self._updateMetadataLibraryFromHints(
+                    self._readTvSeriesMcmHints(showDir)
+                )
                 for episodeXml in sorted(showDir.rglob("metadata/*.xml")):
                     self._updateMetadataLibraryFromHints(
                         self._readTvMcmHints(
@@ -381,7 +390,9 @@ class MetadataMixin:
 
         logger.done("building metadata library from storage")
 
-    def _prepareMetadataLibrary(self, movieDirs: list[Path], videoDirs: list[Path]) -> None:
+    def _prepareMetadataLibrary(
+        self, movieDirs: list[Path], videoDirs: list[Path]
+    ) -> None:
         """Load cached metadata, or rebuild it from storage when requested."""
         self._loadMetadataLibrary()
         libraryPath = self._getMetadataLibraryPath()
@@ -413,14 +424,35 @@ class MetadataMixin:
             merged = self._mergeMetadata(merged, library["tv"]["episodes"].get(key))
         return merged
 
+    def _resolveCanonicalTvShowName(
+        self,
+        resolved: dict,
+        libraryMatch: Optional[dict],
+        *,
+        keepExistingShowName: bool = False,
+    ) -> dict:
+        """Return *resolved* with a canonical show name when one can be inferred."""
+        if keepExistingShowName and resolved.get("showName"):
+            return resolved
+
+        canonicalShowName = (libraryMatch or {}).get("showName")
+        if canonicalShowName:
+            resolved["showName"] = canonicalShowName
+        return resolved
+
     def _enrichTvMetadata(self, tvInfo: Optional[dict]) -> Optional[dict]:
         """Resolve TV metadata from local hints, library cache, and optional scraper data."""
         resolved = self._normaliseTvMetadata(tvInfo)
         if resolved is None:
             return None
 
-        resolved = self._mergeMetadata(
-            resolved, self._lookupTvMetadataInLibrary(resolved)
+        sourceIsMcm = resolved.get("metadataSource") == "mcm"
+        libraryMatch = self._lookupTvMetadataInLibrary(resolved)
+        resolved = self._mergeMetadata(resolved, libraryMatch)
+        resolved = self._resolveCanonicalTvShowName(
+            resolved,
+            libraryMatch,
+            keepExistingShowName=sourceIsMcm,
         )
         if (
             resolved.get("episodeTitle")
@@ -443,22 +475,35 @@ class MetadataMixin:
             return resolved
 
         resolved = self._mergeMetadata(resolved, self._normaliseTvMetadata(scraped))
+        resolved = self._resolveCanonicalTvShowName(
+            resolved,
+            self._lookupTvMetadataInLibrary(resolved),
+            keepExistingShowName=sourceIsMcm,
+        )
         self._updateMetadataLibraryFromHints(resolved)
         return resolved
 
     def _fetchTvMetadataFromScraper(self, tvInfo: dict) -> Optional[dict]:
-        """Return scraped TV metadata for *tvInfo* using a custom fetcher or TVDB."""
+        """Return scraped TV metadata for *tvInfo* using a custom fetcher or built-in providers."""
         fetcher = getattr(self, "_tvMetadataFetcher", None)
         if callable(fetcher):
             try:
-                return fetcher(tvInfo)
+                custom = fetcher(tvInfo)
+                if custom:
+                    return custom
             except Exception as error:
                 logger.warning(
                     "custom TV metadata fetcher failed for %s: %s", tvInfo, error
                 )
-                return None
+        return self._fetchTvMetadataFromProviders(tvInfo)
 
-        return self._fetchTvdbMetadata(tvInfo)
+    def _fetchTvMetadataFromProviders(self, tvInfo: dict) -> Optional[dict]:
+        """Return TV metadata using the default provider order (TVDB then IMDb)."""
+        for fetcher in (self._fetchTvdbMetadata, self._fetchImdbMetadata):
+            fetched = fetcher(tvInfo)
+            if fetched and fetched.get("episodeTitle"):
+                return fetched
+        return None
 
     def _getTvdbToken(self) -> Optional[str]:
         """
@@ -663,3 +708,52 @@ class MetadataMixin:
                 return record
 
         return None
+
+    def _fetchImdbMetadata(self, tvInfo: dict) -> Optional[dict]:
+        """Fetch TV episode metadata from IMDb via OMDb when configuration is available."""
+        apiKey = os.environ.get("ORGANISEMYVIDEO_OMDB_API_KEY")
+        if not apiKey:
+            return None
+
+        season = tvInfo.get("season")
+        episode = tvInfo.get("episode")
+        if season is None or episode is None:
+            return None
+
+        query = {"apikey": apiKey, "Season": str(season), "Episode": str(episode)}
+        imdbId = tvInfo.get("imdbId")
+        if imdbId:
+            query["i"] = imdbId
+        elif tvInfo.get("showName"):
+            query["t"] = tvInfo["showName"]
+        else:
+            return None
+
+        response = self._requestJson(
+            f"{_OMDB_API_BASE_URL}?{urllib.parse.urlencode(query)}"
+        )
+        if not isinstance(response, dict):
+            return None
+        if str(response.get("Response", "")).lower() == "false":
+            return None
+
+        episodeTitle = response.get("Title")
+        if not episodeTitle:
+            return None
+
+        return self._normaliseTvMetadata(
+            {
+                "type": "tv",
+                "showName": response.get("seriesTitle")
+                or response.get("SeriesTitle")
+                or tvInfo.get("showName"),
+                "season": response.get("Season") or season,
+                "episode": response.get("Episode") or episode,
+                "episodeTitle": episodeTitle,
+                "seriesId": tvInfo.get("seriesId"),
+                "episodeId": tvInfo.get("episodeId"),
+                "imdbId": response.get("imdbID") or tvInfo.get("imdbId"),
+                "metadataSource": "imdb",
+                "metadataUpdatedAt": self._metadataUpdatedAt(),
+            }
+        )
