@@ -1,5 +1,6 @@
 """Tests for organiseMyVideo.py"""
 
+import errno
 import io
 import json
 import shutil
@@ -1482,7 +1483,7 @@ def testMoveMovieDryRunReturnsTrueWithoutMoving(
         "type": "movie",
     }
 
-    with patch("organiseMyVideo.video.shutil.move") as mockMove:
+    with patch.object(organizer, "_moveFileWithProgress") as mockMove:
         result = organizer.moveMovie(
             srcFile, movieInfo, [movieStorage], interactive=False
         )
@@ -1619,12 +1620,97 @@ def testMoveTvShowDryRunReturnsTrueWithoutMoving(
         "type": "tv",
     }
 
-    with patch("organiseMyVideo.video.shutil.move") as mockMove:
+    with patch.object(organizer, "_moveFileWithProgress") as mockMove:
         result = organizer.moveTvShow(srcFile, tvInfo, [tvStorage], interactive=False)
 
     assert result is True
     mockMove.assert_not_called()
     assert srcFile.exists()
+
+
+class _FakeTtyStream(io.StringIO):
+    def __init__(self, interactive: bool):
+        super().__init__()
+        self._interactive = interactive
+
+    def isatty(self) -> bool:
+        return self._interactive
+
+
+def testMoveFileWithProgressPrefersRename(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = tmp_path / "movie.mkv"
+    destFile = tmp_path / "dest" / "movie.mkv"
+    srcFile.write_bytes(b"content")
+    destFile.parent.mkdir()
+
+    with (
+        patch("organiseMyVideo.video.os.rename") as mockRename,
+        patch.object(confirmedOrganizer, "_copyFileWithProgress") as mockCopy,
+    ):
+        confirmedOrganizer._moveFileWithProgress(srcFile, destFile)
+
+    mockRename.assert_called_once_with(srcFile, destFile)
+    mockCopy.assert_not_called()
+
+
+def testMoveFileWithProgressFallsBackToCopyOnCrossDeviceError(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = tmp_path / "movie.mkv"
+    destFile = tmp_path / "dest" / "movie.mkv"
+    srcFile.write_bytes(b"content")
+    destFile.parent.mkdir()
+
+    with (
+        patch(
+            "organiseMyVideo.video.os.rename",
+            side_effect=OSError(errno.EXDEV, "Cross-device link"),
+        ) as mockRename,
+        patch.object(confirmedOrganizer, "_copyFileWithProgress") as mockCopy,
+    ):
+        confirmedOrganizer._moveFileWithProgress(srcFile, destFile)
+
+    mockRename.assert_called_once_with(srcFile, destFile)
+    mockCopy.assert_called_once_with(srcFile, destFile)
+
+
+def testCopyFileWithProgressWritesBarOnTty(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = tmp_path / "movie.mkv"
+    destFile = tmp_path / "dest" / "movie.mkv"
+    srcFile.write_bytes(b"progress-data")
+    destFile.parent.mkdir()
+    fakeStderr = _FakeTtyStream(interactive=True)
+
+    with patch("sys.stderr", fakeStderr):
+        confirmedOrganizer._copyFileWithProgress(srcFile, destFile)
+
+    output = fakeStderr.getvalue()
+    assert "Moving movie.mkv:" in output
+    assert "100%" in output
+    assert output.endswith("\n")
+    assert destFile.read_bytes() == b"progress-data"
+    assert not srcFile.exists()
+
+
+def testCopyFileWithProgressSkipsBarWithoutTty(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = tmp_path / "movie.mkv"
+    destFile = tmp_path / "dest" / "movie.mkv"
+    srcFile.write_bytes(b"progress-data")
+    destFile.parent.mkdir()
+    fakeStderr = _FakeTtyStream(interactive=False)
+
+    with patch("sys.stderr", fakeStderr):
+        confirmedOrganizer._copyFileWithProgress(srcFile, destFile)
+
+    assert fakeStderr.getvalue() == ""
+    assert destFile.read_bytes() == b"progress-data"
+    assert not srcFile.exists()
 
 
 # ---------------------------------------------------------------------------
