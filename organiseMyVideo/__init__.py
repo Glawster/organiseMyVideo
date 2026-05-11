@@ -55,6 +55,7 @@ class VideoOrganizer(MetadataMixin, VideoMixin, TorrentMixin):
         self.sourceDir = Path(sourceDir)
         self.dryRun = dryRun
         self._promptHelpDisplayed = False
+        self._promptDecisionCache = {}
         self._metadataLibraryCache = None
         self._metadataMovieLogStarted = False
         self._metadataShowLogStarted = False

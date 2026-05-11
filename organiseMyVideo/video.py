@@ -231,6 +231,27 @@ class VideoMixin:
         matches = difflib.get_close_matches(showName, folderNames, n=1, cutoff=0.6)
         return matches[0] if matches else None
 
+    def _getCachedPromptDecision(
+        self, defaultName: str, fileType: str
+    ) -> Optional[dict]:
+        """Return a cached same-type interactive choice for repeated TV detections."""
+        if fileType != "tv":
+            return None
+        return self._promptDecisionCache.get((fileType, defaultName.casefold()))
+
+    def _cachePromptDecision(
+        self, defaultName: str, fileType: str, result: Optional[dict]
+    ) -> None:
+        """Remember confirmed same-type TV prompt choices for this run."""
+        if (
+            fileType != "tv"
+            or result is None
+            or result.get("type") != fileType
+            or not result.get("name")
+        ):
+            return
+        self._promptDecisionCache[(fileType, defaultName.casefold())] = dict(result)
+
     def getStorageWithMostSpace(self, storageDirs: List[Path]) -> Optional[Path]:
         """
         Return the storage location with the most free space.
@@ -858,6 +879,11 @@ class VideoMixin:
             dict with 'name' and 'type' keys, or None to skip this item.
             'type' may differ from fileType when the user switches category.
         """
+        cachedResult = self._getCachedPromptDecision(defaultName, fileType)
+        if cachedResult is not None:
+            logger.value("reusing confirmed TV show", cachedResult["name"])
+            return dict(cachedResult)
+
         if not self._promptHelpDisplayed:
             print(
                 "  y/enter = confirm  |  n = rename  |  "
@@ -873,19 +899,27 @@ class VideoMixin:
         response = input(prompt).strip()
 
         if response.lower() in ["y", "yes", ""]:
-            return {"name": defaultName, "type": fileType}
+            result = {"name": defaultName, "type": fileType}
+            self._cachePromptDecision(defaultName, fileType, result)
+            return result
         elif response.lower() in ["n", "no"]:
             rawName = input(
                 f"Enter new name (blank for default, enter 'quit' to skip): "
             )
             if not rawName:
-                return {"name": defaultName, "type": fileType}
+                result = {"name": defaultName, "type": fileType}
+                self._cachePromptDecision(defaultName, fileType, result)
+                return result
             if rawName.strip().lower() == "quit":
                 return None
             strippedName = rawName.strip()
             if not strippedName:
-                return {"name": defaultName, "type": fileType}
-            return {"name": strippedName, "type": fileType}
+                result = {"name": defaultName, "type": fileType}
+                self._cachePromptDecision(defaultName, fileType, result)
+                return result
+            result = {"name": strippedName, "type": fileType}
+            self._cachePromptDecision(defaultName, fileType, result)
+            return result
         elif response.lower() in ["q", "quit"]:
             logger.info("user requested to quit")
             sys.exit(0)
@@ -903,7 +937,9 @@ class VideoMixin:
             title = input(f"  Enter movie title (default: {defaultName}): ").strip()
             return {"name": title if title else defaultName, "type": "movie"}
         else:
-            return {"name": response, "type": fileType}
+            result = {"name": response, "type": fileType}
+            self._cachePromptDecision(defaultName, fileType, result)
+            return result
 
     def moveMovie(
         self,

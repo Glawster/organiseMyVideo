@@ -1773,6 +1773,15 @@ def testPromptUserConfirmationLegendNotPrintedOnSecondCall(organizer: VideoOrgan
     mockPrint.assert_not_called()
 
 
+def testPromptUserConfirmationReusesConfirmedTvShow(organizer: VideoOrganizer):
+    with patch("builtins.input", side_effect=["y"]) as mockInput:
+        first = organizer.promptUserConfirmation("file1.mkv", "The Pitt", "tv")
+        second = organizer.promptUserConfirmation("file2.mkv", "The Pitt", "tv")
+    assert first == {"name": "The Pitt", "type": "tv"}
+    assert second == {"name": "The Pitt", "type": "tv"}
+    assert mockInput.call_count == 1
+
+
 # ---------------------------------------------------------------------------
 # moveMovie — skip and type-switch via promptUserConfirmation
 # ---------------------------------------------------------------------------
@@ -1877,6 +1886,45 @@ def testMoveTvShowSwitchesToMovie(tmp_path: Path, confirmedOrganizer: VideoOrgan
     )
     assert destFile.exists()
     assert not srcFile.exists()
+
+
+def testMoveTvShowReusesConfirmedShowWithoutSecondPrompt(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    firstFile = confirmedOrganizer.sourceDir / "The.Pitt.S01E13.Pilot.mkv"
+    secondFile = confirmedOrganizer.sourceDir / "The.Pitt.S02E07.Hour.mkv"
+    firstFile.write_bytes(b"x" * 100)
+    secondFile.write_bytes(b"x" * 100)
+    tvStorage = tmp_path / "tv1"
+    tvStorage.mkdir()
+    firstTvInfo = {
+        "showName": "The Pitt",
+        "season": 1,
+        "episode": 13,
+        "episodeTitle": "Pilot",
+        "extension": ".mkv",
+        "type": "tv",
+    }
+    secondTvInfo = {
+        "showName": "The Pitt",
+        "season": 2,
+        "episode": 7,
+        "episodeTitle": "Hour",
+        "extension": ".mkv",
+        "type": "tv",
+    }
+
+    with patch("builtins.input", side_effect=["y"]) as mockInput:
+        firstResult = confirmedOrganizer.moveTvShow(firstFile, firstTvInfo, [tvStorage])
+        secondResult = confirmedOrganizer.moveTvShow(secondFile, secondTvInfo, [tvStorage])
+
+    assert firstResult is True
+    assert secondResult is True
+    assert mockInput.call_count == 1
+    assert (
+        tvStorage / "The Pitt" / "Season 01" / "The.Pitt.S01E13.Pilot.mkv"
+    ).exists()
+    assert (tvStorage / "The Pitt" / "Season 02" / "The.Pitt.S02E07.Hour.mkv").exists()
 
 
 # ---------------------------------------------------------------------------
