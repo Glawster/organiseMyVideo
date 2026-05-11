@@ -21,6 +21,21 @@ _METADATA_SCAN_SUFFIX = Path(_METADATA_SCAN_PLACEHOLDER_FILENAME).suffix
 class MetadataMixin:
     """Methods for caching local metadata and enriching TV episode details."""
 
+    def _logMetadataLibraryAddition(self, mediaType: str, name: str) -> None:
+        """Log a grouped metadata-library addition header followed by *name*."""
+        if mediaType == "movie":
+            if not getattr(self, "_metadataMovieLogStarted", False):
+                logger.doing("adding movie to library")
+                self._metadataMovieLogStarted = True
+        elif mediaType == "show":
+            if not getattr(self, "_metadataShowLogStarted", False):
+                logger.doing("adding show to library")
+                self._metadataShowLogStarted = True
+        else:
+            raise ValueError(f"unsupported metadata log media type: {mediaType}")
+
+        logger.info(f" {name}")
+
     def _getMetadataLibraryPath(self) -> Path:
         """Return the persistent metadata-library file path."""
         return METADATA_LIBRARY_FILE
@@ -227,8 +242,9 @@ class MetadataMixin:
                 library["movies"], self._movieLibraryKeys(record), record
             )
             if changed:
-                logger.action("adding movie to library")
-                logger.value("movie name", record.get("title") or "unknown movie")
+                self._logMetadataLibraryAddition(
+                    "movie", record.get("title") or "unknown movie"
+                )
         else:
             record = self._normaliseTvMetadata(metadata)
             if record is None:
@@ -267,8 +283,9 @@ class MetadataMixin:
                 seriesRecord,
             )
             if seriesChanged:
-                logger.action("adding show to library")
-                logger.value("show name", record.get("showName") or "unknown show")
+                self._logMetadataLibraryAddition(
+                    "show", record.get("showName") or "unknown show"
+                )
             changed = seriesChanged or changed
             changed = (
                 self._storeMetadataRecord(

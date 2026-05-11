@@ -56,4 +56,6 @@ class VideoOrganizer(MetadataMixin, VideoMixin, TorrentMixin):
         self.dryRun = dryRun
         self._promptHelpDisplayed = False
         self._metadataLibraryCache = None
+        self._metadataMovieLogStarted = False
+        self._metadataShowLogStarted = False
         self._tvMetadataFetcher = None

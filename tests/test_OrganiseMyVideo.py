@@ -966,7 +966,7 @@ def testUpdateMetadataLibraryLogsShowAddition(
             )
 
     assert "adding show to library" in caplog.text
-    assert "show name: After Life" in caplog.text
+    assert "... After Life" in caplog.text
     library = json.loads(libraryPath.read_text(encoding="utf-8"))
     assert library["tv"]["series"]["series:347507"]["showName"] == "After Life"
 
@@ -1007,7 +1007,7 @@ def testUpdateMetadataLibraryLogsShowNameOnlyOncePerSeries(
 
     messages = [record.getMessage() for record in caplog.records]
     assert sum("adding show to library" in message for message in messages) == 1
-    assert sum("show name: Breaking Bad" in message for message in messages) == 1
+    assert sum("... Breaking Bad" in message for message in messages) == 1
     library = json.loads(libraryPath.read_text(encoding="utf-8"))
     assert library["tv"]["series"]["series:81189"]["showName"] == "Breaking Bad"
     assert "series:81189:s01e02" in library["tv"]["episodes"]
@@ -1059,7 +1059,7 @@ def testUpdateMetadataLibraryIgnoresEpisodeOnlySeriesChurnInLogs(
 
     messages = [record.getMessage() for record in caplog.records]
     assert sum("adding show to library" in message for message in messages) == 1
-    assert sum("show name: Imposters" in message for message in messages) == 1
+    assert sum("... Imposters" in message for message in messages) == 1
     library = json.loads(libraryPath.read_text(encoding="utf-8"))
     assert library["tv"]["series"]["series:328634"] == {
         "type": "tv",
@@ -1094,9 +1094,43 @@ def testUpdateMetadataLibraryLogsMovieAddition(
             )
 
     assert "adding movie to library" in caplog.text
-    assert "movie name: Inception" in caplog.text
+    assert "... Inception" in caplog.text
     library = json.loads(libraryPath.read_text(encoding="utf-8"))
     assert library["movies"]["title:inception:2010"]["title"] == "Inception"
+
+
+def testUpdateMetadataLibraryLogsMovieHeaderOnlyOnce(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
+):
+    libraryPath = tmp_path / "metadataLibrary.json"
+
+    with patch.object(
+        confirmedOrganizer, "_getMetadataLibraryPath", return_value=libraryPath
+    ):
+        with caplog.at_level("INFO"):
+            confirmedOrganizer._updateMetadataLibraryFromHints(
+                {
+                    "type": "movie",
+                    "title": "Inception",
+                    "year": "2010",
+                    "imdbId": "tt1375666",
+                    "metadataSource": "mcm",
+                }
+            )
+            confirmedOrganizer._updateMetadataLibraryFromHints(
+                {
+                    "type": "movie",
+                    "title": "Interstellar",
+                    "year": "2014",
+                    "imdbId": "tt0816692",
+                    "metadataSource": "mcm",
+                }
+            )
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert sum("adding movie to library" in message for message in messages) == 1
+    assert sum("... Inception" in message for message in messages) == 1
+    assert sum("... Interstellar" in message for message in messages) == 1
 
 
 def testProcessFilesBuildsMetadataLibraryFromStorageBeforeSourceProcessing(
