@@ -233,6 +233,10 @@ class MetadataMixin:
             record = self._normaliseTvMetadata(metadata)
             if record is None:
                 return metadata
+            isEpisodeHint = any(
+                record.get(field) not in (None, "")
+                for field in ("season", "episode", "episodeId", "episodeTitle")
+            )
             seriesKeys = self._tvSeriesLibraryKeys(record)
             existingSeries = self._firstStoredMetadataRecord(
                 library["tv"]["series"], seriesKeys
@@ -253,6 +257,8 @@ class MetadataMixin:
                 seriesRecord["metadataUpdatedAt"] = existingSeries.get(
                     "metadataUpdatedAt"
                 )
+            if existingSeries and isEpisodeHint:
+                seriesRecord = self._mergeMetadata(existingSeries, seriesRecord)
             seriesChanged = self._storeMetadataRecord(
                 library["tv"]["series"],
                 seriesKeys,

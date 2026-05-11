@@ -1013,6 +1013,58 @@ def testUpdateMetadataLibraryLogsShowNameOnlyOncePerSeries(
     assert "series:81189:s01e02" in library["tv"]["episodes"]
 
 
+def testUpdateMetadataLibraryIgnoresEpisodeOnlySeriesChurnInLogs(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
+):
+    libraryPath = tmp_path / "metadataLibrary.json"
+
+    with patch.object(
+        confirmedOrganizer, "_getMetadataLibraryPath", return_value=libraryPath
+    ):
+        with caplog.at_level("INFO"):
+            confirmedOrganizer._updateMetadataLibraryFromHints(
+                {
+                    "type": "tv",
+                    "showName": "Imposters",
+                    "seriesId": "328634",
+                    "metadataSource": "mcm",
+                }
+            )
+            confirmedOrganizer._updateMetadataLibraryFromHints(
+                {
+                    "type": "tv",
+                    "showName": "Imposters",
+                    "season": 1,
+                    "episode": 1,
+                    "episodeTitle": "My So-Called Wife",
+                    "seriesId": "328634",
+                    "episodeId": "600001",
+                    "imdbId": "tt5212822",
+                    "metadataSource": "mcm",
+                }
+            )
+            confirmedOrganizer._updateMetadataLibraryFromHints(
+                {
+                    "type": "tv",
+                    "showName": "Imposters",
+                    "season": 1,
+                    "episode": 2,
+                    "episodeTitle": "Three River Strokes",
+                    "seriesId": "328634",
+                    "episodeId": "600002",
+                    "imdbId": "tt5786096",
+                    "metadataSource": "mcm",
+                }
+            )
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert sum("adding show to library" in message for message in messages) == 1
+    assert sum("show name: Imposters" in message for message in messages) == 1
+    library = json.loads(libraryPath.read_text(encoding="utf-8"))
+    assert library["tv"]["series"]["series:328634"]["showName"] == "Imposters"
+    assert library["tv"]["episodes"]["episode:600002"]["episodeTitle"] == "Three River Strokes"
+
+
 def testUpdateMetadataLibraryLogsMovieAddition(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
 ):
