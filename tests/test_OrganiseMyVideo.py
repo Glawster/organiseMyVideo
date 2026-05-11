@@ -105,10 +105,10 @@ def _savedAfterLifeMetadataLibrary() -> dict:
     }
 
 
-def testOptionalFlagsDefaultFalse():
+def testOptionalFlagsDefaults():
     org = VideoOrganizer()
     assert org.refreshMetadataLibrary is False
-    assert org.useCurses is False
+    assert org.useCurses is True
 
 
 # ---------------------------------------------------------------------------
@@ -2594,7 +2594,7 @@ def testMainLogsStartupProgressBeforeProcessing(caplog: pytest.LogCaptureFixture
         sourceDir="/tmp/source",
         dryRun=True,
         refreshMetadataLibrary=False,
-        useCurses=False,
+        useCurses=True,
     )
     organizerInstance.processFiles.assert_called_once_with(interactive=True)
     assert "source directory: /tmp/source" in caplog.text
@@ -2604,7 +2604,7 @@ def testMainLogsStartupProgressBeforeProcessing(caplog: pytest.LogCaptureFixture
     assert "running file organisation mode..." in caplog.text
 
 
-def testMainPassesRefreshAndCursesFlagsToOrganizer():
+def testMainPassesRefreshAndNoCursesFlagsToOrganizer():
     organizerInstance = MagicMock()
 
     with patch("organiseMyVideo.VideoOrganizer", return_value=organizerInstance) as mockOrganizer:
@@ -2614,8 +2614,8 @@ def testMainPassesRefreshAndCursesFlagsToOrganizer():
                 "organiseMyVideo",
                 "--source",
                 "/tmp/source",
-                "--refresh-metadata-library",
-                "--curses",
+                "--refresh",
+                "--no-curses",
             ],
         ):
             omv_main.main()
@@ -2624,5 +2624,5 @@ def testMainPassesRefreshAndCursesFlagsToOrganizer():
         sourceDir="/tmp/source",
         dryRun=True,
         refreshMetadataLibrary=True,
-        useCurses=True,
+        useCurses=False,
     )

@@ -50,7 +50,7 @@ class VideoOrganizer(MetadataMixin, VideoMixin, TorrentMixin):
         sourceDir: str = "/mnt/video2/toFile",
         dryRun: bool = True,
         refreshMetadataLibrary: bool = False,
-        useCurses: bool = False,
+        useCurses: bool = True,
     ):
         """Initialise the video organizer.
 

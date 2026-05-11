@@ -41,15 +41,18 @@ def main():
         help="Run without user prompts (skip files that cannot be auto-detected)"
     )
     parser.add_argument(
+        "--refresh",
         "--refresh-metadata-library",
         dest="refresh_metadata_library",
         action="store_true",
         help="rebuild the saved metadata library from storage before processing"
     )
     parser.add_argument(
-        "--curses",
-        action="store_true",
-        help="use curses-driven single-key prompts for interactive choices"
+        "--no-curses",
+        dest="curses",
+        action="store_false",
+        default=True,
+        help="use line-based prompts instead of the default curses single-key menus"
     )
     parser.add_argument(
         "--torrent",
