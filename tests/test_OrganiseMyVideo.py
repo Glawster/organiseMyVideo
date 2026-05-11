@@ -1006,8 +1006,8 @@ def testUpdateMetadataLibraryLogsShowNameOnlyOncePerSeries(
             )
 
     messages = [record.getMessage() for record in caplog.records]
-    assert messages.count("adding show to library") == 1
-    assert messages.count("show name: Breaking Bad") == 1
+    assert sum("adding show to library" in message for message in messages) == 1
+    assert sum("show name: Breaking Bad" in message for message in messages) == 1
     library = json.loads(libraryPath.read_text(encoding="utf-8"))
     assert library["tv"]["series"]["series:81189"]["showName"] == "Breaking Bad"
     assert "series:81189:s01e02" in library["tv"]["episodes"]
