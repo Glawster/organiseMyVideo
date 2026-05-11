@@ -337,7 +337,7 @@ class VideoMixin:
             originalTerminalState = termios.tcgetattr(fileDescriptor)
         except OSError as error:
             raise OSError(
-                "single-key prompts require an interactive terminal"
+                f"single-key prompts require an interactive terminal: {error}"
             ) from error
         promptText = f"{prompt.rstrip()} "
         validChoiceText = ", ".join(sorted(validChoices))
@@ -353,7 +353,7 @@ class VideoMixin:
                 if key == "\x03":
                     raise KeyboardInterrupt
                 if key == "\x04":
-                    raise EOFError("single-key prompt cancelled")
+                    raise EOFError("single-key prompt cancelled by user (Ctrl+D)")
                 if key in ("\n", "\r") and defaultChoice is not None:
                     print(defaultChoice, file=outputStream, flush=True)
                     return defaultChoice

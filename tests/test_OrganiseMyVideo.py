@@ -1977,22 +1977,22 @@ def testReadCursesMenuChoiceKeepsPromptInScrollFlow(organizer: VideoOrganizer):
 
     fakeInput = FakeSingleKeyInput(["x", "y"])
     fakeOutput = io.StringIO()
-    input_flags = 1280
-    output_flags = 5
-    control_flags = 191
-    local_flags = 35387
-    input_speed = 15
-    output_speed = 15
+    iflag = 1280
+    oflag = 5
+    cflag = 191
+    lflag = 35387
+    ispeed = 15
+    ospeed = 15
     # Match the shape returned by termios.tcgetattr():
     # [iflag, oflag, cflag, lflag, ispeed, ospeed, cc]
     control_characters = [b"\x03", b"\x1c", b"\x7f", b"\x15", b"\x04", 0, 1]
     savedTerminalState = [
-        input_flags,
-        output_flags,
-        control_flags,
-        local_flags,
-        input_speed,
-        output_speed,
+        iflag,
+        oflag,
+        cflag,
+        lflag,
+        ispeed,
+        ospeed,
         control_characters,
     ]
 
