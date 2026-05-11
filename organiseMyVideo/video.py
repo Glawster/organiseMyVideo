@@ -1068,7 +1068,11 @@ class VideoMixin:
     def _setXmlFieldIfMissing(
         self, root: ET.Element, tag: str, value: Optional[str]
     ) -> bool:
+<<<<<<< HEAD
         """Set XML `tag` only when missing/blank and return True if changed."""
+=======
+        """Set XML *tag* only when missing/blank and return True if changed."""
+>>>>>>> 0b5c207 (feat: canonicalize TV metadata resolution and add IMDb fallback with series metadata generation)
         if value in (None, ""):
             return False
         valueText = str(value)
@@ -1113,7 +1117,11 @@ class VideoMixin:
         ET.ElementTree(root).write(destFile, encoding="utf-8", xml_declaration=True)
 
     def _writeSeriesMcmTemplate(self, showDir: Path, tvInfo: dict) -> None:
+<<<<<<< HEAD
         """Create a starter `series.xml` when enough canonical show metadata is known."""
+=======
+        """Create a starter ``series.xml`` when enough canonical show metadata is known."""
+>>>>>>> 0b5c207 (feat: canonicalize TV metadata resolution and add IMDb fallback with series metadata generation)
         showName = tvInfo.get("showName")
         seriesId = tvInfo.get("seriesId")
         imdbId = tvInfo.get("imdbId")
@@ -1130,7 +1138,11 @@ class VideoMixin:
     def _updateSeriesMetadataRoot(
         self, root: ET.Element, tvInfo: dict
     ) -> tuple[ET.Element, bool]:
+<<<<<<< HEAD
         """Update `series.xml` with resolved values while preserving existing non-empty fields."""
+=======
+        """Update ``series.xml`` with resolved values while preserving existing non-empty fields."""
+>>>>>>> 0b5c207 (feat: canonicalize TV metadata resolution and add IMDb fallback with series metadata generation)
         changed = False
         showName = tvInfo.get("showName")
         changed = self._setXmlFieldIfMissing(root, "SeriesName", showName) or changed
@@ -1145,7 +1157,11 @@ class VideoMixin:
         return root, changed
 
     def _writeSeriesMetadataFile(self, seriesFile: Path, root: ET.Element) -> None:
+<<<<<<< HEAD
         """Write `series.xml` to `seriesFile`."""
+=======
+        """Write ``series.xml`` to *seriesFile*."""
+>>>>>>> 0b5c207 (feat: canonicalize TV metadata resolution and add IMDb fallback with series metadata generation)
         logger.action("create metadata: %s", seriesFile)
         if self.dryRun:
             return
@@ -1153,7 +1169,11 @@ class VideoMixin:
         ET.ElementTree(root).write(seriesFile, encoding="utf-8", xml_declaration=True)
 
     def _ensureSeriesMetadata(self, showDir: Path, tvInfo: dict) -> None:
+<<<<<<< HEAD
         """Ensure destination show directory has `series.xml` with canonical metadata."""
+=======
+        """Ensure destination show directory has ``series.xml`` with canonical metadata."""
+>>>>>>> 0b5c207 (feat: canonicalize TV metadata resolution and add IMDb fallback with series metadata generation)
         showName = tvInfo.get("showName")
         if not showName:
             return
