@@ -22,6 +22,7 @@ UNKNOWN_YEAR = "Unknown"
 _UTF8_BOM = b"\xef\xbb\xbf"
 _XML_BINARY_CHECK_WINDOW = 256
 _MOVE_PROGRESS_BAR_WIDTH = 24
+_MOVE_PROGRESS_MIN_COLUMNS = 20
 _MOVE_PROGRESS_REDUCED_BAR_RATIO = 5
 _MOVE_PROGRESS_MIN_REDUCED_BAR_WIDTH = 8
 _MOVE_PROGRESS_CHUNK_SIZE = 1024 * 1024
@@ -496,7 +497,10 @@ class VideoMixin:
 
     def _getMoveProgressColumns(self) -> int:
         """Return move-progress columns, using an 80-column fallback and never less than 20."""
-        return max(shutil.get_terminal_size(fallback=(80, 24)).columns, 20)
+        return max(
+            shutil.get_terminal_size(fallback=(80, 24)).columns,
+            _MOVE_PROGRESS_MIN_COLUMNS,
+        )
 
     def _truncateMoveProgressText(self, text: str, maxWidth: int) -> str:
         """Truncate *text* so a move-progress line can stay within the terminal width."""
@@ -515,6 +519,7 @@ class VideoMixin:
         progress = 1.0 if totalBytes <= 0 else min(copiedBytes / totalBytes, 1.0)
         totalDisplay = totalBytes if totalBytes > 0 else copiedBytes
         progressText = f"{progress * 100:3.0f}%"
+        movingPrefix = "Moving "
 
         def _buildSuffix(barWidth: int, includeBytes: bool) -> str:
             if barWidth > 0:
@@ -548,15 +553,15 @@ class VideoMixin:
             (0, False),
         ):
             suffix = _buildSuffix(barWidth, includeBytes)
-            availableFilenameWidth = columns - len("Moving ") - len(suffix)
+            availableFilenameWidth = columns - len(movingPrefix) - len(suffix)
             if availableFilenameWidth >= 1:
                 filenameDisplay = self._truncateMoveProgressText(
                     filename, availableFilenameWidth
                 )
-                return f"Moving {filenameDisplay}{suffix}"
+                return f"{movingPrefix}{filenameDisplay}{suffix}"
 
         return self._truncateMoveProgressText(
-            f"Moving {filename}: {progressText}", columns
+            f"{movingPrefix}{filename}: {progressText}", columns
         )
 
     def _renderMoveProgress(

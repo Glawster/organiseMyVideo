@@ -1699,15 +1699,16 @@ def testCopyFileWithProgressWritesBarOnTty(
 def testRenderMoveProgressFitsWithinTerminalWidth(confirmedOrganizer: VideoOrganizer):
     fakeStderr = _FakeTtyStream(interactive=True)
     longFilename = "Very.Long.Show.Name.With.Lots.Of.Words.And.Metadata.Tags.mkv"
+    terminalWidth = 50
 
     with patch(
         "organiseMyVideo.video.shutil.get_terminal_size",
-        return_value=MagicMock(columns=50),
+        return_value=MagicMock(columns=terminalWidth),
     ):
         confirmedOrganizer._renderMoveProgress(fakeStderr, longFilename, 512, 1024)
 
     renderedLine = fakeStderr.getvalue().split("\r")[-1]
-    assert len(renderedLine) <= 50
+    assert len(renderedLine) <= terminalWidth
     assert "Moving " in renderedLine
     assert " 50%" in renderedLine
     assert "..." in renderedLine
