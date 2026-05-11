@@ -67,6 +67,7 @@ class VideoOrganizer(MetadataMixin, VideoMixin, TorrentMixin):
         self.useCurses = useCurses
         self._promptHelpDisplayed = False
         self._promptDecisionCache = {}
+        self._moveProgressDisplayWidth = 0
         self._metadataLibraryCache = None
         self._metadataLibraryLoadState = "missing"
         self._metadataMovieLogStarted = False

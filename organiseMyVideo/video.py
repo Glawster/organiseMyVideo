@@ -492,18 +492,69 @@ class VideoMixin:
             return None
         return stream
 
+    def _getMoveProgressColumns(self) -> int:
+        """Return the current terminal width used for move progress rendering."""
+        return max(shutil.get_terminal_size(fallback=(80, 24)).columns, 20)
+
+    def _truncateMoveProgressText(self, text: str, maxWidth: int) -> str:
+        """Truncate *text* so a move-progress line can stay within the terminal width."""
+        if maxWidth <= 0:
+            return ""
+        if len(text) <= maxWidth:
+            return text
+        if maxWidth <= 3:
+            return text[:maxWidth]
+        return f"{text[: maxWidth - 3]}..."
+
+    def _formatMoveProgressLine(
+        self, filename: str, copiedBytes: int, totalBytes: int, columns: int
+    ) -> str:
+        """Build a single-line progress display that fits the current terminal width."""
+        progress = 1.0 if totalBytes <= 0 else min(copiedBytes / totalBytes, 1.0)
+        totalDisplay = totalBytes if totalBytes > 0 else copiedBytes
+        progressText = f"{progress * 100:3.0f}%"
+
+        def _buildSuffix(barWidth: int, includeBytes: bool) -> str:
+            if barWidth > 0:
+                filledWidth = int(progress * barWidth)
+                bar = "#" * filledWidth + "-" * (barWidth - filledWidth)
+                suffix = f": [{bar}] {progressText}"
+            else:
+                suffix = f": {progressText}"
+            if includeBytes:
+                suffix += f" ({copiedBytes}/{totalDisplay} bytes)"
+            return suffix
+
+        reducedBarWidth = min(_MOVE_PROGRESS_BAR_WIDTH, max(columns // 5, 8))
+        for barWidth, includeBytes in (
+            (_MOVE_PROGRESS_BAR_WIDTH, True),
+            (_MOVE_PROGRESS_BAR_WIDTH, False),
+            (reducedBarWidth, True),
+            (reducedBarWidth, False),
+            (0, False),
+        ):
+            suffix = _buildSuffix(barWidth, includeBytes)
+            availableFilenameWidth = columns - len("Moving ") - len(suffix)
+            if availableFilenameWidth >= 1:
+                filenameDisplay = self._truncateMoveProgressText(
+                    filename, availableFilenameWidth
+                )
+                return f"Moving {filenameDisplay}{suffix}"
+
+        return self._truncateMoveProgressText(
+            f"Moving {filename}: {progressText}", columns
+        )
+
     def _renderMoveProgress(
         self, stream: TextIO, filename: str, copiedBytes: int, totalBytes: int
     ) -> None:
         """Render a single-line progress bar for a file move."""
-        progress = 1.0 if totalBytes <= 0 else min(copiedBytes / totalBytes, 1.0)
-        filledWidth = int(progress * _MOVE_PROGRESS_BAR_WIDTH)
-        bar = "#" * filledWidth + "-" * (_MOVE_PROGRESS_BAR_WIDTH - filledWidth)
-        totalDisplay = totalBytes if totalBytes > 0 else copiedBytes
-        stream.write(
-            f"\rMoving {filename}: [{bar}] "
-            f"{progress * 100:3.0f}% ({copiedBytes}/{totalDisplay} bytes)"
+        line = self._formatMoveProgressLine(
+            filename, copiedBytes, totalBytes, self._getMoveProgressColumns()
         )
+        paddingWidth = max(self._moveProgressDisplayWidth - len(line), 0)
+        stream.write(f"\r{line}{' ' * paddingWidth}")
+        self._moveProgressDisplayWidth = len(line)
         stream.flush()
 
     def _copyFileWithProgress(self, sourceFile: Path, destFile: Path) -> None:
@@ -544,6 +595,7 @@ class VideoMixin:
             raise
         finally:
             if progressStream is not None:
+                self._moveProgressDisplayWidth = 0
                 progressStream.write("\n")
                 progressStream.flush()
 
