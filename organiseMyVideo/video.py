@@ -1,5 +1,6 @@
 """Core video-file organisation: scan storage, parse filenames, move files, clean names."""
 
+import errno
 import difflib
 import os
 import re
@@ -10,7 +11,7 @@ import tty
 import unicodedata
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Iterable, List, Tuple, Optional
+from typing import Iterable, List, Tuple, Optional, TextIO
 
 from organiseMyProjects.logUtils import getLogger  # type: ignore
 
@@ -20,6 +21,8 @@ logger = getLogger()
 UNKNOWN_YEAR = "Unknown"
 _UTF8_BOM = b"\xef\xbb\xbf"
 _XML_BINARY_CHECK_WINDOW = 256
+_MOVE_PROGRESS_BAR_WIDTH = 24
+_MOVE_PROGRESS_CHUNK_SIZE = 1024 * 1024
 
 
 class VideoMixin:
@@ -474,6 +477,78 @@ class VideoMixin:
                 continue
             destDir.mkdir(parents=True, exist_ok=True)
             shutil.copy2(sourcePath, destPath)
+
+    def _getMoveProgressStream(self) -> Optional[TextIO]:
+        """Return the live console stream for move progress, if interactive."""
+        stream = sys.stderr
+        isatty = getattr(stream, "isatty", None)
+        if self.dryRun or not callable(isatty) or not isatty():
+            return None
+        return stream
+
+    def _renderMoveProgress(
+        self, stream: TextIO, filename: str, copiedBytes: int, totalBytes: int
+    ) -> None:
+        """Render a single-line progress bar for a file move."""
+        progress = 1.0 if totalBytes <= 0 else min(copiedBytes / totalBytes, 1.0)
+        filledWidth = int(progress * _MOVE_PROGRESS_BAR_WIDTH)
+        bar = "#" * filledWidth + "-" * (_MOVE_PROGRESS_BAR_WIDTH - filledWidth)
+        totalDisplay = totalBytes if totalBytes > 0 else copiedBytes
+        stream.write(
+            f"\rMoving {filename}: [{bar}] "
+            f"{progress * 100:3.0f}% ({copiedBytes}/{totalDisplay} bytes)"
+        )
+        stream.flush()
+
+    def _copyFileWithProgress(self, sourceFile: Path, destFile: Path) -> None:
+        """Copy *sourceFile* to *destFile* and delete the source afterwards."""
+        progressStream = self._getMoveProgressStream()
+        if progressStream is None:
+            shutil.copy2(sourceFile, destFile)
+            sourceFile.unlink()
+            return
+
+        totalBytes = sourceFile.stat().st_size
+        copiedBytes = 0
+        try:
+            with sourceFile.open("rb") as sourceHandle, destFile.open("wb") as destHandle:
+                self._renderMoveProgress(
+                    progressStream, sourceFile.name, copiedBytes, totalBytes
+                )
+                while True:
+                    chunk = sourceHandle.read(_MOVE_PROGRESS_CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    destHandle.write(chunk)
+                    copiedBytes += len(chunk)
+                    self._renderMoveProgress(
+                        progressStream, sourceFile.name, copiedBytes, totalBytes
+                    )
+            try:
+                shutil.copystat(sourceFile, destFile)
+            except PermissionError as e:
+                logger.warning(
+                    "could not preserve timestamps for %s: %s", destFile, e
+                )
+            sourceFile.unlink()
+        except Exception as e:
+            logger.error("failed to copy file %s to %s: %s", sourceFile, destFile, e)
+            if destFile.exists():
+                destFile.unlink()
+            raise
+        finally:
+            if progressStream is not None:
+                progressStream.write("\n")
+                progressStream.flush()
+
+    def _moveFileWithProgress(self, sourceFile: Path, destFile: Path) -> None:
+        """Move *sourceFile* to *destFile*, showing progress for copy fallback only."""
+        try:
+            os.rename(sourceFile, destFile)
+        except OSError as e:
+            if e.errno != errno.EXDEV:
+                raise
+            self._copyFileWithProgress(sourceFile, destFile)
 
     def _extractEpisodeMetadataImage(self, metadataFile: Path) -> Optional[str]:
         """Return the local metadata image filename referenced by an MCM episode XML file."""
@@ -1190,7 +1265,7 @@ class VideoMixin:
 
         try:
             destDir.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(sourceFile), str(destFile))
+            self._moveFileWithProgress(sourceFile, destFile)
             self._replicateMovieMetadata(sourceFile, destDir)
             logger.action(f"movie moved successfully: {destFile}")
             return True
@@ -1281,7 +1356,7 @@ class VideoMixin:
 
         try:
             seasonDir.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(sourceFile), str(destFile))
+            self._moveFileWithProgress(sourceFile, destFile)
             self._replicateTvMetadata(
                 sourceFile, showDir, seasonDir, tvInfo, destFile=destFile
             )
