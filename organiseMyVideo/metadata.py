@@ -25,18 +25,18 @@ class MetadataMixin:
     def _logMetadataLibraryAddition(self, mediaType: str, name: str) -> None:
         """Log a grouped metadata-library addition header followed by ``name``."""
         if mediaType == "movie":
-            if not getattr(self, "_metadataMovieLogStarted", False):
+            if not self._metadataMovieLogStarted:
                 logger.doing("adding movie to library")
                 self._metadataMovieLogStarted = True
         elif mediaType == "show":
-            if not getattr(self, "_metadataShowLogStarted", False):
+            if not self._metadataShowLogStarted:
                 logger.doing("adding show to library")
                 self._metadataShowLogStarted = True
         else:
             raise ValueError(f"unsupported metadata log media type: {mediaType}")
 
-        # Use a bare continuation line so library additions read as a compact
-        # grouped list beneath the one-time header for that media type.
+        # Use logger.info() here instead of logger.value() so additions render as
+        # a compact grouped list beneath the one-time header for that media type.
         logger.info(f"{_METADATA_LIBRARY_LOG_CONTINUATION_PREFIX}{name}")
 
     def _getMetadataLibraryPath(self) -> Path:

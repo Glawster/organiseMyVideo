@@ -1131,6 +1131,9 @@ def testUpdateMetadataLibraryLogsMovieHeaderOnlyOnce(
     assert sum("adding movie to library" in message for message in messages) == 1
     assert sum("... Inception" in message for message in messages) == 1
     assert sum("... Interstellar" in message for message in messages) == 1
+    library = json.loads(libraryPath.read_text(encoding="utf-8"))
+    assert library["movies"]["title:inception:2010"]["title"] == "Inception"
+    assert library["movies"]["title:interstellar:2014"]["title"] == "Interstellar"
 
 
 def testProcessFilesBuildsMetadataLibraryFromStorageBeforeSourceProcessing(
