@@ -528,16 +528,18 @@ class VideoMixin:
                 shutil.copystat(sourceFile, destFile)
             except PermissionError as e:
                 logger.warning(
-                    "could not preserve metadata for moved file %s: %s", destFile, e
+                    "could not preserve timestamps for %s: %s", destFile, e
                 )
             sourceFile.unlink()
-        except Exception:
+        except Exception as e:
+            logger.error("failed to copy file %s to %s: %s", sourceFile, destFile, e)
             if destFile.exists():
                 destFile.unlink()
             raise
         finally:
-            progressStream.write("\n")
-            progressStream.flush()
+            if progressStream is not None:
+                progressStream.write("\n")
+                progressStream.flush()
 
     def _moveFileWithProgress(self, sourceFile: Path, destFile: Path) -> None:
         """Move *sourceFile* to *destFile*, showing progress for copy fallback only."""
