@@ -1040,29 +1040,24 @@ class VideoMixin:
             )
             self._promptHelpDisplayed = True
 
+        if fileType == "tv":
+            prompt = (
+                f"\nTV Show detected: '{defaultName}'\n"
+                "Is this correct?  (y/n/q/t/m or enter new name): "
+            )
+        else:
+            prompt = (
+                f"\nMovie detected: '{defaultName}'\n"
+                "Is this correct? (y/n/q/t/m or enter new name): "
+            )
+
         if self._shouldUseCursesPrompts():
-            if fileType == "tv":
-                prompt = (
-                    f"TV Show detected: '{defaultName}'\n"
-                    "Press y/Enter to confirm, n to rename, "
-                    "t for TV, m for movie, q to quit."
-                )
-            else:
-                prompt = (
-                    f"Movie detected: '{defaultName}'\n"
-                    "Press y/Enter to confirm, n to rename, "
-                    "t for TV, m for movie, q to quit."
-                )
             response = self._readMenuChoice(
                 prompt,
                 validChoices={"y", "n", "q", "t", "m"},
                 defaultChoice="y",
             )
         else:
-            if fileType == "tv":
-                prompt = f"\nTV Show detected: '{defaultName}'\nIs this correct?  (y/n/q/t/m or enter new name): "
-            else:
-                prompt = f"\nMovie detected: '{defaultName}'\nIs this correct? (y/n/q/t/m or enter new name): "
             response = self._readTextResponse(prompt)
 
         if response.lower() in ["y", "yes", ""]:

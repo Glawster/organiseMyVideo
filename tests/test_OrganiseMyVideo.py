@@ -1960,7 +1960,11 @@ def testPromptUserConfirmationUsesCursesMenuWhenEnabled(organizer: VideoOrganize
     ):
         result = organizer.promptUserConfirmation("file.mkv", "My Show", "tv")
     assert result == {"name": "My Show", "type": "tv"}
-    mockMenu.assert_called_once()
+    mockMenu.assert_called_once_with(
+        "\nTV Show detected: 'My Show'\nIs this correct?  (y/n/q/t/m or enter new name): ",
+        validChoices={"y", "n", "q", "t", "m"},
+        defaultChoice="y",
+    )
     mockText.assert_not_called()
 
 
