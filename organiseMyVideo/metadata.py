@@ -201,7 +201,7 @@ class MetadataMixin:
         return changed
 
     def _firstStoredMetadataRecord(self, bucket: dict, keys: list[str]) -> Optional[dict]:
-        """Return the first stored record found under *keys*."""
+        """Return the first record already stored in `bucket` under any key in `keys`."""
         for key in keys:
             existing = bucket.get(key)
             if existing is not None:
@@ -246,6 +246,10 @@ class MetadataMixin:
                 "metadataUpdatedAt": record.get("metadataUpdatedAt"),
             }
             if existingSeries and not metadata.get("metadataUpdatedAt"):
+                # Preserve the stored series timestamp so episode-only updates do
+                # not make the series record look newly changed each time. When
+                # metadataUpdatedAt is present in `metadata`, that explicit
+                # series-level refresh timestamp should win instead.
                 seriesRecord["metadataUpdatedAt"] = existingSeries.get(
                     "metadataUpdatedAt"
                 )
