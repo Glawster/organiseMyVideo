@@ -1061,7 +1061,16 @@ def testUpdateMetadataLibraryIgnoresEpisodeOnlySeriesChurnInLogs(
     assert sum("adding show to library" in message for message in messages) == 1
     assert sum("show name: Imposters" in message for message in messages) == 1
     library = json.loads(libraryPath.read_text(encoding="utf-8"))
-    assert library["tv"]["series"]["series:328634"]["showName"] == "Imposters"
+    assert library["tv"]["series"]["series:328634"] == {
+        "type": "tv",
+        "showName": "Imposters",
+        "seriesId": "328634",
+        "imdbId": None,
+        "metadataSource": "mcm",
+        "metadataUpdatedAt": library["tv"]["series"]["series:328634"][
+            "metadataUpdatedAt"
+        ],
+    }
     assert library["tv"]["episodes"]["episode:600002"]["episodeTitle"] == "Three River Strokes"
 
 
