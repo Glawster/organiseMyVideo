@@ -485,10 +485,14 @@ class MetadataMixin:
 
     def _fetchTvMetadataFromScraper(self, tvInfo: dict) -> Optional[dict]:
 <<<<<<< HEAD
+<<<<<<< HEAD
         """Return scraped TV metadata for `tvInfo` using a custom fetcher or built-in providers."""
 =======
         """Return scraped TV metadata for *tvInfo* using a custom fetcher or built-in providers."""
 >>>>>>> 0b5c207 (feat: canonicalize TV metadata resolution and add IMDb fallback with series metadata generation)
+=======
+        """Return scraped TV metadata for `tvInfo` using a custom fetcher or built-in providers."""
+>>>>>>> 370e7a6 (test: expand TV metadata coverage and refine metadata docstrings)
         fetcher = getattr(self, "_tvMetadataFetcher", None)
         if callable(fetcher):
             try:
