@@ -1977,11 +1977,12 @@ def testReadCursesMenuChoiceKeepsPromptInScrollFlow(organizer: VideoOrganizer):
 
     fakeInput = FakeSingleKeyInput(["x", "y"])
     fakeOutput = io.StringIO()
+    savedTerminalState = [1280, 5, 191, 35387, 15, 15, [b"\x03", b"\x1c", b"\x7f", b"\x15", b"\x04", 0, 1]]
 
     with (
         patch("sys.stdin", fakeInput),
         patch("sys.stdout", fakeOutput),
-        patch("termios.tcgetattr", return_value=["saved"]),
+        patch("termios.tcgetattr", return_value=savedTerminalState),
         patch("tty.setraw"),
         patch("termios.tcsetattr") as mockRestore,
     ):
@@ -1999,7 +2000,7 @@ def testReadCursesMenuChoiceKeepsPromptInScrollFlow(organizer: VideoOrganizer):
     status = output.index("Use one of: m, n, q, t, y")
     secondPrompt = output.rindex("TV Show detected: 'My Show'")
     assert firstPrompt < status < secondPrompt
-    mockRestore.assert_called_once_with(0, 1, ["saved"])
+    mockRestore.assert_called_once_with(0, 1, savedTerminalState)
 
 
 # ---------------------------------------------------------------------------

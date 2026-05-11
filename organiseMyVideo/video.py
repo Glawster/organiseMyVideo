@@ -348,9 +348,15 @@ class VideoMixin:
                 )
                 _showPrompt()
         finally:
-            termios.tcsetattr(
-                fileDescriptor, termios.TCSADRAIN, originalTerminalState
-            )
+            try:
+                termios.tcsetattr(
+                    fileDescriptor, termios.TCSADRAIN, originalTerminalState
+                )
+            except OSError as error:
+                logger.warning(
+                    "failed to restore terminal state after single-key prompt: %s",
+                    error,
+                )
 
     def _readMenuChoice(
         self,
