@@ -305,9 +305,13 @@ class VideoMixin:
 
     def _extractEpisodeMetadataImage(self, metadataFile: Path) -> Optional[str]:
         """Return the local metadata image filename referenced by an MCM episode XML file."""
+        xmlText = self._readXmlText(metadataFile)
+        if xmlText is None:
+            return None
+
         try:
-            root = ET.fromstring(metadataFile.read_text(encoding="utf-8"))
-        except (ET.ParseError, OSError, UnicodeDecodeError) as e:
+            root = ET.fromstring(xmlText)
+        except ET.ParseError as e:
             logger.warning("could not parse metadata XML %s: %s", metadataFile, e)
             return None
 
@@ -323,10 +327,31 @@ class VideoMixin:
         if not xmlFile.exists() or not xmlFile.is_file():
             return None
 
+        xmlText = self._readXmlText(xmlFile)
+        if xmlText is None:
+            return None
+
         try:
-            return ET.fromstring(xmlFile.read_text(encoding="utf-8"))
-        except (ET.ParseError, OSError, UnicodeDecodeError) as e:
+            return ET.fromstring(xmlText)
+        except ET.ParseError as e:
             logger.warning("could not parse metadata XML %s: %s", xmlFile, e)
+            return None
+
+    def _readXmlText(self, xmlFile: Path) -> Optional[str]:
+        """Return decoded XML text for *xmlFile*, or None for unreadable/non-XML files."""
+        try:
+            raw = xmlFile.read_bytes()
+        except OSError as e:
+            logger.warning("could not read metadata XML %s: %s", xmlFile, e)
+            return None
+
+        stripped = raw.lstrip(b"\xef\xbb\xbf \t\r\n")
+        if not stripped or b"\x00" in stripped[:256] or not stripped.startswith(b"<"):
+            return None
+
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
             return None
 
     def _readFirstXmlText(

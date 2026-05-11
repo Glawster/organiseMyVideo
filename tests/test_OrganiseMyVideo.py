@@ -237,6 +237,43 @@ def testReadMcmHintsInfersTvSeasonFromSeriesAndPath(
     }
 
 
+def testReadMcmHintsIgnoresBinaryEpisodeXmlWithoutWarning(
+    sourceDir: Path, organizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
+):
+    showDir = sourceDir / "Royal Marines Commando School"
+    seasonDir = showDir / "Season 1"
+    metadataDir = seasonDir / "metadata"
+    metadataDir.mkdir(parents=True)
+    videoFile = seasonDir / "episode.mkv"
+    videoFile.write_bytes(b"x" * 50)
+    (showDir / "series.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Series>
+    <SeriesName>Royal Marines Commando School</SeriesName>
+    <SeriesID>999999</SeriesID>
+</Series>
+""",
+        encoding="utf-8",
+    )
+    (metadataDir / "episode.xml").write_bytes(b"\x00" * 4096)
+
+    with caplog.at_level("WARNING"):
+        hints = organizer._readMcmHints(videoFile)
+
+    assert hints == {
+        "type": "tv",
+        "showName": "Royal Marines Commando School",
+        "season": 1,
+        "episode": None,
+        "episodeTitle": None,
+        "imdbId": None,
+        "seriesId": "999999",
+        "episodeId": None,
+        "metadataSource": "mcm",
+    }
+    assert "could not parse metadata XML" not in caplog.text
+
+
 # ---------------------------------------------------------------------------
 # scanStorageLocations
 # ---------------------------------------------------------------------------
