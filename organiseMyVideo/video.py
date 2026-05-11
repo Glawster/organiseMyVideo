@@ -493,7 +493,7 @@ class VideoMixin:
         return stream
 
     def _getMoveProgressColumns(self) -> int:
-        """Return the current terminal width used for move progress rendering."""
+        """Return terminal columns for move progress, falling back to 80 with a 20-column floor."""
         return max(shutil.get_terminal_size(fallback=(80, 24)).columns, 20)
 
     def _truncateMoveProgressText(self, text: str, maxWidth: int) -> str:
@@ -525,7 +525,13 @@ class VideoMixin:
                 suffix += f" ({copiedBytes}/{totalDisplay} bytes)"
             return suffix
 
+        # When the terminal is narrow, keep a smaller bar so some filename text
+        # can still fit; one fifth of the terminal with an 8-character minimum
+        # keeps the bar readable without forcing line wrapping.
         reducedBarWidth = min(_MOVE_PROGRESS_BAR_WIDTH, max(columns // 5, 8))
+        # Degrade in stages so the line stays on one terminal row: prefer the
+        # full bar with byte counts, then remove byte counts, then use a
+        # smaller bar, and finally fall back to percentage only.
         for barWidth, includeBytes in (
             (_MOVE_PROGRESS_BAR_WIDTH, True),
             (_MOVE_PROGRESS_BAR_WIDTH, False),
