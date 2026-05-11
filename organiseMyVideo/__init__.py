@@ -45,15 +45,26 @@ class VideoOrganizer(MetadataMixin, VideoMixin, TorrentMixin):
       and clean torrent-site name prefixes.
     """
 
-    def __init__(self, sourceDir: str = "/mnt/video2/toFile", dryRun: bool = True):
+    def __init__(
+        self,
+        sourceDir: str = "/mnt/video2/toFile",
+        dryRun: bool = True,
+        refreshMetadataLibrary: bool = False,
+        useCurses: bool = False,
+    ):
         """Initialise the video organizer.
 
         Args:
             sourceDir: Source directory containing files to organise.
             dryRun: If ``True``, show what would be done without making changes.
+            refreshMetadataLibrary: Rebuild the saved metadata library from
+                storage before processing files.
+            useCurses: Use curses-based single-key prompts when interactive.
         """
         self.sourceDir = Path(sourceDir)
         self.dryRun = dryRun
+        self.refreshMetadataLibrary = refreshMetadataLibrary
+        self.useCurses = useCurses
         self._promptHelpDisplayed = False
         self._promptDecisionCache = {}
         self._metadataLibraryCache = None

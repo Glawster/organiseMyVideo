@@ -1,5 +1,6 @@
 """Core video-file organisation: scan storage, parse filenames, move files, clean names."""
 
+import curses
 import difflib
 import os
 import re
@@ -290,6 +291,67 @@ class VideoMixin:
         self._promptDecisionCache[self._makePromptCacheKey(defaultName, fileType)] = dict(
             result
         )
+
+    def _shouldUseCursesPrompts(self) -> bool:
+        """Return True when curses single-key prompts can be used safely."""
+        return bool(
+            self.useCurses and sys.stdin.isatty() and sys.stdout.isatty()
+        )
+
+    def _readTextResponse(self, prompt: str) -> str:
+        """Read a line of text using the standard input prompt."""
+        return input(prompt).strip()
+
+    def _readCursesMenuChoice(
+        self,
+        prompt: str,
+        *,
+        validChoices: set[str],
+        defaultChoice: Optional[str] = None,
+    ) -> str:
+        """Read a single menu choice using curses and return the selected key."""
+
+        def _inner(stdscr) -> str:
+            curses.noecho()
+            stdscr.keypad(True)
+            stdscr.clear()
+
+            lines = prompt.splitlines() or [prompt]
+            row = 0
+            for line in lines:
+                stdscr.addstr(row, 0, line)
+                row += 1
+            stdscr.refresh()
+
+            while True:
+                key = stdscr.get_wch()
+                if key in ("\n", "\r") and defaultChoice is not None:
+                    return defaultChoice
+                if isinstance(key, str):
+                    lowered = key.lower()
+                    if lowered in validChoices:
+                        return lowered
+
+        return curses.wrapper(_inner)
+
+    def _readMenuChoice(
+        self,
+        prompt: str,
+        *,
+        validChoices: set[str],
+        defaultChoice: Optional[str] = None,
+    ) -> str:
+        """Read a menu selection using curses when enabled, otherwise plain input."""
+        if self._shouldUseCursesPrompts():
+            try:
+                return self._readCursesMenuChoice(
+                    prompt,
+                    validChoices=validChoices,
+                    defaultChoice=defaultChoice,
+                )
+            except curses.error as error:
+                logger.warning("curses prompt failed, falling back to text input: %s", error)
+        return self._readTextResponse(prompt)
 
     def getStorageWithMostSpace(self, storageDirs: List[Path]) -> Optional[Path]:
         """
@@ -930,20 +992,38 @@ class VideoMixin:
             )
             self._promptHelpDisplayed = True
 
-        if fileType == "tv":
-            prompt = f"\nTV Show detected: '{defaultName}'\nIs this correct?  (y/n/q/t/m or enter new name): "
+        if self._shouldUseCursesPrompts():
+            if fileType == "tv":
+                prompt = (
+                    f"TV Show detected: '{defaultName}'\n"
+                    "Press y/Enter to confirm, n to rename, "
+                    "t for TV, m for movie, q to quit."
+                )
+            else:
+                prompt = (
+                    f"Movie detected: '{defaultName}'\n"
+                    "Press y/Enter to confirm, n to rename, "
+                    "t for TV, m for movie, q to quit."
+                )
+            response = self._readMenuChoice(
+                prompt,
+                validChoices={"y", "n", "q", "t", "m"},
+                defaultChoice="y",
+            )
         else:
-            prompt = f"\nMovie detected: '{defaultName}'\nIs this correct? (y/n/q/t/m or enter new name): "
-
-        response = input(prompt).strip()
+            if fileType == "tv":
+                prompt = f"\nTV Show detected: '{defaultName}'\nIs this correct?  (y/n/q/t/m or enter new name): "
+            else:
+                prompt = f"\nMovie detected: '{defaultName}'\nIs this correct? (y/n/q/t/m or enter new name): "
+            response = self._readTextResponse(prompt)
 
         if response.lower() in ["y", "yes", ""]:
             result = {"name": defaultName, "type": fileType}
             self._cachePromptDecision(defaultName, fileType, result)
             return result
         elif response.lower() in ["n", "no"]:
-            rawName = input(
-                f"Enter new name (blank for default, enter 'quit' to skip): "
+            rawName = self._readTextResponse(
+                "Enter new name (blank for default, enter 'quit' to skip): "
             )
             if not rawName:
                 result = {"name": defaultName, "type": fileType}
@@ -970,10 +1050,14 @@ class VideoMixin:
                 bestMatch = self.findBestMatchingTvShow(parsedShowName, videoDirs)
                 if bestMatch:
                     tvDefault = bestMatch
-            showName = input(f"  Enter show name (default: {tvDefault}): ").strip()
+            showName = self._readTextResponse(
+                f"  Enter show name (default: {tvDefault}): "
+            )
             return {"name": showName if showName else tvDefault, "type": "tv"}
         elif response.lower() == "m":
-            title = input(f"  Enter movie title (default: {defaultName}): ").strip()
+            title = self._readTextResponse(
+                f"  Enter movie title (default: {defaultName}): "
+            )
             return {"name": title if title else defaultName, "type": "movie"}
         else:
             result = {"name": response, "type": fileType}
@@ -1019,7 +1103,7 @@ class VideoMixin:
                 return False
             if result["type"] == "tv":
                 # User wants to process as TV show instead
-                season = input("  Season number (default 1): ").strip()
+                season = self._readTextResponse("  Season number (default 1): ")
                 season = int(season) if season.isdigit() else 1
                 tvInfo = {
                     "showName": result["name"],
@@ -1119,7 +1203,7 @@ class VideoMixin:
                 return False
             if result["type"] == "movie":
                 # User wants to process as movie instead
-                year = input("  Year (e.g. 2020): ").strip()
+                year = self._readTextResponse("  Year (e.g. 2020): ")
                 movieInfo = {
                     "title": result["name"],
                     "year": year if year else "Unknown",
@@ -1318,7 +1402,7 @@ class VideoMixin:
         for d in videoDirs:
             logger.value("  - ", d)
 
-        self._buildMetadataLibraryFromStorage(movieDirs, videoDirs)
+        self._prepareMetadataLibrary(movieDirs, videoDirs)
 
         if not movieDirs:
             logger.error("No Movie storage locations found")
@@ -1377,19 +1461,18 @@ class VideoMixin:
             logger.info("could not determine if movie or TV show")
 
             if interactive:
-                fileType = (
-                    input("  Is this a (m)ovie or (t)v show? (or 's' to skip): ")
-                    .strip()
-                    .lower()
+                fileType = self._readMenuChoice(
+                    "Could not determine type.\nPress m for movie, t for TV show, or s to skip.",
+                    validChoices={"m", "t", "s"},
                 )
 
                 if fileType == "m" and movieDirs:
                     # Prompt for movie info
-                    title = input(
+                    title = self._readTextResponse(
                         f"  Movie title (default: {videoFile.stem}): "
-                    ).strip()
+                    )
                     title = title if title else videoFile.stem
-                    year = input("  Year:  ").strip()
+                    year = self._readTextResponse("  Year:  ")
 
                     if year:
                         movieInfo = {
@@ -1406,9 +1489,11 @@ class VideoMixin:
 
                 elif fileType == "t" and videoDirs:
                     # Prompt for TV show info
-                    show = input(f"  Show name (default: {videoFile.stem}): ").strip()
+                    show = self._readTextResponse(
+                        f"  Show name (default: {videoFile.stem}): "
+                    )
                     show = show if show else videoFile.stem
-                    season = input("  Season number: ").strip()
+                    season = self._readTextResponse("  Season number: ")
 
                     if season and season.isdigit():
                         tvInfo = {

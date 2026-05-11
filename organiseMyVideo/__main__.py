@@ -41,6 +41,17 @@ def main():
         help="Run without user prompts (skip files that cannot be auto-detected)"
     )
     parser.add_argument(
+        "--refresh-metadata-library",
+        dest="refresh_metadata_library",
+        action="store_true",
+        help="rebuild the saved metadata library from storage before processing"
+    )
+    parser.add_argument(
+        "--curses",
+        action="store_true",
+        help="use curses-driven single-key prompts for interactive choices"
+    )
+    parser.add_argument(
         "--torrent",
         action="store_true",
         help="scan the torrent download directory for .torrent files and delete those already in the library (dry-run by default; use --confirm to delete)"
@@ -84,7 +95,12 @@ def main():
     logger.doing("initializing video organizer")
     from . import VideoOrganizer
 
-    organizer = VideoOrganizer(sourceDir=args.source, dryRun=dryRun)
+    organizer = VideoOrganizer(
+        sourceDir=args.source,
+        dryRun=dryRun,
+        refreshMetadataLibrary=args.refresh_metadata_library,
+        useCurses=args.curses,
+    )
     logger.done("video organizer initialized")
 
     if args.torrent:

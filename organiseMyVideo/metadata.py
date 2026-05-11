@@ -65,6 +65,7 @@ class MetadataMixin:
 
         libraryPath = self._getMetadataLibraryPath()
         if not libraryPath.exists():
+            self._metadataLibraryLoadState = "missing"
             self._metadataLibraryCache = self._newMetadataLibrary()
             return self._metadataLibraryCache
 
@@ -72,9 +73,11 @@ class MetadataMixin:
             loaded = json.loads(libraryPath.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError, UnicodeDecodeError) as error:
             logger.warning("could not read metadata library %s: %s", libraryPath, error)
+            self._metadataLibraryLoadState = "invalid"
             loaded = self._newMetadataLibrary()
 
         if not isinstance(loaded, dict):
+            self._metadataLibraryLoadState = "invalid"
             loaded = self._newMetadataLibrary()
 
         loaded.setdefault("version", 1)
@@ -82,21 +85,28 @@ class MetadataMixin:
         loaded.setdefault("tv", {})
         loaded["tv"].setdefault("series", {})
         loaded["tv"].setdefault("episodes", {})
+        if getattr(self, "_metadataLibraryLoadState", None) != "invalid":
+            self._metadataLibraryLoadState = "loaded"
         self._metadataLibraryCache = loaded
         return loaded
 
     def _saveMetadataLibrary(self) -> None:
-        """Persist the in-memory metadata library unless running in dry-run mode."""
+        """Persist the in-memory metadata library for reuse on later runs."""
         library = self._loadMetadataLibrary()
         libraryPath = self._getMetadataLibraryPath()
-        if self.dryRun:
-            return
-
         libraryPath.parent.mkdir(parents=True, exist_ok=True)
         libraryPath.write_text(
             json.dumps(library, indent=2, sort_keys=True),
             encoding="utf-8",
         )
+        self._metadataLibraryLoadState = "loaded"
+
+    def _resetMetadataLibrary(self) -> None:
+        """Clear in-memory metadata state before a full rebuild."""
+        self._metadataLibraryCache = self._newMetadataLibrary()
+        self._metadataLibraryLoadState = "loaded"
+        self._metadataMovieLogStarted = False
+        self._metadataShowLogStarted = False
 
     def _metadataUpdatedAt(self) -> str:
         """Return an ISO-8601 UTC timestamp for metadata updates."""
@@ -361,6 +371,21 @@ class MetadataMixin:
                     )
 
         logger.done("building metadata library from storage")
+
+    def _prepareMetadataLibrary(self, movieDirs: list[Path], videoDirs: list[Path]) -> None:
+        """Load cached metadata, or rebuild it from storage when requested."""
+        self._loadMetadataLibrary()
+        libraryPath = self._getMetadataLibraryPath()
+        loadState = getattr(self, "_metadataLibraryLoadState", "loaded")
+
+        if self.refreshMetadataLibrary or loadState in {"missing", "invalid"}:
+            if self.refreshMetadataLibrary:
+                logger.value("refreshing metadata library", libraryPath)
+            self._resetMetadataLibrary()
+            self._buildMetadataLibraryFromStorage(movieDirs, videoDirs)
+            return
+
+        logger.value("using saved metadata library", libraryPath)
 
     def _lookupTvMetadataInLibrary(self, tvInfo: Optional[dict]) -> Optional[dict]:
         """Return the best matching TV metadata record from the library."""

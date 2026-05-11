@@ -59,7 +59,11 @@ python organiseMyVideo.py --torrent --clean --confirm
 | `--confirm` | Execute changes. Without this flag the script runs as a dry-run |
 | `--clean` | Clean the source directory, or when combined with `--torrent`, also clean prefixed `.torrent` names |
 | `--non-interactive` | Skip prompts for files that cannot be auto-detected |
+| `--refresh-metadata-library` | Rebuild the saved metadata library from storage before processing files |
+| `--curses` | Use curses-driven single-key prompts for interactive menu choices |
 | `--torrent` | Run torrent cleanup against the `Downloads` folder that sits next to the source directory |
+
+The metadata library is saved in `~/.config/organiseMyVideo/metadataLibrary.json` and reused on later runs. Use `--refresh-metadata-library` when you want to rescan the existing movie and TV storage roots and rebuild that cache.
 
 ---
 
@@ -82,6 +86,8 @@ Is this correct?  (y/n/q/t/m or enter new name):
 | `t` | Switch type to **TV show** and prompt for show name |
 | `m` | Switch type to **Movie** and prompt for title |
 | Any other text | Use that text as the name directly |
+
+With `--curses`, the main menu choices (`y`, `n`, `t`, `m`, `q`, and Enter to confirm) are handled as single key presses. Text entry prompts such as rename, show title, movie title, season, and year still use normal line input.
 
 ### Rename sub-prompt
 

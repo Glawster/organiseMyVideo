@@ -53,6 +53,12 @@ def testExplicitDryRunFalse(tmp_path: Path):
     assert org.dryRun is False
 
 
+def testOptionalFlagsDefaultFalse():
+    org = VideoOrganizer()
+    assert org.refreshMetadataLibrary is False
+    assert org.useCurses is False
+
+
 # ---------------------------------------------------------------------------
 # parseTvFilename
 # ---------------------------------------------------------------------------
@@ -1263,6 +1269,156 @@ def testProcessFilesBuildsMetadataLibraryFromStorageBeforeSourceProcessing(
     )
 
 
+def testUpdateMetadataLibraryPersistsEvenInDryRun(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    libraryPath = tmp_path / "metadataLibrary.json"
+
+    with patch.object(organizer, "_getMetadataLibraryPath", return_value=libraryPath):
+        organizer._updateMetadataLibraryFromHints(
+            {
+                "type": "tv",
+                "showName": "After Life",
+                "season": 1,
+                "episode": 4,
+                "episodeTitle": "Sic Semper Systema",
+                "seriesId": "347507",
+                "episodeId": "10751471",
+                "metadataSource": "mcm",
+            }
+        )
+
+    assert libraryPath.exists()
+    library = json.loads(libraryPath.read_text(encoding="utf-8"))
+    assert library["tv"]["episodes"]["series:347507:s01e04"]["episodeTitle"] == (
+        "Sic Semper Systema"
+    )
+
+
+def testProcessFilesUsesSavedMetadataLibraryWithoutStorageRescan(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    libraryPath = tmp_path / "metadataLibrary.json"
+    libraryPath.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "movies": {},
+                "tv": {
+                    "series": {
+                        "series:347507": {
+                            "type": "tv",
+                            "showName": "After Life",
+                            "seriesId": "347507",
+                            "imdbId": None,
+                            "metadataSource": "mcm",
+                            "metadataUpdatedAt": "2026-05-11T00:00:00+00:00",
+                        },
+                        "show:afterlife": {
+                            "type": "tv",
+                            "showName": "After Life",
+                            "seriesId": "347507",
+                            "imdbId": None,
+                            "metadataSource": "mcm",
+                            "metadataUpdatedAt": "2026-05-11T00:00:00+00:00",
+                        },
+                    },
+                    "episodes": {
+                        "series:347507:s01e04": {
+                            "type": "tv",
+                            "showName": "After Life",
+                            "season": 1,
+                            "episode": 4,
+                            "episodeTitle": "Sic Semper Systema",
+                            "seriesId": "347507",
+                            "episodeId": "10751471",
+                            "metadataSource": "mcm",
+                            "metadataUpdatedAt": "2026-05-11T00:00:00+00:00",
+                        },
+                        "show:afterlife:s01e04": {
+                            "type": "tv",
+                            "showName": "After Life",
+                            "season": 1,
+                            "episode": 4,
+                            "episodeTitle": "Sic Semper Systema",
+                            "seriesId": "347507",
+                            "episodeId": "10751471",
+                            "metadataSource": "mcm",
+                            "metadataUpdatedAt": "2026-05-11T00:00:00+00:00",
+                        },
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    srcFile = confirmedOrganizer.sourceDir / "After.Life.S01E04.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    with patch.object(
+        confirmedOrganizer, "_getMetadataLibraryPath", return_value=libraryPath
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([movieStorage], [tvStorage]),
+        ):
+            with patch.object(
+                confirmedOrganizer, "_buildMetadataLibraryFromStorage"
+            ) as mockBuild:
+                with patch.object(
+                    confirmedOrganizer, "_fetchTvMetadataFromScraper"
+                ) as mockFetch:
+                    with caplog.at_level("INFO"):
+                        confirmedOrganizer.processFiles(interactive=False)
+
+    destFile = (
+        tvStorage
+        / "After Life"
+        / "Season 01"
+        / "After.Life.S01E04.Sic.Semper.Systema.mkv"
+    )
+    assert destFile.exists()
+    assert not srcFile.exists()
+    mockBuild.assert_not_called()
+    mockFetch.assert_not_called()
+    assert "using saved metadata library" in caplog.text
+
+
+def testProcessFilesRefreshMetadataLibraryRebuildsStorageCache(tmp_path: Path):
+    sourceDir = tmp_path / "source"
+    sourceDir.mkdir()
+    organizer = VideoOrganizer(
+        sourceDir=str(sourceDir),
+        dryRun=True,
+        refreshMetadataLibrary=True,
+    )
+    libraryPath = tmp_path / "metadataLibrary.json"
+    libraryPath.write_text(json.dumps({"version": 1, "movies": {}, "tv": {}}), encoding="utf-8")
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    with patch.object(organizer, "_getMetadataLibraryPath", return_value=libraryPath):
+        with patch.object(
+            organizer,
+            "scanStorageLocations",
+            return_value=([movieStorage], [tvStorage]),
+        ):
+            with patch.object(organizer, "_buildMetadataLibraryFromStorage") as mockBuild:
+                organizer.processFiles(interactive=False)
+
+    mockBuild.assert_called_once_with([movieStorage], [tvStorage])
+
+
 def testProcessFilesKeepsSourceNameWhenScraperCannotFillEpisodeTitle(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer
 ):
@@ -1789,6 +1945,19 @@ def testPromptUserConfirmationDoesNotReuseMovieChoices(organizer: VideoOrganizer
     assert first == {"name": "Inception (2010)", "type": "movie"}
     assert second == {"name": "Inception (2010)", "type": "movie"}
     assert mockInput.call_count == 2
+
+
+def testPromptUserConfirmationUsesCursesMenuWhenEnabled(organizer: VideoOrganizer):
+    organizer.useCurses = True
+    with (
+        patch.object(organizer, "_shouldUseCursesPrompts", return_value=True),
+        patch.object(organizer, "_readCursesMenuChoice", return_value="y") as mockMenu,
+        patch.object(organizer, "_readTextResponse") as mockText,
+    ):
+        result = organizer.promptUserConfirmation("file.mkv", "My Show", "tv")
+    assert result == {"name": "My Show", "type": "tv"}
+    mockMenu.assert_called_once()
+    mockText.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -2418,10 +2587,39 @@ def testMainLogsStartupProgressBeforeProcessing(caplog: pytest.LogCaptureFixture
             with caplog.at_level("INFO"):
                 omv_main.main()
 
-    mockOrganizer.assert_called_once_with(sourceDir="/tmp/source", dryRun=True)
+    mockOrganizer.assert_called_once_with(
+        sourceDir="/tmp/source",
+        dryRun=True,
+        refreshMetadataLibrary=False,
+        useCurses=False,
+    )
     organizerInstance.processFiles.assert_called_once_with(interactive=True)
     assert "source directory: /tmp/source" in caplog.text
     assert "mode: process" in caplog.text
     assert "initializing video organizer..." in caplog.text
     assert "...video organizer initialized" in caplog.text
     assert "running file organisation mode..." in caplog.text
+
+
+def testMainPassesRefreshAndCursesFlagsToOrganizer():
+    organizerInstance = MagicMock()
+
+    with patch("organiseMyVideo.VideoOrganizer", return_value=organizerInstance) as mockOrganizer:
+        with patch(
+            "sys.argv",
+            [
+                "organiseMyVideo",
+                "--source",
+                "/tmp/source",
+                "--refresh-metadata-library",
+                "--curses",
+            ],
+        ):
+            omv_main.main()
+
+    mockOrganizer.assert_called_once_with(
+        sourceDir="/tmp/source",
+        dryRun=True,
+        refreshMetadataLibrary=True,
+        useCurses=True,
+    )
