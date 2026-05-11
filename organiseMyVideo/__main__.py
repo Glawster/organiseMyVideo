@@ -19,11 +19,13 @@ def main():
         description="Organize video files into movies and TV show directories"
     )
     parser.add_argument(
+        "-s",
         "--source",
         default="/mnt/video2/toFile",
         help="Source directory containing files to organize (default: /mnt/video2/toFile)"
     )
     parser.add_argument(
+        "-y",
         '--confirm',
         default=False,
         action='store_true',
@@ -42,7 +44,6 @@ def main():
     )
     parser.add_argument(
         "--refresh",
-        "--refresh-metadata-library",
         dest="refresh_metadata_library",
         action="store_true",
         help="rebuild the saved metadata library from storage before processing"
