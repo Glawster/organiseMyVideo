@@ -375,7 +375,7 @@ class VideoMixin:
                 )
             except OSError as error:
                 logger.warning(
-                    "failed to restore terminal state after single-key prompt: %s",
+                    "Failed to restore terminal state after single-key prompt: %s",
                     error,
                 )
 
