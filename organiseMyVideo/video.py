@@ -231,26 +231,65 @@ class VideoMixin:
         matches = difflib.get_close_matches(showName, folderNames, n=1, cutoff=0.6)
         return matches[0] if matches else None
 
+    def _makePromptCacheKey(self, defaultName: str, fileType: str) -> tuple[str, str]:
+        """
+        Return a stable cache key for repeated interactive prompt choices.
+
+        ``casefold()`` is used for robust case-insensitive matching, including
+        international characters that are not normalised as well by ``lower()``.
+
+        Returns:
+            Tuple of ``(fileType, normalized_name)`` used for cache lookup.
+        """
+        return (fileType, defaultName.casefold())
+
     def _getCachedPromptDecision(
         self, defaultName: str, fileType: str
     ) -> Optional[dict]:
-        """Return a cached same-type interactive choice for repeated TV detections."""
+        """
+        Return a cached same-type interactive choice for repeated TV detections.
+
+        TV shows are cached because many files in the same run share the same
+        show name, while movie detections are typically one-off decisions.
+        Returned values are copied so callers cannot mutate cached state.
+        This shallow copy assumes cached values remain simple scalar fields.
+
+        Returns:
+            Prompt decision dict with ``name`` and ``type`` keys, or ``None``
+            when no cached TV decision exists.
+        """
         if fileType != "tv":
             return None
-        return self._promptDecisionCache.get((fileType, defaultName.casefold()))
+        cachedResult = self._promptDecisionCache.get(
+            self._makePromptCacheKey(defaultName, fileType)
+        )
+        return dict(cachedResult) if cachedResult is not None else None
 
     def _cachePromptDecision(
         self, defaultName: str, fileType: str, result: Optional[dict]
     ) -> None:
-        """Remember confirmed same-type TV prompt choices for this run."""
+        """
+        Remember confirmed same-type TV prompt choices for this run.
+
+        Args:
+            defaultName: Detected name shown to the user.
+            fileType: Detected file type; only ``"tv"`` results are cached.
+            result: Prompt decision dict, or ``None`` when nothing should be
+                cached.
+
+        A defensive copy is stored so later mutations to *result* do not change
+        the cached choice reused by subsequent episodes.
+        """
         if (
             fileType != "tv"
             or result is None
-            or result.get("type") != fileType
             or not result.get("name")
+            or result.get("type") != fileType
         ):
             return
-        self._promptDecisionCache[(fileType, defaultName.casefold())] = dict(result)
+        self._promptDecisionCache[self._makePromptCacheKey(defaultName, fileType)] = dict(
+            result
+        )
 
     def getStorageWithMostSpace(self, storageDirs: List[Path]) -> Optional[Path]:
         """
@@ -882,7 +921,7 @@ class VideoMixin:
         cachedResult = self._getCachedPromptDecision(defaultName, fileType)
         if cachedResult is not None:
             logger.value("reusing confirmed TV show", cachedResult["name"])
-            return dict(cachedResult)
+            return cachedResult
 
         if not self._promptHelpDisplayed:
             print(

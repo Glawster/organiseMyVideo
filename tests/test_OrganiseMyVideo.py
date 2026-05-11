@@ -1782,6 +1782,15 @@ def testPromptUserConfirmationReusesConfirmedTvShow(organizer: VideoOrganizer):
     assert mockInput.call_count == 1
 
 
+def testPromptUserConfirmationDoesNotReuseMovieChoices(organizer: VideoOrganizer):
+    with patch("builtins.input", side_effect=["y", "y"]) as mockInput:
+        first = organizer.promptUserConfirmation("file1.mkv", "Inception (2010)", "movie")
+        second = organizer.promptUserConfirmation("file2.mkv", "Inception (2010)", "movie")
+    assert first == {"name": "Inception (2010)", "type": "movie"}
+    assert second == {"name": "Inception (2010)", "type": "movie"}
+    assert mockInput.call_count == 2
+
+
 # ---------------------------------------------------------------------------
 # moveMovie — skip and type-switch via promptUserConfirmation
 # ---------------------------------------------------------------------------
@@ -1888,7 +1897,7 @@ def testMoveTvShowSwitchesToMovie(tmp_path: Path, confirmedOrganizer: VideoOrgan
     assert not srcFile.exists()
 
 
-def testMoveTvShowReusesConfirmedShowWithoutSecondPrompt(
+def testMoveTvShowReusesConfirmedChoiceWithoutSecondPrompt(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer
 ):
     firstFile = confirmedOrganizer.sourceDir / "The.Pitt.S01E13.Pilot.mkv"
