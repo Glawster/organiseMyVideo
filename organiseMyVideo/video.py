@@ -16,6 +16,8 @@ from .constants import VIDEO_EXTENSIONS, _PREFIX_REGEX
 
 logger = getLogger()
 UNKNOWN_YEAR = "Unknown"
+_UTF8_BOM = b"\xef\xbb\xbf"
+_XML_BINARY_CHECK_WINDOW = 256
 
 
 class VideoMixin:
@@ -345,8 +347,15 @@ class VideoMixin:
             logger.warning("could not read metadata XML %s: %s", xmlFile, e)
             return None
 
-        stripped = raw.lstrip(b"\xef\xbb\xbf \t\r\n")
-        if not stripped or b"\x00" in stripped[:256] or not stripped.startswith(b"<"):
+        stripped = raw.lstrip(_UTF8_BOM + b" \t\r\n")
+        if (
+            not stripped
+            or b"\x00" in stripped[:_XML_BINARY_CHECK_WINDOW]
+            or not (
+                stripped.startswith(b"<?xml")
+                or re.match(rb"<[A-Za-z_!?]", stripped) is not None
+            )
+        ):
             return None
 
         try:

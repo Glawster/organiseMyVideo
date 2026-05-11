@@ -10,6 +10,7 @@ import pytest
 # conftest.py stubs organiseMyProjects before this import
 import organiseMyVideo.__main__ as omv_main
 from organiseMyVideo import VideoOrganizer
+from organiseMyVideo.video import _XML_BINARY_CHECK_WINDOW
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -255,7 +256,7 @@ def testReadMcmHintsIgnoresBinaryEpisodeXmlWithoutWarning(
 """,
         encoding="utf-8",
     )
-    (metadataDir / "episode.xml").write_bytes(b"\x00" * 4096)
+    (metadataDir / "episode.xml").write_bytes(b"\x00" * _XML_BINARY_CHECK_WINDOW)
 
     with caplog.at_level("WARNING"):
         hints = organizer._readMcmHints(videoFile)
