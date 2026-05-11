@@ -1977,7 +1977,22 @@ def testReadCursesMenuChoiceKeepsPromptInScrollFlow(organizer: VideoOrganizer):
 
     fakeInput = FakeSingleKeyInput(["x", "y"])
     fakeOutput = io.StringIO()
-    savedTerminalState = [1280, 5, 191, 35387, 15, 15, [b"\x03", b"\x1c", b"\x7f", b"\x15", b"\x04", 0, 1]]
+    inputFlags = 1280
+    outputFlags = 5
+    controlFlags = 191
+    localFlags = 35387
+    inputSpeed = 15
+    outputSpeed = 15
+    controlCharacters = [b"\x03", b"\x1c", b"\x7f", b"\x15", b"\x04", 0, 1]
+    savedTerminalState = [
+        inputFlags,
+        outputFlags,
+        controlFlags,
+        localFlags,
+        inputSpeed,
+        outputSpeed,
+        controlCharacters,
+    ]
 
     with (
         patch("sys.stdin", fakeInput),

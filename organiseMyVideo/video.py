@@ -320,7 +320,7 @@ class VideoMixin:
         outputStream = sys.stdout
         fileDescriptor = inputStream.fileno()
         originalTerminalState = termios.tcgetattr(fileDescriptor)
-        promptText = prompt if prompt.endswith(" ") else f"{prompt} "
+        promptText = f"{prompt.rstrip()} "
         validChoiceText = ", ".join(sorted(validChoices))
 
         def _showPrompt() -> None:
@@ -333,6 +333,8 @@ class VideoMixin:
                 key = inputStream.read(1)
                 if key == "\x03":
                     raise KeyboardInterrupt
+                if key == "\x04":
+                    raise EOFError("single-key prompt cancelled")
                 if key in ("\n", "\r") and defaultChoice is not None:
                     print(defaultChoice, file=outputStream, flush=True)
                     return defaultChoice
