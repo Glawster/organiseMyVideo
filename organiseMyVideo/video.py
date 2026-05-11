@@ -1068,7 +1068,7 @@ class VideoMixin:
     def _setXmlFieldIfMissing(
         self, root: ET.Element, tag: str, value: Optional[str]
     ) -> bool:
-        """Set XML *tag* only when missing/blank and return True if changed."""
+        """Set XML `tag` only when missing/blank and return True if changed."""
         if value in (None, ""):
             return False
         valueText = str(value)
@@ -1113,7 +1113,7 @@ class VideoMixin:
         ET.ElementTree(root).write(destFile, encoding="utf-8", xml_declaration=True)
 
     def _writeSeriesMcmTemplate(self, showDir: Path, tvInfo: dict) -> None:
-        """Create a starter ``series.xml`` when enough canonical show metadata is known."""
+        """Create a starter `series.xml` when enough canonical show metadata is known."""
         showName = tvInfo.get("showName")
         seriesId = tvInfo.get("seriesId")
         imdbId = tvInfo.get("imdbId")
@@ -1130,7 +1130,7 @@ class VideoMixin:
     def _updateSeriesMetadataRoot(
         self, root: ET.Element, tvInfo: dict
     ) -> tuple[ET.Element, bool]:
-        """Update ``series.xml`` with resolved values while preserving existing non-empty fields."""
+        """Update `series.xml` with resolved values while preserving existing non-empty fields."""
         changed = False
         showName = tvInfo.get("showName")
         changed = self._setXmlFieldIfMissing(root, "SeriesName", showName) or changed
@@ -1145,7 +1145,7 @@ class VideoMixin:
         return root, changed
 
     def _writeSeriesMetadataFile(self, seriesFile: Path, root: ET.Element) -> None:
-        """Write ``series.xml`` to *seriesFile*."""
+        """Write `series.xml` to `seriesFile`."""
         logger.action("create metadata: %s", seriesFile)
         if self.dryRun:
             return
@@ -1153,7 +1153,7 @@ class VideoMixin:
         ET.ElementTree(root).write(seriesFile, encoding="utf-8", xml_declaration=True)
 
     def _ensureSeriesMetadata(self, showDir: Path, tvInfo: dict) -> None:
-        """Ensure destination show directory has ``series.xml`` with canonical metadata."""
+        """Ensure destination show directory has `series.xml` with canonical metadata."""
         showName = tvInfo.get("showName")
         if not showName:
             return
