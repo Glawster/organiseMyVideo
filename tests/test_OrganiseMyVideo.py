@@ -1995,6 +1995,10 @@ def testReadCursesMenuChoiceKeepsPromptInScrollFlow(organizer: VideoOrganizer):
     output = fakeOutput.getvalue()
     assert output.count("TV Show detected: 'My Show'") == 2
     assert "Use one of: m, n, q, t, y" in output
+    firstPrompt = output.index("TV Show detected: 'My Show'")
+    status = output.index("Use one of: m, n, q, t, y")
+    secondPrompt = output.rindex("TV Show detected: 'My Show'")
+    assert firstPrompt < status < secondPrompt
     mockRestore.assert_called_once_with(0, 1, ["saved"])
 
 

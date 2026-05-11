@@ -334,7 +334,7 @@ class VideoMixin:
                 if key == "\x03":
                     raise KeyboardInterrupt
                 if key in ("\n", "\r") and defaultChoice is not None:
-                    print(file=outputStream, flush=True)
+                    print(defaultChoice, file=outputStream, flush=True)
                     return defaultChoice
                 if key:
                     lowered = key.lower()
@@ -367,7 +367,7 @@ class VideoMixin:
                     validChoices=validChoices,
                     defaultChoice=defaultChoice,
                 )
-            except (OSError, RuntimeError, termios.error, ValueError) as error:
+            except OSError as error:
                 logger.warning(
                     "single-key prompt initialization failed, falling back to text input: %s",
                     error,
