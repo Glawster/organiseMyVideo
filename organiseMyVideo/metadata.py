@@ -200,6 +200,14 @@ class MetadataMixin:
                 changed = True
         return changed
 
+    def _firstStoredMetadataRecord(self, bucket: dict, keys: list[str]) -> Optional[dict]:
+        """Return the first stored record found under *keys*."""
+        for key in keys:
+            existing = bucket.get(key)
+            if existing is not None:
+                return existing
+        return None
+
     def _updateMetadataLibraryFromHints(
         self, metadata: Optional[dict]
     ) -> Optional[dict]:
@@ -219,11 +227,16 @@ class MetadataMixin:
                 library["movies"], self._movieLibraryKeys(record), record
             )
             if changed:
+                logger.action("adding movie to library")
                 logger.value("movie name", record.get("title") or "unknown movie")
         else:
             record = self._normaliseTvMetadata(metadata)
             if record is None:
                 return metadata
+            seriesKeys = self._tvSeriesLibraryKeys(record)
+            existingSeries = self._firstStoredMetadataRecord(
+                library["tv"]["series"], seriesKeys
+            )
             seriesRecord = {
                 "type": "tv",
                 "showName": record.get("showName"),
@@ -232,12 +245,17 @@ class MetadataMixin:
                 "metadataSource": record.get("metadataSource"),
                 "metadataUpdatedAt": record.get("metadataUpdatedAt"),
             }
+            if existingSeries and not metadata.get("metadataUpdatedAt"):
+                seriesRecord["metadataUpdatedAt"] = existingSeries.get(
+                    "metadataUpdatedAt"
+                )
             seriesChanged = self._storeMetadataRecord(
                 library["tv"]["series"],
-                self._tvSeriesLibraryKeys(record),
+                seriesKeys,
                 seriesRecord,
             )
             if seriesChanged:
+                logger.action("adding show to library")
                 logger.value("show name", record.get("showName") or "unknown show")
             changed = seriesChanged or changed
             changed = (
@@ -283,7 +301,6 @@ class MetadataMixin:
             if not movieDir.exists() or not movieDir.is_dir():
                 continue
             logger.value("movie metadata storage", movieDir)
-            logger.action("adding movies to library")
 
             for movieXml in sorted(movieDir.rglob("movie.xml")):
                 self._updateMetadataLibraryFromHints(
@@ -294,7 +311,6 @@ class MetadataMixin:
             if not tvDir.exists() or not tvDir.is_dir():
                 continue
             logger.value("TV metadata storage", tvDir)
-            logger.action("adding TV show to library")
 
             try:
                 showDirs = sorted([showDir for showDir in tvDir.iterdir() if showDir.is_dir()])

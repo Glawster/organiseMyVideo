@@ -971,6 +971,48 @@ def testUpdateMetadataLibraryLogsShowAddition(
     assert library["tv"]["series"]["series:347507"]["showName"] == "After Life"
 
 
+def testUpdateMetadataLibraryLogsShowNameOnlyOncePerSeries(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
+):
+    libraryPath = tmp_path / "metadataLibrary.json"
+
+    with patch.object(
+        confirmedOrganizer, "_getMetadataLibraryPath", return_value=libraryPath
+    ):
+        with caplog.at_level("INFO"):
+            confirmedOrganizer._updateMetadataLibraryFromHints(
+                {
+                    "type": "tv",
+                    "showName": "Breaking Bad",
+                    "season": 1,
+                    "episode": 1,
+                    "episodeTitle": "Pilot",
+                    "seriesId": "81189",
+                    "episodeId": "3492321",
+                    "metadataSource": "mcm",
+                }
+            )
+            confirmedOrganizer._updateMetadataLibraryFromHints(
+                {
+                    "type": "tv",
+                    "showName": "Breaking Bad",
+                    "season": 1,
+                    "episode": 2,
+                    "episodeTitle": "Cat's in the Bag...",
+                    "seriesId": "81189",
+                    "episodeId": "3492322",
+                    "metadataSource": "mcm",
+                }
+            )
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert messages.count("adding show to library") == 1
+    assert messages.count("show name: Breaking Bad") == 1
+    library = json.loads(libraryPath.read_text(encoding="utf-8"))
+    assert library["tv"]["series"]["series:81189"]["showName"] == "Breaking Bad"
+    assert "series:81189:s01e02" in library["tv"]["episodes"]
+
+
 def testUpdateMetadataLibraryLogsMovieAddition(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
 ):
