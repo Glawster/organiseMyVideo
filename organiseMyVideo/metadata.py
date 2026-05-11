@@ -16,13 +16,14 @@ from .constants import METADATA_LIBRARY_FILE, TVDB_API_BASE_URL
 logger = getLogger()
 _METADATA_SCAN_PLACEHOLDER_FILENAME = "__metadata_scan__.mkv"
 _METADATA_SCAN_SUFFIX = Path(_METADATA_SCAN_PLACEHOLDER_FILENAME).suffix
+_METADATA_LIBRARY_LOG_CONTINUATION_PREFIX = " "
 
 
 class MetadataMixin:
     """Methods for caching local metadata and enriching TV episode details."""
 
     def _logMetadataLibraryAddition(self, mediaType: str, name: str) -> None:
-        """Log a grouped metadata-library addition header followed by *name*."""
+        """Log a grouped metadata-library addition header followed by ``name``."""
         if mediaType == "movie":
             if not getattr(self, "_metadataMovieLogStarted", False):
                 logger.doing("adding movie to library")
@@ -34,7 +35,9 @@ class MetadataMixin:
         else:
             raise ValueError(f"unsupported metadata log media type: {mediaType}")
 
-        logger.info(f" {name}")
+        # Use a bare continuation line so library additions read as a compact
+        # grouped list beneath the one-time header for that media type.
+        logger.info(f"{_METADATA_LIBRARY_LOG_CONTINUATION_PREFIX}{name}")
 
     def _getMetadataLibraryPath(self) -> Path:
         """Return the persistent metadata-library file path."""
