@@ -492,10 +492,7 @@ class VideoMixin:
         """Render a single-line progress bar for a file move."""
         progress = 1.0 if totalBytes <= 0 else min(copiedBytes / totalBytes, 1.0)
         filledWidth = int(progress * _MOVE_PROGRESS_BAR_WIDTH)
-        bar = (
-            "#" * filledWidth
-            + "-" * (_MOVE_PROGRESS_BAR_WIDTH - filledWidth)
-        )
+        bar = "#" * filledWidth + "-" * (_MOVE_PROGRESS_BAR_WIDTH - filledWidth)
         totalDisplay = totalBytes if totalBytes > 0 else copiedBytes
         stream.write(
             f"\rMoving {filename}: [{bar}] "
@@ -527,7 +524,12 @@ class VideoMixin:
                     self._renderMoveProgress(
                         progressStream, sourceFile.name, copiedBytes, totalBytes
                     )
-            shutil.copystat(sourceFile, destFile)
+            try:
+                shutil.copystat(sourceFile, destFile)
+            except PermissionError as e:
+                logger.warning(
+                    "could not preserve metadata for moved file %s: %s", destFile, e
+                )
             sourceFile.unlink()
         except Exception:
             if destFile.exists():
