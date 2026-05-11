@@ -484,7 +484,7 @@ class MetadataMixin:
         return resolved
 
     def _fetchTvMetadataFromScraper(self, tvInfo: dict) -> Optional[dict]:
-        """Return scraped TV metadata for *tvInfo* using a custom fetcher or built-in providers."""
+        """Return scraped TV metadata for `tvInfo` using a custom fetcher or built-in providers."""
         fetcher = getattr(self, "_tvMetadataFetcher", None)
         if callable(fetcher):
             try:
