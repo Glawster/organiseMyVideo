@@ -310,8 +310,8 @@ class VideoMixin:
     def _readTextResponse(self, prompt: str) -> str:
         """Read a line of text using the standard input prompt."""
         promptStream = sys.stdout
-        stderrIsTty = getattr(sys.stderr, "isatty", None)
-        if callable(stderrIsTty) and stderrIsTty():
+        stderrIsTtyMethod = getattr(sys.stderr, "isatty", None)
+        if callable(stderrIsTtyMethod) and stderrIsTtyMethod():
             promptStream = sys.stderr
         promptStream.write(prompt)
         promptStream.flush()
