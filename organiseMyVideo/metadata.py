@@ -71,7 +71,6 @@ class MetadataMixin:
         """Persist the in-memory metadata library unless running in dry-run mode."""
         library = self._loadMetadataLibrary()
         libraryPath = self._getMetadataLibraryPath()
-        logger.action("update metadata library: %s", libraryPath)
         if self.dryRun:
             return
 
@@ -220,7 +219,6 @@ class MetadataMixin:
                 library["movies"], self._movieLibraryKeys(record), record
             )
             if changed:
-                logger.action("adding movie to library")
                 logger.value("movie name", record.get("title") or "unknown movie")
         else:
             record = self._normaliseTvMetadata(metadata)
@@ -240,7 +238,6 @@ class MetadataMixin:
                 seriesRecord,
             )
             if seriesChanged:
-                logger.action("adding show to library")
                 logger.value("show name", record.get("showName") or "unknown show")
             changed = seriesChanged or changed
             changed = (
@@ -286,6 +283,8 @@ class MetadataMixin:
             if not movieDir.exists() or not movieDir.is_dir():
                 continue
             logger.value("movie metadata storage", movieDir)
+            logger.action("adding movies to library")
+
             for movieXml in sorted(movieDir.rglob("movie.xml")):
                 self._updateMetadataLibraryFromHints(
                     self._readMovieMcmHints(self._metadataScanPath(movieXml.parent))
@@ -295,6 +294,8 @@ class MetadataMixin:
             if not tvDir.exists() or not tvDir.is_dir():
                 continue
             logger.value("TV metadata storage", tvDir)
+            logger.action("adding TV show to library")
+
             try:
                 showDirs = sorted([showDir for showDir in tvDir.iterdir() if showDir.is_dir()])
             except OSError as error:

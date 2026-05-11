@@ -15,7 +15,10 @@ from pathlib import (
     Path,
 )  # re-exported so patch("organiseMyVideo.Path") still works in tests
 
-from organiseMyProjects.logUtils import getLogger  # type: ignore
+from organiseMyProjects.logUtils import getLogger, setApplication  # type: ignore
+
+thisApplication = Path(__file__).parent.name
+setApplication(thisApplication)
 
 from .constants import (
     VIDEO_EXTENSIONS,
