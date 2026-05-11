@@ -496,7 +496,7 @@ class VideoMixin:
         return stream
 
     def _getMoveProgressColumns(self) -> int:
-        """Return move-progress columns, using an 80-column fallback and never less than 20."""
+        """Return move-progress columns, using an 80-column fallback and a 20-column readability floor."""
         return max(
             shutil.get_terminal_size(fallback=(80, 24)).columns,
             _MOVE_PROGRESS_MIN_COLUMNS,
@@ -543,8 +543,8 @@ class VideoMixin:
             return suffix
 
         # When the terminal is narrow, keep a smaller bar so some filename text
-        # can still fit; one fifth of the terminal with an 8-character minimum
-        # keeps the bar readable without forcing line wrapping.
+        # can still fit; a ratio of 5 means one fifth of the terminal width,
+        # with an 8-character minimum to stay readable without forcing wraps.
         reducedBarWidth = self._getReducedMoveProgressBarWidth(columns)
         # Degrade in stages so the line stays on one terminal row: prefer the
         # full bar with byte counts, then remove byte counts, then use a
