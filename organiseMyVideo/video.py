@@ -309,7 +309,13 @@ class VideoMixin:
 
     def _readTextResponse(self, prompt: str) -> str:
         """Read a line of text using the standard input prompt."""
-        return input(prompt).strip()
+        promptStream = sys.stdout
+        stderrIsTty = getattr(sys.stderr, "isatty", None)
+        if callable(stderrIsTty) and stderrIsTty():
+            promptStream = sys.stderr
+        promptStream.write(prompt)
+        promptStream.flush()
+        return input().strip()
 
     def _readCursesMenuChoice(
         self,
@@ -1107,6 +1113,13 @@ class VideoMixin:
         if cachedResult is not None:
             logger.value("reusing confirmed TV show", cachedResult["name"])
             return cachedResult
+
+        if not self._promptHelpDisplayed:
+            print(
+                "  y/enter = confirm  |  n = rename  |  "
+                "t = treat as TV show  |  m = treat as movie  |  q = quit"
+            )
+            self._promptHelpDisplayed = True
 
         if fileType == "tv":
             prompt = (

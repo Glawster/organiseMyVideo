@@ -2019,6 +2019,27 @@ def testPromptUserConfirmationLegendNotPrintedOnSecondCall(organizer: VideoOrgan
     mockPrint.assert_not_called()
 
 
+def testPromptUserConfirmationWritesTextPromptToStderrWhenInteractive(
+    organizer: VideoOrganizer,
+):
+    organizer._promptHelpDisplayed = True
+    fakeStderr = _FakeTtyStream(interactive=True)
+    fakeStdout = io.StringIO()
+
+    with (
+        patch("sys.stderr", fakeStderr),
+        patch("sys.stdout", fakeStdout),
+        patch("builtins.input", return_value="y") as mockInput,
+    ):
+        result = organizer.promptUserConfirmation("file.mkv", "My Show", "tv")
+
+    assert result == {"name": "My Show", "type": "tv"}
+    mockInput.assert_called_once_with()
+    assert "\nTV Show detected: 'My Show'\n" in fakeStderr.getvalue()
+    assert "Is this correct?  (y/n/q/t/m or enter new name): " in fakeStderr.getvalue()
+    assert fakeStdout.getvalue() == ""
+
+
 def testPromptUserConfirmationReusesConfirmedTvShow(organizer: VideoOrganizer):
     with patch("builtins.input", side_effect=["y"]) as mockInput:
         first = organizer.promptUserConfirmation("file1.mkv", "The Pitt", "tv")
