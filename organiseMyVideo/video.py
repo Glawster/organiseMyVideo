@@ -1,11 +1,12 @@
 """Core video-file organisation: scan storage, parse filenames, move files, clean names."""
 
-import curses
 import difflib
 import os
 import re
-import sys
 import shutil
+import sys
+import termios
+import tty
 import unicodedata
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -19,7 +20,6 @@ logger = getLogger()
 UNKNOWN_YEAR = "Unknown"
 _UTF8_BOM = b"\xef\xbb\xbf"
 _XML_BINARY_CHECK_WINDOW = 256
-_CURSES_STATUS_MARGIN = 10
 
 
 class VideoMixin:
@@ -315,48 +315,42 @@ class VideoMixin:
         validChoices: set[str],
         defaultChoice: Optional[str] = None,
     ) -> str:
-        """Read a single menu choice using curses and return the selected key."""
+        """Read a single menu choice without redrawing earlier terminal output."""
+        inputStream = sys.stdin
+        outputStream = sys.stdout
+        fileDescriptor = inputStream.fileno()
+        originalTerminalState = termios.tcgetattr(fileDescriptor)
+        promptText = prompt if prompt.endswith(" ") else f"{prompt} "
+        validChoiceText = ", ".join(sorted(validChoices))
 
-        def _inner(stdscr) -> str:
-            """Render the prompt and return one accepted key from the terminal."""
-            curses.noecho()
-            stdscr.keypad(True)
-            stdscr.clear()
+        def _showPrompt() -> None:
+            print(promptText, end="", flush=True, file=outputStream)
 
-            lines = prompt.splitlines() or [prompt]
-            maxRows, maxCols = stdscr.getmaxyx()
-            row = 0
-            for line in lines:
-                if row >= maxRows - 1:
-                    break
-                if maxCols > 1:
-                    stdscr.addstr(row, 0, str(line)[: maxCols - 1])
-                row += 1
-            statusRow = min(row + 1, maxRows - 1)
-            stdscr.refresh()
-
+        _showPrompt()
+        try:
+            tty.setraw(fileDescriptor)
             while True:
-                key = stdscr.get_wch()
+                key = inputStream.read(1)
+                if key == "\x03":
+                    raise KeyboardInterrupt
                 if key in ("\n", "\r") and defaultChoice is not None:
+                    print(file=outputStream, flush=True)
                     return defaultChoice
-                if isinstance(key, str):
+                if key:
                     lowered = key.lower()
                     if lowered in validChoices:
+                        print(lowered, file=outputStream, flush=True)
                         return lowered
-                if statusRow < maxRows:
-                    stdscr.move(statusRow, 0)
-                    stdscr.clrtoeol()
-                    stdscr.addstr(
-                        statusRow,
-                        0,
-                        "Use one of: "
-                        + ", ".join(sorted(validChoices))[
-                            : max(0, maxCols - _CURSES_STATUS_MARGIN)
-                        ],
-                    )
-                    stdscr.refresh()
-
-        return curses.wrapper(_inner)
+                print(
+                    f"\nUse one of: {validChoiceText}",
+                    file=outputStream,
+                    flush=True,
+                )
+                _showPrompt()
+        finally:
+            termios.tcsetattr(
+                fileDescriptor, termios.TCSADRAIN, originalTerminalState
+            )
 
     def _readMenuChoice(
         self,
@@ -373,9 +367,9 @@ class VideoMixin:
                     validChoices=validChoices,
                     defaultChoice=defaultChoice,
                 )
-            except curses.error as error:
+            except (OSError, RuntimeError, termios.error, ValueError) as error:
                 logger.warning(
-                    "curses prompt initialization failed, falling back to text input: %s",
+                    "single-key prompt initialization failed, falling back to text input: %s",
                     error,
                 )
         return self._readTextResponse(prompt)

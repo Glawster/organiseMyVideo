@@ -1,5 +1,6 @@
 """Tests for organiseMyVideo.py"""
 
+import io
 import json
 import shutil
 from pathlib import Path
@@ -1961,6 +1962,40 @@ def testPromptUserConfirmationUsesCursesMenuWhenEnabled(organizer: VideoOrganize
     assert result == {"name": "My Show", "type": "tv"}
     mockMenu.assert_called_once()
     mockText.assert_not_called()
+
+
+def testReadCursesMenuChoiceKeepsPromptInScrollFlow(organizer: VideoOrganizer):
+    class FakeSingleKeyInput:
+        def __init__(self, values: list[str]):
+            self._values = iter(values)
+
+        def fileno(self) -> int:
+            return 0
+
+        def read(self, _: int) -> str:
+            return next(self._values)
+
+    fakeInput = FakeSingleKeyInput(["x", "y"])
+    fakeOutput = io.StringIO()
+
+    with (
+        patch("sys.stdin", fakeInput),
+        patch("sys.stdout", fakeOutput),
+        patch("termios.tcgetattr", return_value=["saved"]),
+        patch("tty.setraw"),
+        patch("termios.tcsetattr") as mockRestore,
+    ):
+        result = organizer._readCursesMenuChoice(
+            "TV Show detected: 'My Show'",
+            validChoices={"y", "n", "q", "t", "m"},
+            defaultChoice="y",
+        )
+
+    assert result == "y"
+    output = fakeOutput.getvalue()
+    assert output.count("TV Show detected: 'My Show'") == 2
+    assert "Use one of: m, n, q, t, y" in output
+    mockRestore.assert_called_once_with(0, 1, ["saved"])
 
 
 # ---------------------------------------------------------------------------
