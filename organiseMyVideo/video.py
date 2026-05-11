@@ -512,6 +512,16 @@ class VideoMixin:
             return text[:maxWidth]
         return f"{text[: maxWidth - 3]}..."
 
+    def _getReducedMoveProgressBarWidth(self, columns: int) -> int:
+        """Return a narrower progress-bar width that still leaves room for the filename."""
+        return min(
+            _MOVE_PROGRESS_BAR_WIDTH,
+            max(
+                columns // _MOVE_PROGRESS_REDUCED_BAR_RATIO,
+                _MOVE_PROGRESS_MIN_REDUCED_BAR_WIDTH,
+            ),
+        )
+
     def _formatMoveProgressLine(
         self, filename: str, copiedBytes: int, totalBytes: int, columns: int
     ) -> str:
@@ -535,13 +545,7 @@ class VideoMixin:
         # When the terminal is narrow, keep a smaller bar so some filename text
         # can still fit; one fifth of the terminal with an 8-character minimum
         # keeps the bar readable without forcing line wrapping.
-        reducedBarWidth = min(
-            _MOVE_PROGRESS_BAR_WIDTH,
-            max(
-                columns // _MOVE_PROGRESS_REDUCED_BAR_RATIO,
-                _MOVE_PROGRESS_MIN_REDUCED_BAR_WIDTH,
-            ),
-        )
+        reducedBarWidth = self._getReducedMoveProgressBarWidth(columns)
         # Degrade in stages so the line stays on one terminal row: prefer the
         # full bar with byte counts, then remove byte counts, then use a
         # smaller bar, and finally fall back to percentage only.
@@ -578,6 +582,7 @@ class VideoMixin:
 
     def _copyFileWithProgress(self, sourceFile: Path, destFile: Path) -> None:
         """Copy *sourceFile* to *destFile* and delete the source afterwards."""
+        self._moveProgressDisplayWidth = 0
         progressStream = self._getMoveProgressStream()
         if progressStream is None:
             shutil.copy2(sourceFile, destFile)
