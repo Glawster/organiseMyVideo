@@ -315,11 +315,30 @@ class VideoMixin:
         validChoices: set[str],
         defaultChoice: Optional[str] = None,
     ) -> str:
-        """Read a single menu choice without redrawing earlier terminal output."""
+        """Read a single menu choice without redrawing earlier terminal output.
+
+        Args:
+            prompt: Prompt text displayed before waiting for a single key.
+            validChoices: Accepted single-character menu responses.
+            defaultChoice: Response returned when Enter is pressed.
+
+        Returns:
+            The accepted single-character response.
+
+        Raises:
+            KeyboardInterrupt: If the user presses Ctrl+C.
+            EOFError: If the user presses Ctrl+D.
+            OSError: If raw terminal input cannot be initialized.
+        """
         inputStream = sys.stdin
         outputStream = sys.stdout
         fileDescriptor = inputStream.fileno()
-        originalTerminalState = termios.tcgetattr(fileDescriptor)
+        try:
+            originalTerminalState = termios.tcgetattr(fileDescriptor)
+        except OSError as error:
+            raise OSError(
+                "single-key prompts require an interactive terminal"
+            ) from error
         promptText = f"{prompt.rstrip()} "
         validChoiceText = ", ".join(sorted(validChoices))
 

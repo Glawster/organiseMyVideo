@@ -1983,6 +1983,8 @@ def testReadCursesMenuChoiceKeepsPromptInScrollFlow(organizer: VideoOrganizer):
     localFlags = 35387
     inputSpeed = 15
     outputSpeed = 15
+    # Match the shape returned by termios.tcgetattr():
+    # [iflag, oflag, cflag, lflag, ispeed, ospeed, cc]
     controlCharacters = [b"\x03", b"\x1c", b"\x7f", b"\x15", b"\x04", 0, 1]
     savedTerminalState = [
         inputFlags,
