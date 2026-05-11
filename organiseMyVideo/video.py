@@ -1048,7 +1048,7 @@ class VideoMixin:
         else:
             prompt = (
                 f"\nMovie detected: '{defaultName}'\n"
-                "Is this correct? (y/n/q/t/m or enter new name): "
+                "Is this correct?  (y/n/q/t/m or enter new name): "
             )
 
         if self._shouldUseCursesPrompts():
