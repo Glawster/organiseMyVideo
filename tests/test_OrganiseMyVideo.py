@@ -3,6 +3,7 @@
 import errno
 import io
 import json
+import logging
 import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -12,7 +13,7 @@ import pytest
 # conftest.py stubs organiseMyProjects before this import
 import organiseMyVideo.__main__ as omv_main
 from organiseMyVideo import VideoOrganizer
-from organiseMyVideo.video import _XML_BINARY_CHECK_WINDOW
+from organiseMyVideo.video import _FILE_PROCESS_SEPARATOR, _XML_BINARY_CHECK_WINDOW
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -840,6 +841,32 @@ def testProcessFilesUsesMovieMcmHintsWhenFilenameCannotBeParsed(
     destFile = movieStorage / "3 from Hell (2019)" / "clip.mp4"
     assert destFile.exists()
     assert not srcFile.exists()
+
+
+def testProcessFilesLogsSeparatorBeforeEachVideo(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
+):
+    srcFile = confirmedOrganizer.sourceDir / "Breaking.Bad.S01E01.Pilot.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    with patch.object(
+        confirmedOrganizer, "scanStorageLocations", return_value=([], [tvStorage])
+    ):
+        with caplog.at_level("INFO"):
+            confirmedOrganizer.processFiles(interactive=False)
+
+    messages = [record.getMessage() for record in caplog.records]
+    separatorIndex = next(
+        i
+        for i, message in enumerate(messages)
+        if message.endswith(_FILE_PROCESS_SEPARATOR)
+    )
+    processingIndex = next(
+        i for i, message in enumerate(messages) if "processing TV show:" in message
+    )
+    assert separatorIndex < processingIndex
 
 
 def testProcessFilesPrefersMovieMcmHintsBeforeFilenameClassification(
@@ -2204,13 +2231,11 @@ def testMoveTvShowPreservesExistingEpisodeMetadataInDestination(
     ).write_text("<Item><EpisodeName>new</EpisodeName></Item>", encoding="utf-8")
 
     tvStorage = tmp_path / "video1" / "TV"
-    metadataDestDir = (
-        tvStorage / "Daredevil Born Again" / "Season 01" / "metadata"
-    )
+    metadataDestDir = tvStorage / "Daredevil Born Again" / "Season 01" / "metadata"
     metadataDestDir.mkdir(parents=True)
-    (
-        metadataDestDir / "Daredevil.Born.Again.S01E04.Sic.Semper.Systema.xml"
-    ).write_text("<Item><EpisodeName>existing</EpisodeName></Item>", encoding="utf-8")
+    (metadataDestDir / "Daredevil.Born.Again.S01E04.Sic.Semper.Systema.xml").write_text(
+        "<Item><EpisodeName>existing</EpisodeName></Item>", encoding="utf-8"
+    )
 
     tvInfo = {
         "showName": "Daredevil Born Again",
@@ -3390,4 +3415,24 @@ def testMainPassesRefreshAndNoCursesFlagsToOrganizer():
         dryRun=True,
         refreshMetadataLibrary=True,
         useCurses=False,
+    )
+
+
+def testMainConfiguresConsoleTimestampWithoutMilliseconds():
+    organizerInstance = MagicMock()
+
+    with patch("organiseMyVideo.VideoOrganizer", return_value=organizerInstance):
+        with patch("sys.argv", ["organiseMyVideo", "--source", "/tmp/source"]):
+            omv_main.main()
+
+    consoleHandlers = [
+        handler
+        for handler in omv_main.logger.logger.handlers
+        if type(handler) is logging.StreamHandler
+    ]
+    assert consoleHandlers
+    assert all(
+        handler.formatter is not None
+        and handler.formatter.datefmt == "%Y-%m-%d %H:%M:%S"
+        for handler in consoleHandlers
     )

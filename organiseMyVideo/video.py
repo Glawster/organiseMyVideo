@@ -26,6 +26,7 @@ _MOVE_PROGRESS_MIN_COLUMNS = 20
 _MOVE_PROGRESS_REDUCED_BAR_RATIO = 5
 _MOVE_PROGRESS_MIN_REDUCED_BAR_WIDTH = 8
 _MOVE_PROGRESS_CHUNK_SIZE = 1024 * 1024
+_FILE_PROCESS_SEPARATOR = "-" * 72
 
 
 class VideoMixin:
@@ -345,6 +346,9 @@ class VideoMixin:
         """
         inputStream = sys.stdin
         outputStream = sys.stdout
+        stderrIsTtyMethod = getattr(sys.stderr, "isatty", None)
+        if callable(stderrIsTtyMethod) and stderrIsTtyMethod():
+            outputStream = sys.stderr
         fileDescriptor = inputStream.fileno()
         try:
             originalTerminalState = termios.tcgetattr(fileDescriptor)
@@ -848,7 +852,9 @@ class VideoMixin:
         )
         tvMcm = {
             "showXmlExists": bool(
-                sourceHasTvLayout and sourceShowDir and (sourceShowDir / "series.xml").exists()
+                sourceHasTvLayout
+                and sourceShowDir
+                and (sourceShowDir / "series.xml").exists()
             ),
             "dvdIdXmlExists": bool(
                 sourceHasTvLayout
@@ -1165,7 +1171,9 @@ class VideoMixin:
         ``tvInfo`` values take precedence over ``mcmHints`` fallbacks.
         Naming order is: imdb+series, imdb-only, then series-only.
         """
-        imdbId = self._safeMcmIdFilenamePart(tvInfo.get("imdbId") or mcmHints.get("imdbId"))
+        imdbId = self._safeMcmIdFilenamePart(
+            tvInfo.get("imdbId") or mcmHints.get("imdbId")
+        )
         seriesId = self._safeMcmIdFilenamePart(
             tvInfo.get("seriesId") or mcmHints.get("seriesId")
         )
@@ -1845,6 +1853,7 @@ class VideoMixin:
         stats = {"movies": 0, "tv": 0, "skipped": 0, "errors": 0}
 
         for videoFile in videoFiles:
+            logger.info(_FILE_PROCESS_SEPARATOR)
             mcmHints = self._readMcmHints(videoFile)
             tvInfo, movieInfo = self._classifyVideoFile(videoFile, mcmHints)
             if tvInfo and videoDirs:
