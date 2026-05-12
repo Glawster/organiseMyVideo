@@ -485,15 +485,19 @@ class VideoMixin:
             destDir: Destination directory that should receive the copied files.
         """
         for sourcePath in sourceFiles:
-            destPath = destDir / sourcePath.name
-            if destPath.exists():
-                logger.value("preserving existing metadata", destPath)
-                continue
-            logger.action(f"copy metadata: {sourcePath} -> {destPath}")
-            if self.dryRun:
-                continue
-            destDir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(sourcePath, destPath)
+            self._copyFileIfMissing(sourcePath, destDir / sourcePath.name)
+
+    def _copyFileIfMissing(self, sourcePath: Path, destPath: Path) -> None:
+        """Copy *sourcePath* to *destPath* only when destination does not already exist."""
+        if destPath.exists():
+            logger.value("preserving existing metadata", destPath)
+            return
+
+        logger.action(f"copy metadata: {sourcePath} -> {destPath}")
+        if self.dryRun:
+            return
+        destPath.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(sourcePath, destPath)
 
     def _getMoveProgressStream(self) -> Optional[TextIO]:
         """Return the live console stream for move progress, if interactive."""
@@ -872,15 +876,6 @@ class VideoMixin:
                 )
             ),
         }
-
-        if not sourceHasTvLayout:
-            tvMcm = {
-                "showXmlExists": False,
-                "dvdIdXmlExists": False,
-                "seasonMetadataFolderExists": False,
-                "episodeXmlExists": False,
-                "artworkExists": False,
-            }
 
         if not self._hasAnyMetadata(
             showName=showName,
@@ -1304,14 +1299,9 @@ class VideoMixin:
         if destStem == sourceFile.stem:
             self._copyFilesIntoDir([episodeMetadataFile], destMetadataDir)
         else:
-            destEpisodeFile = destMetadataDir / f"{destStem}.xml"
-            if destEpisodeFile.exists():
-                logger.value("preserving existing metadata", destEpisodeFile)
-            else:
-                logger.action("copy metadata: %s -> %s", episodeMetadataFile, destEpisodeFile)
-                if not self.dryRun:
-                    destMetadataDir.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(episodeMetadataFile, destEpisodeFile)
+            self._copyFileIfMissing(
+                episodeMetadataFile, destMetadataDir / f"{destStem}.xml"
+            )
 
         imageName = self._extractEpisodeMetadataImage(episodeMetadataFile)
         if not imageName:
