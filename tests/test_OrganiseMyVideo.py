@@ -2262,9 +2262,40 @@ def testMoveTvShowCreatesSeriesXmlWhenMissingAndMetadataConfident(
     assert "<SeriesName>Virgin River</SeriesName>" in seriesText
     assert "<SeriesID>117581</SeriesID>" in seriesText
     assert "<IMDB_ID>tt9077530</IMDB_ID>" in seriesText
+    assert (showDestDir / "mcm_id__tt9077530-117581.dvdid.xml").exists()
     assert (
         showDestDir / "Season 06" / "metadata" / "Virgin.River.S06E01.The.Beginning.xml"
     ).exists()
+
+
+def testMoveTvShowPreservesExistingDvdIdXmlWithoutCreatingDuplicate(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "Virgin.River.S06E01.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    tvStorage = tmp_path / "video1" / "TV"
+    showDestDir = tvStorage / "Virgin River"
+    showDestDir.mkdir(parents=True)
+    (showDestDir / "mcm_id__existing.dvdid.xml").write_text(
+        "<Item><SeriesID>existing</SeriesID></Item>", encoding="utf-8"
+    )
+
+    tvInfo = {
+        "showName": "Virgin River",
+        "season": 6,
+        "episode": 1,
+        "seriesId": "117581",
+        "imdbId": "tt9077530",
+        "extension": ".mkv",
+        "type": "tv",
+    }
+    result = confirmedOrganizer.moveTvShow(
+        srcFile, tvInfo, [tvStorage], interactive=False
+    )
+
+    assert result is True
+    assert (showDestDir / "mcm_id__existing.dvdid.xml").exists()
+    assert len(list(showDestDir.glob("mcm_id__*.dvdid.xml"))) == 1
 
 
 def testMoveTvShowPreservesExistingSeriesXmlWithoutOverwriting(

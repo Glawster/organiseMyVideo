@@ -1141,12 +1141,65 @@ class VideoMixin:
             child.text = value
 
         destFile = destMetadataDir / f"{destStem or sourceFile.stem}.xml"
+        if destFile.exists():
+            logger.value("preserving existing metadata", destFile)
+            return
         logger.action("create metadata: %s", destFile)
         if self.dryRun:
             return
 
         destMetadataDir.mkdir(parents=True, exist_ok=True)
         ET.ElementTree(item).write(destFile, encoding="utf-8", xml_declaration=True)
+
+    def _safeMcmIdFilenamePart(self, value: Optional[str]) -> str:
+        """Return a filesystem-safe MCM identifier fragment."""
+        if not value:
+            return ""
+        return re.sub(r"[^A-Za-z0-9._-]+", "", str(value))
+
+    def _buildTvDvdIdFilename(self, tvInfo: dict, mcmHints: dict) -> Optional[str]:
+        """Return a deterministic TV MCM dvdid filename for known identifiers."""
+        imdbId = self._safeMcmIdFilenamePart(tvInfo.get("imdbId") or mcmHints.get("imdbId"))
+        seriesId = self._safeMcmIdFilenamePart(
+            tvInfo.get("seriesId") or mcmHints.get("seriesId")
+        )
+        if imdbId and seriesId:
+            return f"mcm_id__{imdbId}-{seriesId}.dvdid.xml"
+        if imdbId:
+            return f"mcm_id__{imdbId}.dvdid.xml"
+        if seriesId:
+            return f"mcm_id__series-{seriesId}.dvdid.xml"
+        return None
+
+    def _ensureTvDvdIdMetadata(
+        self, sourceFile: Path, showDir: Path, tvInfo: dict
+    ) -> None:
+        """Create a show-level TV ``mcm_id__*.dvdid.xml`` only when missing."""
+        existing = self._collectMatchingFiles(showDir, ("mcm_id__*.dvdid.xml",))
+        if existing:
+            logger.value("preserving existing metadata", existing[0])
+            return
+
+        mcmHints = self._readTvMcmHints(sourceFile) or {}
+        dvdIdFilename = self._buildTvDvdIdFilename(tvInfo, mcmHints)
+        if not dvdIdFilename:
+            return
+
+        dvdIdFile = showDir / dvdIdFilename
+        root = ET.Element("Item")
+        ET.SubElement(root, "SeriesID").text = str(
+            tvInfo.get("seriesId") or mcmHints.get("seriesId") or ""
+        )
+        ET.SubElement(root, "IMDB_ID").text = str(
+            tvInfo.get("imdbId") or mcmHints.get("imdbId") or ""
+        )
+        ET.SubElement(root, "Type").text = "tv"
+
+        logger.action("create metadata: %s", dvdIdFile)
+        if self.dryRun:
+            return
+        showDir.mkdir(parents=True, exist_ok=True)
+        ET.ElementTree(root).write(dvdIdFile, encoding="utf-8", xml_declaration=True)
 
     def _setXmlFieldIfMissing(
         self, root: ET.Element, tag: str, value: Optional[str]
@@ -1292,6 +1345,7 @@ class VideoMixin:
             self._copyFilesIntoDir(seasonMetadataFiles, seasonDir)
 
         self._ensureSeriesMetadata(showDir, tvInfo)
+        self._ensureTvDvdIdMetadata(sourceFile, showDir, tvInfo)
 
         metadataDir = sourceSeasonDir / "metadata" if sourceHasSeasonContext else None
         episodeMetadataFile = (
