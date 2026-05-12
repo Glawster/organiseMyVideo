@@ -3,6 +3,7 @@
 import errno
 import io
 import json
+import logging
 import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -12,7 +13,7 @@ import pytest
 # conftest.py stubs organiseMyProjects before this import
 import organiseMyVideo.__main__ as omv_main
 from organiseMyVideo import VideoOrganizer
-from organiseMyVideo.video import _XML_BINARY_CHECK_WINDOW
+from organiseMyVideo.video import _FILE_PROCESS_SEPARATOR, _XML_BINARY_CHECK_WINDOW
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -840,6 +841,38 @@ def testProcessFilesUsesMovieMcmHintsWhenFilenameCannotBeParsed(
     destFile = movieStorage / "3 from Hell (2019)" / "clip.mp4"
     assert destFile.exists()
     assert not srcFile.exists()
+
+
+def testProcessFilesLogsSeparatorBeforeProcessingMessage(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
+):
+    srcFile = confirmedOrganizer.sourceDir / "Breaking.Bad.S01E01.Pilot.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    with patch.object(
+        confirmedOrganizer, "scanStorageLocations", return_value=([], [tvStorage])
+    ):
+        with caplog.at_level("INFO"):
+            confirmedOrganizer.processFiles(interactive=False)
+
+    messages = [record.getMessage() for record in caplog.records]
+    separatorIndex = next(
+        (
+            i
+            for i, message in enumerate(messages)
+            if message.endswith(_FILE_PROCESS_SEPARATOR)
+        ),
+        None,
+    )
+    processingIndex = next(
+        (i for i, message in enumerate(messages) if "processing TV show:" in message),
+        None,
+    )
+    assert separatorIndex is not None, f"missing separator log in: {messages}"
+    assert processingIndex is not None, f"missing processing log in: {messages}"
+    assert separatorIndex < processingIndex
 
 
 def testProcessFilesPrefersMovieMcmHintsBeforeFilenameClassification(
@@ -2204,13 +2237,11 @@ def testMoveTvShowPreservesExistingEpisodeMetadataInDestination(
     ).write_text("<Item><EpisodeName>new</EpisodeName></Item>", encoding="utf-8")
 
     tvStorage = tmp_path / "video1" / "TV"
-    metadataDestDir = (
-        tvStorage / "Daredevil Born Again" / "Season 01" / "metadata"
-    )
+    metadataDestDir = tvStorage / "Daredevil Born Again" / "Season 01" / "metadata"
     metadataDestDir.mkdir(parents=True)
-    (
-        metadataDestDir / "Daredevil.Born.Again.S01E04.Sic.Semper.Systema.xml"
-    ).write_text("<Item><EpisodeName>existing</EpisodeName></Item>", encoding="utf-8")
+    (metadataDestDir / "Daredevil.Born.Again.S01E04.Sic.Semper.Systema.xml").write_text(
+        "<Item><EpisodeName>existing</EpisodeName></Item>", encoding="utf-8"
+    )
 
     tvInfo = {
         "showName": "Daredevil Born Again",
@@ -2262,9 +2293,102 @@ def testMoveTvShowCreatesSeriesXmlWhenMissingAndMetadataConfident(
     assert "<SeriesName>Virgin River</SeriesName>" in seriesText
     assert "<SeriesID>117581</SeriesID>" in seriesText
     assert "<IMDB_ID>tt9077530</IMDB_ID>" in seriesText
+    assert (showDestDir / "mcm_id__tt9077530-117581.dvdid.xml").exists()
     assert (
         showDestDir / "Season 06" / "metadata" / "Virgin.River.S06E01.The.Beginning.xml"
     ).exists()
+
+
+def testMoveTvShowPreservesExistingDvdIdXmlWithoutCreatingDuplicate(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "Virgin.River.S06E01.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    tvStorage = tmp_path / "video1" / "TV"
+    showDestDir = tvStorage / "Virgin River"
+    showDestDir.mkdir(parents=True)
+    (showDestDir / "mcm_id__existing.dvdid.xml").write_text(
+        "<Item><SeriesID>existing</SeriesID></Item>", encoding="utf-8"
+    )
+
+    tvInfo = {
+        "showName": "Virgin River",
+        "season": 6,
+        "episode": 1,
+        "seriesId": "117581",
+        "imdbId": "tt9077530",
+        "extension": ".mkv",
+        "type": "tv",
+    }
+    result = confirmedOrganizer.moveTvShow(
+        srcFile, tvInfo, [tvStorage], interactive=False
+    )
+
+    assert result is True
+    assert (showDestDir / "mcm_id__existing.dvdid.xml").exists()
+    assert len(list(showDestDir.glob("mcm_id__*.dvdid.xml"))) == 1
+
+
+def testMoveTvShowLeavesMultipleExistingDvdIdXmlFilesUnchanged(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "Virgin.River.S06E01.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    tvStorage = tmp_path / "video1" / "TV"
+    showDestDir = tvStorage / "Virgin River"
+    showDestDir.mkdir(parents=True)
+    (showDestDir / "mcm_id__first.dvdid.xml").write_text(
+        "<Item><SeriesID>first</SeriesID></Item>", encoding="utf-8"
+    )
+    (showDestDir / "mcm_id__second.dvdid.xml").write_text(
+        "<Item><SeriesID>second</SeriesID></Item>", encoding="utf-8"
+    )
+
+    tvInfo = {
+        "showName": "Virgin River",
+        "season": 6,
+        "episode": 1,
+        "seriesId": "117581",
+        "imdbId": "tt9077530",
+        "extension": ".mkv",
+        "type": "tv",
+    }
+    result = confirmedOrganizer.moveTvShow(
+        srcFile, tvInfo, [tvStorage], interactive=False
+    )
+
+    assert result is True
+    assert (showDestDir / "mcm_id__first.dvdid.xml").exists()
+    assert (showDestDir / "mcm_id__second.dvdid.xml").exists()
+    assert len(list(showDestDir.glob("mcm_id__*.dvdid.xml"))) == 2
+
+
+def testMoveTvShowCreatesSeriesIdOnlyDvdIdXmlWhenImdbMissing(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "Virgin.River.S06E01.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    tvInfo = {
+        "showName": "Virgin River",
+        "season": 6,
+        "episode": 1,
+        "seriesId": "117581",
+        "extension": ".mkv",
+        "type": "tv",
+    }
+    result = confirmedOrganizer.moveTvShow(
+        srcFile, tvInfo, [tvStorage], interactive=False
+    )
+
+    assert result is True
+    dvdIdXml = tvStorage / "Virgin River" / "mcm_id__117581.dvdid.xml"
+    assert dvdIdXml.exists()
+    dvdIdContent = dvdIdXml.read_text(encoding="utf-8")
+    assert "<SeriesID>117581</SeriesID>" in dvdIdContent
+    assert "<IMDB_ID>" not in dvdIdContent
 
 
 def testMoveTvShowPreservesExistingSeriesXmlWithoutOverwriting(
@@ -3297,4 +3421,24 @@ def testMainPassesRefreshAndNoCursesFlagsToOrganizer():
         dryRun=True,
         refreshMetadataLibrary=True,
         useCurses=False,
+    )
+
+
+def testMainConfiguresConsoleTimestampWithoutMilliseconds():
+    organizerInstance = MagicMock()
+
+    with patch("organiseMyVideo.VideoOrganizer", return_value=organizerInstance):
+        with patch("sys.argv", ["organiseMyVideo", "--source", "/tmp/source"]):
+            omv_main.main()
+
+    consoleHandlers = [
+        handler
+        for handler in omv_main.logger.logger.handlers
+        if isinstance(handler, logging.StreamHandler)
+    ]
+    assert consoleHandlers
+    assert all(
+        handler.formatter is not None
+        and handler.formatter.datefmt == "%Y-%m-%d %H:%M:%S"
+        for handler in consoleHandlers
     )
