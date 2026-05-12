@@ -2298,6 +2298,68 @@ def testMoveTvShowPreservesExistingDvdIdXmlWithoutCreatingDuplicate(
     assert len(list(showDestDir.glob("mcm_id__*.dvdid.xml"))) == 1
 
 
+def testMoveTvShowLeavesMultipleExistingDvdIdXmlFilesUnchanged(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "Virgin.River.S06E01.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    tvStorage = tmp_path / "video1" / "TV"
+    showDestDir = tvStorage / "Virgin River"
+    showDestDir.mkdir(parents=True)
+    (showDestDir / "mcm_id__first.dvdid.xml").write_text(
+        "<Item><SeriesID>first</SeriesID></Item>", encoding="utf-8"
+    )
+    (showDestDir / "mcm_id__second.dvdid.xml").write_text(
+        "<Item><SeriesID>second</SeriesID></Item>", encoding="utf-8"
+    )
+
+    tvInfo = {
+        "showName": "Virgin River",
+        "season": 6,
+        "episode": 1,
+        "seriesId": "117581",
+        "imdbId": "tt9077530",
+        "extension": ".mkv",
+        "type": "tv",
+    }
+    result = confirmedOrganizer.moveTvShow(
+        srcFile, tvInfo, [tvStorage], interactive=False
+    )
+
+    assert result is True
+    assert (showDestDir / "mcm_id__first.dvdid.xml").exists()
+    assert (showDestDir / "mcm_id__second.dvdid.xml").exists()
+    assert len(list(showDestDir.glob("mcm_id__*.dvdid.xml"))) == 2
+
+
+def testMoveTvShowCreatesSeriesIdOnlyDvdIdXmlWhenImdbMissing(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "Virgin.River.S06E01.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    tvInfo = {
+        "showName": "Virgin River",
+        "season": 6,
+        "episode": 1,
+        "seriesId": "117581",
+        "extension": ".mkv",
+        "type": "tv",
+    }
+    result = confirmedOrganizer.moveTvShow(
+        srcFile, tvInfo, [tvStorage], interactive=False
+    )
+
+    assert result is True
+    dvdIdXml = tvStorage / "Virgin River" / "mcm_id__117581.dvdid.xml"
+    assert dvdIdXml.exists()
+    dvdIdContent = dvdIdXml.read_text(encoding="utf-8")
+    assert "<SeriesID>117581</SeriesID>" in dvdIdContent
+    assert "<IMDB_ID>" not in dvdIdContent
+
+
 def testMoveTvShowPreservesExistingSeriesXmlWithoutOverwriting(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer
 ):
