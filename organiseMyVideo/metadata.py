@@ -290,6 +290,8 @@ class MetadataMixin:
                 "metadataSource": record.get("metadataSource"),
                 "metadataUpdatedAt": record.get("metadataUpdatedAt"),
             }
+            if record.get("mcm") is not None:
+                seriesRecord["mcm"] = record.get("mcm")
             if existingSeries and metadata.get("metadataUpdatedAt") is None:
                 # Preserve the stored series timestamp so episode-only updates do
                 # not make the series record look newly changed each time. When
@@ -327,14 +329,33 @@ class MetadataMixin:
 
     def _readTvSeriesMcmHints(self, showDir: Path) -> Optional[dict]:
         """Return show-level TV metadata hints from a library show's ``series.xml``."""
-        seriesRoot = self._readXmlRoot(showDir / "series.xml")
+        seriesFile = showDir / "series.xml"
+        seriesRoot = self._readXmlRoot(seriesFile)
         showName = self._readFirstXmlText(seriesRoot, ("LocalTitle", "SeriesName"))
         imdbId = self._readFirstXmlText(seriesRoot, ("IMDB_ID", "IMDbId"))
         seriesId = self._readFirstXmlText(seriesRoot, ("SeriesID", "id"))
+        try:
+            seasonMetadataDirs = [
+                item
+                for item in showDir.glob("Season*/metadata")
+                if item.is_dir()
+            ]
+        except OSError:
+            seasonMetadataDirs = []
+
+        tvMcm = {
+            "showXmlExists": seriesFile.exists(),
+            "dvdIdXmlExists": self._hasMatchingFiles(showDir, ("mcm_id__*.dvdid.xml",)),
+            "seasonMetadataFolderExists": bool(seasonMetadataDirs),
+            "episodeXmlExists": self._hasMatchingFiles(showDir, ("Season*/metadata/*.xml",)),
+            "artworkExists": self._hasMatchingFiles(
+                showDir, ("folder.jpg", "banner.jpg", "backdrop*.jpg", "Season*/folder.jpg")
+            ),
+        }
 
         if not self._hasAnyMetadata(
             showName=showName, imdbId=imdbId, seriesId=seriesId
-        ):
+        ) and not any(tvMcm.values()):
             return None
 
         return {
@@ -343,6 +364,7 @@ class MetadataMixin:
             "imdbId": imdbId,
             "seriesId": seriesId,
             "metadataSource": "mcm",
+            "mcm": tvMcm,
         }
 
     def _buildMetadataLibraryFromStorage(

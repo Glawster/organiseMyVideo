@@ -46,6 +46,9 @@ class VideoMixin:
         "mcm_id__*.dvdid.xml",
     )
     _TV_SEASON_MCM_PATTERNS = ("folder.jpg",)
+    _MOVIE_ARTWORK_PATTERNS = ("folder.jpg", "banner.jpg", "backdrop*.jpg")
+    _TV_SHOW_ARTWORK_PATTERNS = ("folder.jpg", "banner.jpg", "backdrop*.jpg")
+    _TV_SEASON_ARTWORK_PATTERNS = ("folder.jpg",)
 
     def scanStorageLocations(self) -> Tuple[List[Path], List[Path]]:
         """
@@ -469,6 +472,10 @@ class VideoMixin:
                 matches.append(match)
         return matches
 
+    def _hasMatchingFiles(self, sourceDir: Path, patterns: Iterable[str]) -> bool:
+        """Return True when *sourceDir* contains at least one file for *patterns*."""
+        return bool(self._collectMatchingFiles(sourceDir, patterns))
+
     def _copyFilesIntoDir(self, sourceFiles: Iterable[Path], destDir: Path) -> None:
         """
         Copy pre-filtered companion files into *destDir*.
@@ -479,6 +486,9 @@ class VideoMixin:
         """
         for sourcePath in sourceFiles:
             destPath = destDir / sourcePath.name
+            if destPath.exists():
+                logger.value("preserving existing metadata", destPath)
+                continue
             logger.action(f"copy metadata: {sourcePath} -> {destPath}")
             if self.dryRun:
                 continue
@@ -738,8 +748,20 @@ class VideoMixin:
             ``imdbId`` (Optional[str]), ``tmdbId`` (Optional[str]), and
             ``metadataSource`` (str).
         """
-        movieRoot = self._readXmlRoot(sourceFile.parent / "movie.xml")
-        if movieRoot is None:
+        sourceDir = sourceFile.parent
+        movieXmlFile = sourceDir / "movie.xml"
+        movieRoot = self._readXmlRoot(movieXmlFile)
+        movieMcm = {
+            "movieXmlExists": movieXmlFile.exists(),
+            "dvdIdXmlExists": self._hasMatchingFiles(
+                sourceDir, ("mcm_id__*.dvdid.xml",)
+            ),
+            "artworkExists": self._hasMatchingFiles(
+                sourceDir, self._MOVIE_ARTWORK_PATTERNS
+            ),
+        }
+
+        if movieRoot is None and not any(movieMcm.values()):
             return None
 
         title = self._readFirstXmlText(movieRoot, ("LocalTitle", "OriginalTitle"))
@@ -749,7 +771,7 @@ class VideoMixin:
 
         if not self._hasAnyMetadata(
             title=title, year=year, imdbId=imdbId, tmdbId=tmdbId
-        ):
+        ) and not any(movieMcm.values()):
             return None
 
         return {
@@ -759,6 +781,7 @@ class VideoMixin:
             "imdbId": imdbId,
             "tmdbId": tmdbId,
             "metadataSource": "mcm",
+            "mcm": movieMcm,
         }
 
     def _readTvMcmHints(self, sourceFile: Path) -> Optional[dict]:
@@ -804,6 +827,60 @@ class VideoMixin:
         imdbId = self._readFirstXmlText(episodeRoot, ("IMDB_ID", "IMDbId"))
         seriesId = self._readFirstXmlText(seriesRoot, ("SeriesID", "id"))
         episodeId = self._readFirstXmlText(episodeRoot, ("EpisodeID",))
+        sourceHasTvLayout = bool(
+            sourceShowDir
+            or re.match(r"^season\b", sourceSeasonDir.name, re.IGNORECASE)
+            or (sourceSeasonDir / "metadata").is_dir()
+        )
+        tvMcm = {
+            "showXmlExists": bool(
+                sourceHasTvLayout and sourceShowDir and (sourceShowDir / "series.xml").exists()
+            ),
+            "dvdIdXmlExists": bool(
+                sourceHasTvLayout
+                and sourceShowDir
+                and self._hasMatchingFiles(sourceShowDir, ("mcm_id__*.dvdid.xml",))
+            ),
+            "seasonMetadataFolderExists": bool(
+                sourceHasTvLayout
+                and sourceSeasonDir != self.sourceDir
+                and (sourceSeasonDir / "metadata").is_dir()
+            ),
+            "episodeXmlExists": bool(
+                sourceHasTvLayout
+                and sourceSeasonDir != self.sourceDir
+                and self._hasMatchingFiles(
+                    sourceSeasonDir / "metadata",
+                    ("*.xml",),
+                )
+            ),
+            "artworkExists": bool(
+                sourceHasTvLayout
+                and (
+                    (
+                        sourceShowDir
+                        and self._hasMatchingFiles(
+                            sourceShowDir, self._TV_SHOW_ARTWORK_PATTERNS
+                        )
+                    )
+                    or (
+                        sourceSeasonDir != self.sourceDir
+                        and self._hasMatchingFiles(
+                            sourceSeasonDir, self._TV_SEASON_ARTWORK_PATTERNS
+                        )
+                    )
+                )
+            ),
+        }
+
+        if not sourceHasTvLayout:
+            tvMcm = {
+                "showXmlExists": False,
+                "dvdIdXmlExists": False,
+                "seasonMetadataFolderExists": False,
+                "episodeXmlExists": False,
+                "artworkExists": False,
+            }
 
         if not self._hasAnyMetadata(
             showName=showName,
@@ -813,7 +890,7 @@ class VideoMixin:
             imdbId=imdbId,
             seriesId=seriesId,
             episodeId=episodeId,
-        ):
+        ) and not any(tvMcm.values()):
             return None
 
         return {
@@ -826,6 +903,7 @@ class VideoMixin:
             "seriesId": seriesId,
             "episodeId": episodeId,
             "metadataSource": "mcm",
+            "mcm": tvMcm,
         }
 
     def _readMcmHints(self, sourceFile: Path) -> Optional[dict]:
@@ -1105,6 +1183,9 @@ class VideoMixin:
 
     def _writeEpisodeMetadataFile(self, destFile: Path, root: ET.Element) -> None:
         """Write an episode metadata XML file to *destFile*."""
+        if destFile.exists():
+            logger.value("preserving existing metadata", destFile)
+            return
         logger.action("create metadata: %s", destFile)
         if self.dryRun:
             return
@@ -1146,6 +1227,9 @@ class VideoMixin:
 
     def _writeSeriesMetadataFile(self, seriesFile: Path, root: ET.Element) -> None:
         """Write `series.xml` to `seriesFile`."""
+        if seriesFile.exists():
+            logger.value("preserving existing metadata", seriesFile)
+            return
         logger.action("create metadata: %s", seriesFile)
         if self.dryRun:
             return
@@ -1158,14 +1242,10 @@ class VideoMixin:
         if not showName:
             return
         seriesFile = showDir / "series.xml"
-        if not seriesFile.exists():
-            self._writeSeriesMcmTemplate(showDir, tvInfo)
+        if seriesFile.exists():
+            logger.value("preserving existing metadata", seriesFile)
             return
-
-        seriesRoot = self._readXmlRoot(seriesFile) or ET.Element("Series")
-        seriesRoot, changed = self._updateSeriesMetadataRoot(seriesRoot, tvInfo)
-        if changed:
-            self._writeSeriesMetadataFile(seriesFile, seriesRoot)
+        self._writeSeriesMcmTemplate(showDir, tvInfo)
 
     def _replicateTvMetadata(
         self,
@@ -1221,14 +1301,17 @@ class VideoMixin:
             )
             return
 
-        episodeRoot = self._readXmlRoot(episodeMetadataFile) or ET.Element("Item")
-        episodeRoot, changed = self._updateEpisodeMetadataRoot(episodeRoot, tvInfo)
-        if not changed and destStem == sourceFile.stem:
+        if destStem == sourceFile.stem:
             self._copyFilesIntoDir([episodeMetadataFile], destMetadataDir)
         else:
-            self._writeEpisodeMetadataFile(
-                destMetadataDir / f"{destStem}.xml", episodeRoot
-            )
+            destEpisodeFile = destMetadataDir / f"{destStem}.xml"
+            if destEpisodeFile.exists():
+                logger.value("preserving existing metadata", destEpisodeFile)
+            else:
+                logger.action("copy metadata: %s -> %s", episodeMetadataFile, destEpisodeFile)
+                if not self.dryRun:
+                    destMetadataDir.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(episodeMetadataFile, destEpisodeFile)
 
         imageName = self._extractEpisodeMetadataImage(episodeMetadataFile)
         if not imageName:
