@@ -340,7 +340,8 @@ class MetadataMixin:
                 for item in showDir.glob("Season*/metadata")
                 if item.is_dir()
             ]
-        except OSError:
+        except OSError as error:
+            logger.warning("could not inspect show metadata folders %s: %s", showDir, error)
             seasonMetadataDirs = []
 
         tvMcm = {

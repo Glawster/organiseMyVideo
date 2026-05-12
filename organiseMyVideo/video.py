@@ -473,7 +473,12 @@ class VideoMixin:
         return matches
 
     def _hasMatchingFiles(self, sourceDir: Path, patterns: Iterable[str]) -> bool:
-        """Return True when *sourceDir* contains at least one file for *patterns*."""
+        """
+        Return True when *sourceDir* contains at least one glob-pattern match.
+
+        Uses the same matching rules as :meth:`_collectMatchingFiles`.
+        Returns False when *sourceDir* is missing or not a directory.
+        """
         return bool(self._collectMatchingFiles(sourceDir, patterns))
 
     def _copyFilesIntoDir(self, sourceFiles: Iterable[Path], destDir: Path) -> None:
@@ -488,7 +493,12 @@ class VideoMixin:
             self._copyFileIfMissing(sourcePath, destDir / sourcePath.name)
 
     def _copyFileIfMissing(self, sourcePath: Path, destPath: Path) -> None:
-        """Copy *sourcePath* to *destPath* only when destination does not already exist."""
+        """
+        Copy *sourcePath* to *destPath* only when destination does not already exist.
+
+        Existing destinations are preserved unchanged. Parent directories are
+        created automatically when writing.
+        """
         if destPath.exists():
             logger.value("preserving existing metadata", destPath)
             return

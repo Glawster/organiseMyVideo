@@ -2180,6 +2180,7 @@ def testMoveTvShowReplicatesMcmCompanionFiles(
         / "metadata"
         / "Daredevil.Born.Again.S01E04.Sic.Semper.Systema.xml"
     ).read_text(encoding="utf-8")
+    assert destMetadata.startswith("<?xml")
     assert "<filename>/67da18725f220.jpg</filename>" in destMetadata
     assert "<EpisodeNumber>4</EpisodeNumber>" not in destMetadata
     assert "<SeasonNumber>1</SeasonNumber>" not in destMetadata
