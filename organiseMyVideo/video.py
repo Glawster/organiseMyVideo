@@ -346,8 +346,7 @@ class VideoMixin:
         """
         inputStream = sys.stdin
         outputStream = sys.stdout
-        stderrIsTtyMethod = getattr(sys.stderr, "isatty", None)
-        if callable(stderrIsTtyMethod) and stderrIsTtyMethod():
+        if hasattr(sys.stderr, "isatty") and sys.stderr.isatty():
             outputStream = sys.stderr
         fileDescriptor = inputStream.fileno()
         try:

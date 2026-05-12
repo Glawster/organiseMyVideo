@@ -843,7 +843,7 @@ def testProcessFilesUsesMovieMcmHintsWhenFilenameCannotBeParsed(
     assert not srcFile.exists()
 
 
-def testProcessFilesLogsSeparatorBeforeEachVideo(
+def testProcessFilesLogsSeparatorBeforeEachFile(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
 ):
     srcFile = confirmedOrganizer.sourceDir / "Breaking.Bad.S01E01.Pilot.mkv"
@@ -859,13 +859,19 @@ def testProcessFilesLogsSeparatorBeforeEachVideo(
 
     messages = [record.getMessage() for record in caplog.records]
     separatorIndex = next(
-        i
-        for i, message in enumerate(messages)
-        if message.endswith(_FILE_PROCESS_SEPARATOR)
+        (
+            i
+            for i, message in enumerate(messages)
+            if message.endswith(_FILE_PROCESS_SEPARATOR)
+        ),
+        None,
     )
     processingIndex = next(
-        i for i, message in enumerate(messages) if "processing TV show:" in message
+        (i for i, message in enumerate(messages) if "processing TV show:" in message),
+        None,
     )
+    assert separatorIndex is not None, f"missing separator log in: {messages}"
+    assert processingIndex is not None, f"missing processing log in: {messages}"
     assert separatorIndex < processingIndex
 
 
