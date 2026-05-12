@@ -765,7 +765,7 @@ class VideoMixin:
         sourceDir = sourceFile.parent
         movieXmlFile = sourceDir / "movie.xml"
         movieRoot = self._readXmlRoot(movieXmlFile)
-        movieMcm = {
+        mcmPresence = {
             "movieXmlExists": movieXmlFile.exists(),
             "dvdIdXmlExists": self._hasMatchingFiles(
                 sourceDir, ("mcm_id__*.dvdid.xml",)
@@ -775,7 +775,7 @@ class VideoMixin:
             ),
         }
 
-        if movieRoot is None and not any(movieMcm.values()):
+        if movieRoot is None and not any(mcmPresence.values()):
             return None
 
         title = self._readFirstXmlText(movieRoot, ("LocalTitle", "OriginalTitle"))
@@ -785,7 +785,7 @@ class VideoMixin:
 
         if not self._hasAnyMetadata(
             title=title, year=year, imdbId=imdbId, tmdbId=tmdbId
-        ) and not any(movieMcm.values()):
+        ) and not any(mcmPresence.values()):
             return None
 
         return {
@@ -795,7 +795,7 @@ class VideoMixin:
             "imdbId": imdbId,
             "tmdbId": tmdbId,
             "metadataSource": "mcm",
-            "mcm": movieMcm,
+            "mcm": mcmPresence,
         }
 
     def _readTvMcmHints(self, sourceFile: Path) -> Optional[dict]:
@@ -1242,7 +1242,7 @@ class VideoMixin:
         ET.ElementTree(root).write(seriesFile, encoding="utf-8", xml_declaration=True)
 
     def _ensureSeriesMetadata(self, showDir: Path, tvInfo: dict) -> None:
-        """Ensure destination show directory has `series.xml` with canonical metadata."""
+        """Create destination `series.xml` only when missing; preserve existing files."""
         showName = tvInfo.get("showName")
         if not showName:
             return

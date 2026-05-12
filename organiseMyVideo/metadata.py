@@ -344,7 +344,7 @@ class MetadataMixin:
             logger.warning("could not inspect show metadata folders %s: %s", showDir, error)
             seasonMetadataDirs = []
 
-        tvMcm = {
+        mcmPresence = {
             "showXmlExists": seriesFile.exists(),
             "dvdIdXmlExists": self._hasMatchingFiles(showDir, ("mcm_id__*.dvdid.xml",)),
             "seasonMetadataFolderExists": bool(seasonMetadataDirs),
@@ -356,7 +356,7 @@ class MetadataMixin:
 
         if not self._hasAnyMetadata(
             showName=showName, imdbId=imdbId, seriesId=seriesId
-        ) and not any(tvMcm.values()):
+        ) and not any(mcmPresence.values()):
             return None
 
         return {
@@ -365,7 +365,7 @@ class MetadataMixin:
             "imdbId": imdbId,
             "seriesId": seriesId,
             "metadataSource": "mcm",
-            "mcm": tvMcm,
+            "mcm": mcmPresence,
         }
 
     def _buildMetadataLibraryFromStorage(
