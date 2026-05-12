@@ -218,6 +218,11 @@ def testReadMcmHintsReturnsMovieMetadata(sourceDir: Path, organizer: VideoOrgani
         "imdbId": "tt8134742",
         "tmdbId": "489064",
         "metadataSource": "mcm",
+        "mcm": {
+            "movieXmlExists": True,
+            "dvdIdXmlExists": False,
+            "artworkExists": False,
+        },
     }
 
 
@@ -262,6 +267,13 @@ def testReadMcmHintsReturnsTvMetadata(sourceDir: Path, organizer: VideoOrganizer
         "seriesId": "347507",
         "episodeId": "10751471",
         "metadataSource": "mcm",
+        "mcm": {
+            "showXmlExists": True,
+            "dvdIdXmlExists": False,
+            "seasonMetadataFolderExists": True,
+            "episodeXmlExists": True,
+            "artworkExists": False,
+        },
     }
 
 
@@ -295,6 +307,13 @@ def testReadMcmHintsInfersTvSeasonFromSeriesAndPath(
         "seriesId": "117581",
         "episodeId": None,
         "metadataSource": "mcm",
+        "mcm": {
+            "showXmlExists": True,
+            "dvdIdXmlExists": False,
+            "seasonMetadataFolderExists": False,
+            "episodeXmlExists": False,
+            "artworkExists": False,
+        },
     }
 
 
@@ -331,8 +350,67 @@ def testReadMcmHintsIgnoresBinaryEpisodeXmlWithoutWarning(
         "seriesId": "999999",
         "episodeId": None,
         "metadataSource": "mcm",
+        "mcm": {
+            "showXmlExists": True,
+            "dvdIdXmlExists": False,
+            "seasonMetadataFolderExists": True,
+            "episodeXmlExists": True,
+            "artworkExists": False,
+        },
     }
     assert "could not parse metadata XML" not in caplog.text
+
+
+def testReadMcmHintsDetectsMovieArtworkWithoutMovieXml(
+    sourceDir: Path, organizer: VideoOrganizer
+):
+    movieDir = sourceDir / "3 from Hell (2019)"
+    movieDir.mkdir()
+    movieFile = movieDir / "clip.mp4"
+    movieFile.write_bytes(b"x" * 50)
+    (movieDir / "folder.jpg").write_bytes(b"poster")
+    (movieDir / "mcm_id__tt8134742-489064.dvdid.xml").write_text(
+        "<Disc />", encoding="utf-8"
+    )
+
+    hints = organizer._readMcmHints(movieFile)
+
+    assert hints == {
+        "type": "movie",
+        "title": None,
+        "year": None,
+        "imdbId": None,
+        "tmdbId": None,
+        "metadataSource": "mcm",
+        "mcm": {
+            "movieXmlExists": False,
+            "dvdIdXmlExists": True,
+            "artworkExists": True,
+        },
+    }
+
+
+def testReadTvSeriesMcmHintsReportsShowEpisodeXmlAndArtwork(
+    sourceDir: Path, organizer: VideoOrganizer
+):
+    showDir = sourceDir / "After Life"
+    seasonDir = showDir / "Season 1"
+    metadataDir = seasonDir / "metadata"
+    metadataDir.mkdir(parents=True)
+    (showDir / "series.xml").write_text("<Series />", encoding="utf-8")
+    (showDir / "folder.jpg").write_bytes(b"poster")
+    (metadataDir / "episode.xml").write_text("<Item />", encoding="utf-8")
+
+    hints = organizer._readTvSeriesMcmHints(showDir)
+
+    assert hints is not None
+    assert hints["mcm"] == {
+        "showXmlExists": True,
+        "dvdIdXmlExists": False,
+        "seasonMetadataFolderExists": True,
+        "episodeXmlExists": True,
+        "artworkExists": True,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1812,6 +1890,34 @@ def testMoveMovieReplicatesMcmCompanionFiles(
     ) == "<Disc />"
 
 
+def testMoveMoviePreservesExistingMcmCompanionFilesInDestination(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    movieSourceDir = confirmedOrganizer.sourceDir / "3 from Hell (2019)"
+    movieSourceDir.mkdir()
+    srcFile = movieSourceDir / "3 from Hell (2019).mp4"
+    srcFile.write_bytes(b"x" * 100)
+    (movieSourceDir / "folder.jpg").write_bytes(b"new-poster")
+
+    movieStorage = tmp_path / "movie1"
+    destDir = movieStorage / "3 from Hell (2019)"
+    destDir.mkdir(parents=True)
+    (destDir / "folder.jpg").write_bytes(b"existing-poster")
+
+    movieInfo = {
+        "title": "3 from Hell",
+        "year": "2019",
+        "extension": ".mp4",
+        "type": "movie",
+    }
+    result = confirmedOrganizer.moveMovie(
+        srcFile, movieInfo, [movieStorage], interactive=False
+    )
+
+    assert result is True
+    assert (destDir / "folder.jpg").read_bytes() == b"existing-poster"
+
+
 def testMoveMovieUsesExistingDir(tmp_path: Path, confirmedOrganizer: VideoOrganizer):
     srcFile = confirmedOrganizer.sourceDir / "Inception (2010).mp4"
     srcFile.write_bytes(b"x" * 100)
@@ -2064,9 +2170,7 @@ def testMoveTvShowReplicatesMcmCompanionFiles(
     assert (showDestDir / "folder.jpg").read_bytes() == b"show-cover"
     assert (showDestDir / "backdrop.jpg").read_bytes() == b"backdrop"
     assert (showDestDir / "backdrop2.jpg").read_bytes() == b"backdrop2"
-    seriesText = (showDestDir / "series.xml").read_text(encoding="utf-8")
-    assert "<SeriesName>Daredevil, Born Again</SeriesName>" in seriesText
-    assert "<LocalTitle>Daredevil, Born Again</LocalTitle>" in seriesText
+    assert (showDestDir / "series.xml").read_text(encoding="utf-8") == "<Series />"
     assert (showDestDir / "mcm_id__show.dvdid.xml").read_text(
         encoding="utf-8"
     ) == "<Disc />"
@@ -2076,13 +2180,56 @@ def testMoveTvShowReplicatesMcmCompanionFiles(
         / "metadata"
         / "Daredevil.Born.Again.S01E04.Sic.Semper.Systema.xml"
     ).read_text(encoding="utf-8")
+    assert destMetadata.startswith("<?xml")
     assert "<filename>/67da18725f220.jpg</filename>" in destMetadata
-    assert "<EpisodeNumber>4</EpisodeNumber>" in destMetadata
-    assert "<SeasonNumber>1</SeasonNumber>" in destMetadata
-    assert "<EpisodeName>Sic Semper Systema</EpisodeName>" in destMetadata
+    assert "<EpisodeNumber>4</EpisodeNumber>" not in destMetadata
+    assert "<SeasonNumber>1</SeasonNumber>" not in destMetadata
+    assert "<EpisodeName>Sic Semper Systema</EpisodeName>" not in destMetadata
     assert (
         seasonDestDir / "metadata" / "67da18725f220.jpg"
     ).read_bytes() == b"episode-thumb"
+
+
+def testMoveTvShowPreservesExistingEpisodeMetadataInDestination(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    showSourceDir = confirmedOrganizer.sourceDir / "Daredevil Born Again"
+    seasonSourceDir = showSourceDir / "Season 1"
+    metadataSourceDir = seasonSourceDir / "metadata"
+    metadataSourceDir.mkdir(parents=True)
+    srcFile = seasonSourceDir / "Daredevil.Born.Again.S01E04.Sic.Semper.Systema.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    (
+        metadataSourceDir / "Daredevil.Born.Again.S01E04.Sic.Semper.Systema.xml"
+    ).write_text("<Item><EpisodeName>new</EpisodeName></Item>", encoding="utf-8")
+
+    tvStorage = tmp_path / "video1" / "TV"
+    metadataDestDir = (
+        tvStorage / "Daredevil Born Again" / "Season 01" / "metadata"
+    )
+    metadataDestDir.mkdir(parents=True)
+    (
+        metadataDestDir / "Daredevil.Born.Again.S01E04.Sic.Semper.Systema.xml"
+    ).write_text("<Item><EpisodeName>existing</EpisodeName></Item>", encoding="utf-8")
+
+    tvInfo = {
+        "showName": "Daredevil Born Again",
+        "season": 1,
+        "episode": 4,
+        "episodeTitle": "Sic Semper Systema",
+        "seriesId": "12345",
+        "imdbId": "tt12345",
+        "extension": ".mkv",
+        "type": "tv",
+    }
+    result = confirmedOrganizer.moveTvShow(
+        srcFile, tvInfo, [tvStorage], interactive=False
+    )
+
+    assert result is True
+    assert (
+        metadataDestDir / "Daredevil.Born.Again.S01E04.Sic.Semper.Systema.xml"
+    ).read_text(encoding="utf-8") == "<Item><EpisodeName>existing</EpisodeName></Item>"
 
 
 def testMoveTvShowCreatesSeriesXmlWhenMissingAndMetadataConfident(
@@ -2120,7 +2267,7 @@ def testMoveTvShowCreatesSeriesXmlWhenMissingAndMetadataConfident(
     ).exists()
 
 
-def testMoveTvShowPreservesExistingSeriesXmlAndOnlyFillsMissingFields(
+def testMoveTvShowPreservesExistingSeriesXmlWithoutOverwriting(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer
 ):
     showSourceDir = confirmedOrganizer.sourceDir / "Alias Name"
@@ -2160,7 +2307,7 @@ def testMoveTvShowPreservesExistingSeriesXmlAndOnlyFillsMissingFields(
     )
     assert "<SeriesName>Existing Canonical Name</SeriesName>" in seriesText
     assert "<SeriesID>990001</SeriesID>" in seriesText
-    assert "<IMDB_ID>tt8398600</IMDB_ID>" in seriesText
+    assert "<IMDB_ID>" not in seriesText
 
 
 def testMoveTvShowUsesCanonicalEpisodeTitleFilename(
