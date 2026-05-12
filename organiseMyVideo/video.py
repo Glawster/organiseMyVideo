@@ -1264,6 +1264,10 @@ class VideoMixin:
             logger.value("reusing confirmed TV show", cachedResult["name"])
             return cachedResult
 
+        if not self._promptHelpDisplayed and not self._shouldUseCursesPrompts():
+            print("Keys: y = yes  n = no  q = quit  t = TV show  m = movie")
+            self._promptHelpDisplayed = True
+
         if fileType == "tv":
             prompt = (
                 f"\nTV Show detected: '{defaultName}'\n"
