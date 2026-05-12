@@ -21,6 +21,7 @@ _METADATA_LIBRARY_STATE_MISSING = "missing"
 _METADATA_LIBRARY_STATE_INVALID = "invalid"
 _METADATA_LIBRARY_STATE_READY = "ready"
 _OMDB_API_BASE_URL = "https://www.omdbapi.com/"
+_MAX_ARTWORK_SIZE_BYTES = 20_000_000
 
 
 class MetadataMixin:
@@ -794,7 +795,7 @@ class MetadataMixin:
         normalised["type"] = "movie"
         normalised["title"] = normalised.get("title") or None
         normalised["year"] = normalised.get("year") or None
-        normalised["imdbId"] = normalised.get("imdbId") or None
+        normalised["imdbId"] = self._normaliseIdValue(normalised.get("imdbId"))
         normalised["tmdbId"] = self._normaliseIdValue(normalised.get("tmdbId"))
         normalised["metadataSource"] = normalised.get("metadataSource") or None
         normalised["metadataUpdatedAt"] = (
@@ -878,6 +879,7 @@ class MetadataMixin:
         title = movieInfo.get("title")
 
         if tmdbId:
+            # JWT bearer tokens start with "ey" (base64-encoded '{"'); plain API keys do not.
             if apiKey.startswith("ey"):
                 data = self._requestJson(
                     f"{TMDB_API_BASE_URL}/movie/{tmdbId}",
@@ -898,6 +900,7 @@ class MetadataMixin:
         if movieInfo.get("year"):
             queryParams["year"] = movieInfo["year"]
 
+        # JWT bearer tokens start with "ey" (base64-encoded '{"'); plain API keys do not.
         if apiKey.startswith("ey"):
             queryStr = urllib.parse.urlencode(queryParams)
             searchData = self._requestJson(
@@ -1022,11 +1025,11 @@ class MetadataMixin:
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
                 contentLength = response.headers.get("Content-Length")
-                if contentLength and int(contentLength) > 20_000_000:
+                if contentLength and int(contentLength) > _MAX_ARTWORK_SIZE_BYTES:
                     logger.warning("artwork response too large from %s", url)
                     return False
-                raw = response.read(20_000_001)
-                if len(raw) > 20_000_000:
+                raw = response.read(_MAX_ARTWORK_SIZE_BYTES + 1)
+                if len(raw) > _MAX_ARTWORK_SIZE_BYTES:
                     logger.warning("artwork response too large from %s", url)
                     return False
                 destPath.parent.mkdir(parents=True, exist_ok=True)
