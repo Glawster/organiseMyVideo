@@ -1989,6 +1989,565 @@ def testMoveMovieNoStorageReturnsFalse(organizer: VideoOrganizer):
 
 
 # ---------------------------------------------------------------------------
+# Movie MCM metadata generation — _ensureMovieMetadata / _ensureMovieDvdIdMetadata
+# ---------------------------------------------------------------------------
+
+
+def testMoveMovieCreatesMovieXmlWhenMissingAndMetadataConfident(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "Inception (2010).mp4"
+    srcFile.write_bytes(b"x" * 100)
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+
+    movieInfo = {
+        "title": "Inception",
+        "year": "2010",
+        "imdbId": "tt1375666",
+        "tmdbId": "27205",
+        "extension": ".mp4",
+        "type": "movie",
+    }
+    result = confirmedOrganizer.moveMovie(
+        srcFile, movieInfo, [movieStorage], interactive=False
+    )
+
+    assert result is True
+    destDir = movieStorage / "Inception (2010)"
+    movieXml = destDir / "movie.xml"
+    assert movieXml.exists()
+    movieXmlText = movieXml.read_text(encoding="utf-8")
+    assert "<LocalTitle>Inception</LocalTitle>" in movieXmlText
+    assert "<ProductionYear>2010</ProductionYear>" in movieXmlText
+    assert "<IMDbId>tt1375666</IMDbId>" in movieXmlText
+    assert "<TMDbId>27205</TMDbId>" in movieXmlText
+
+
+def testMoveMovieCreatesDvdIdXmlWhenMissingWithBothIds(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "Inception (2010).mp4"
+    srcFile.write_bytes(b"x" * 100)
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+
+    movieInfo = {
+        "title": "Inception",
+        "year": "2010",
+        "imdbId": "tt1375666",
+        "tmdbId": "27205",
+        "extension": ".mp4",
+        "type": "movie",
+    }
+    result = confirmedOrganizer.moveMovie(
+        srcFile, movieInfo, [movieStorage], interactive=False
+    )
+
+    assert result is True
+    destDir = movieStorage / "Inception (2010)"
+    dvdIdXml = destDir / "mcm_id__tt1375666-27205.dvdid.xml"
+    assert dvdIdXml.exists()
+    dvdIdText = dvdIdXml.read_text(encoding="utf-8")
+    assert "<IMDbId>tt1375666</IMDbId>" in dvdIdText
+    assert "<TMDbId>27205</TMDbId>" in dvdIdText
+    assert "<Type>movie</Type>" in dvdIdText
+
+
+def testMoveMovieCreatesDvdIdXmlWithImdbOnlyWhenTmdbMissing(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    destDir = tmp_path / "Inception (2010)"
+    destDir.mkdir()
+    movieInfo = {"imdbId": "tt1375666", "tmdbId": None}
+    confirmedOrganizer._ensureMovieDvdIdMetadata(destDir, movieInfo)
+    dvdIdXml = destDir / "mcm_id__tt1375666.dvdid.xml"
+    assert dvdIdXml.exists()
+
+
+def testMoveMovieCreatesDvdIdXmlWithTmdbOnlyWhenImdbMissing(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    destDir = tmp_path / "Inception (2010)"
+    destDir.mkdir()
+    movieInfo = {"imdbId": None, "tmdbId": "27205"}
+    confirmedOrganizer._ensureMovieDvdIdMetadata(destDir, movieInfo)
+    dvdIdXml = destDir / "mcm_id__27205.dvdid.xml"
+    assert dvdIdXml.exists()
+
+
+def testMoveMovieSkipsDvdIdXmlWhenNoIds(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    destDir = tmp_path / "Inception (2010)"
+    destDir.mkdir()
+    movieInfo = {}
+    confirmedOrganizer._ensureMovieDvdIdMetadata(destDir, movieInfo)
+    dvdIdFiles = list(destDir.glob("mcm_id__*.dvdid.xml"))
+    assert dvdIdFiles == []
+
+
+def testMoveMoviePreservesExistingMovieXmlWithoutOverwriting(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    movieSourceDir = confirmedOrganizer.sourceDir / "Inception (2010)"
+    movieSourceDir.mkdir()
+    srcFile = movieSourceDir / "Inception (2010).mp4"
+    srcFile.write_bytes(b"x" * 100)
+
+    movieStorage = tmp_path / "movie1"
+    destDir = movieStorage / "Inception (2010)"
+    destDir.mkdir(parents=True)
+    existingXml = "<Title><LocalTitle>Existing</LocalTitle></Title>"
+    (destDir / "movie.xml").write_text(existingXml, encoding="utf-8")
+
+    movieInfo = {
+        "title": "Inception",
+        "year": "2010",
+        "imdbId": "tt1375666",
+        "extension": ".mp4",
+        "type": "movie",
+    }
+    result = confirmedOrganizer.moveMovie(
+        srcFile, movieInfo, [movieStorage], interactive=False
+    )
+
+    assert result is True
+    assert (destDir / "movie.xml").read_text(encoding="utf-8") == existingXml
+
+
+def testMoveMoviePreservesExistingDvdIdXmlWithoutCreatingDuplicate(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "Inception (2010).mp4"
+    srcFile.write_bytes(b"x" * 100)
+    movieStorage = tmp_path / "movie1"
+    destDir = movieStorage / "Inception (2010)"
+    destDir.mkdir(parents=True)
+    (destDir / "mcm_id__existing.dvdid.xml").write_text("<Item />", encoding="utf-8")
+
+    movieInfo = {
+        "title": "Inception",
+        "year": "2010",
+        "imdbId": "tt1375666",
+        "tmdbId": "27205",
+        "extension": ".mp4",
+        "type": "movie",
+    }
+    result = confirmedOrganizer.moveMovie(
+        srcFile, movieInfo, [movieStorage], interactive=False
+    )
+
+    assert result is True
+    dvdIdFiles = list(destDir.glob("mcm_id__*.dvdid.xml"))
+    assert len(dvdIdFiles) == 1
+    assert dvdIdFiles[0].name == "mcm_id__existing.dvdid.xml"
+
+
+def testMoveMovieDryRunDoesNotCreateMetadataFiles(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    srcFile = organizer.sourceDir / "Inception (2010).mp4"
+    srcFile.write_bytes(b"x" * 100)
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+
+    movieInfo = {
+        "title": "Inception",
+        "year": "2010",
+        "imdbId": "tt1375666",
+        "tmdbId": "27205",
+        "extension": ".mp4",
+        "type": "movie",
+    }
+    result = organizer.moveMovie(srcFile, movieInfo, [movieStorage], interactive=False)
+
+    assert result is True
+    destDir = movieStorage / "Inception (2010)"
+    assert not (destDir / "movie.xml").exists()
+    assert not list(destDir.glob("mcm_id__*.dvdid.xml"))
+
+
+def testBuildMovieDvdIdFilenameWithBothIds(organizer: VideoOrganizer):
+    movieInfo = {"imdbId": "tt1375666", "tmdbId": "27205"}
+    assert (
+        organizer._buildMovieDvdIdFilename(movieInfo)
+        == "mcm_id__tt1375666-27205.dvdid.xml"
+    )
+
+
+def testBuildMovieDvdIdFilenameImdbOnly(organizer: VideoOrganizer):
+    movieInfo = {"imdbId": "tt1375666"}
+    assert (
+        organizer._buildMovieDvdIdFilename(movieInfo) == "mcm_id__tt1375666.dvdid.xml"
+    )
+
+
+def testBuildMovieDvdIdFilenameTmdbOnly(organizer: VideoOrganizer):
+    movieInfo = {"tmdbId": "27205"}
+    assert organizer._buildMovieDvdIdFilename(movieInfo) == "mcm_id__27205.dvdid.xml"
+
+
+def testBuildMovieDvdIdFilenameNoIds(organizer: VideoOrganizer):
+    assert organizer._buildMovieDvdIdFilename({}) is None
+
+
+# ---------------------------------------------------------------------------
+# Movie metadata enrichment — _normaliseMovieMetadata / _enrichMovieMetadata
+# ---------------------------------------------------------------------------
+
+
+def testNormaliseMovieMetadataReturnsNoneForNone(organizer: VideoOrganizer):
+    assert organizer._normaliseMovieMetadata(None) is None
+
+
+def testNormaliseMovieMetadataSetsType(organizer: VideoOrganizer):
+    result = organizer._normaliseMovieMetadata({"title": "Inception", "year": "2010"})
+    assert result is not None
+    assert result["type"] == "movie"
+
+
+def testNormaliseMovieMetadataNormalisesEmptyStringsToNone(organizer: VideoOrganizer):
+    result = organizer._normaliseMovieMetadata(
+        {"title": "", "year": "", "imdbId": "", "tmdbId": ""}
+    )
+    assert result is not None
+    assert result["title"] is None
+    assert result["year"] is None
+    assert result["imdbId"] is None
+    assert result["tmdbId"] is None
+
+
+def testEnrichMovieMetadataReturnsNoneForNone(organizer: VideoOrganizer):
+    assert organizer._enrichMovieMetadata(None) is None
+
+
+def testEnrichMovieMetadataSkipsScraperWhenBothIdsPresent(organizer: VideoOrganizer):
+    movieInfo = {
+        "title": "Inception",
+        "year": "2010",
+        "imdbId": "tt1375666",
+        "tmdbId": "27205",
+        "type": "movie",
+    }
+    with patch.object(
+        organizer, "_fetchMovieMetadataFromScraper"
+    ) as mockScraper:
+        result = organizer._enrichMovieMetadata(movieInfo)
+
+    mockScraper.assert_not_called()
+    assert result is not None
+    assert result["imdbId"] == "tt1375666"
+    assert result["tmdbId"] == "27205"
+
+
+def testEnrichMovieMetadataSkipsScraperInDryRun(organizer: VideoOrganizer):
+    """In dry-run mode enrichment logs but does not call the scraper."""
+    movieInfo = {
+        "title": "Inception",
+        "year": "2010",
+        "imdbId": None,
+        "type": "movie",
+    }
+    with patch.object(
+        organizer, "_fetchMovieMetadataFromScraper"
+    ) as mockScraper:
+        result = organizer._enrichMovieMetadata(movieInfo)
+
+    mockScraper.assert_not_called()
+    assert result is not None
+
+
+def testEnrichMovieMetadataCallsScraperWhenIdsMissing(organizer: VideoOrganizer):
+    """In confirm mode, enrichment fetches from scraper when IDs are missing."""
+    organizer.dryRun = False
+    movieInfo = {
+        "title": "Inception",
+        "year": "2010",
+        "type": "movie",
+    }
+    scraped = {
+        "type": "movie",
+        "title": "Inception",
+        "year": "2010",
+        "imdbId": "tt1375666",
+        "tmdbId": "27205",
+        "metadataSource": "tmdb",
+    }
+    emptyLibrary = organizer._newMetadataLibrary()
+    with patch.object(organizer, "_loadMetadataLibrary", return_value=emptyLibrary):
+        with patch.object(
+            organizer, "_fetchMovieMetadataFromScraper", return_value=scraped
+        ) as mockScraper:
+            with patch.object(organizer, "_saveMetadataLibrary"):
+                result = organizer._enrichMovieMetadata(movieInfo)
+
+    mockScraper.assert_called_once()
+    assert result is not None
+    assert result["imdbId"] == "tt1375666"
+    assert result["tmdbId"] == "27205"
+
+
+# ---------------------------------------------------------------------------
+# TMDB movie metadata — _fetchTmdbMovieMetadata / _tmdbMovieRecord
+# ---------------------------------------------------------------------------
+
+
+def testFetchTmdbMovieMetadataReturnsNoneWhenNoApiKey(organizer: VideoOrganizer):
+    with patch.dict("os.environ", {}, clear=True):
+        result = organizer._fetchTmdbMovieMetadata(
+            {"title": "Inception", "year": "2010"}
+        )
+    assert result is None
+
+
+def testFetchTmdbMovieMetadataSearchesByTitle(organizer: VideoOrganizer):
+    tmdbResponse = {
+        "results": [
+            {
+                "id": 27205,
+                "title": "Inception",
+                "release_date": "2010-07-16",
+                "poster_path": "/poster.jpg",
+                "backdrop_path": "/backdrop.jpg",
+            }
+        ]
+    }
+    with patch.dict("os.environ", {"ORGANISEMYVIDEO_TMDB_API_KEY": "testkey"}):
+        with patch.object(organizer, "_requestJson", return_value=tmdbResponse):
+            result = organizer._fetchTmdbMovieMetadata(
+                {"title": "Inception", "year": "2010"}
+            )
+
+    assert result is not None
+    assert result["tmdbId"] == "27205"
+    assert result["title"] == "Inception"
+    assert result["year"] == "2010"
+    assert result["posterPath"] == "/poster.jpg"
+    assert result["backdropPath"] == "/backdrop.jpg"
+    assert result["metadataSource"] == "tmdb"
+
+
+def testFetchTmdbMovieMetadataFetchesById(organizer: VideoOrganizer):
+    tmdbDetail = {
+        "id": 27205,
+        "title": "Inception",
+        "release_date": "2010-07-16",
+        "imdb_id": "tt1375666",
+        "poster_path": "/poster.jpg",
+        "backdrop_path": None,
+    }
+    with patch.dict("os.environ", {"ORGANISEMYVIDEO_TMDB_API_KEY": "testkey"}):
+        with patch.object(organizer, "_requestJson", return_value=tmdbDetail):
+            result = organizer._fetchTmdbMovieMetadata(
+                {"title": "Inception", "tmdbId": "27205"}
+            )
+
+    assert result is not None
+    assert result["tmdbId"] == "27205"
+    assert result["imdbId"] == "tt1375666"
+    assert result["posterPath"] == "/poster.jpg"
+    assert result["backdropPath"] is None
+
+
+def testTmdbMovieRecordReturnsNoneForNonDict(organizer: VideoOrganizer):
+    assert organizer._tmdbMovieRecord(None) is None  # type: ignore[arg-type]
+    assert organizer._tmdbMovieRecord("bad") is None  # type: ignore[arg-type]
+
+
+def testTmdbMovieRecordReturnsNoneWhenNoTitle(organizer: VideoOrganizer):
+    assert organizer._tmdbMovieRecord({"id": 123}) is None
+
+
+def testTmdbMovieRecordParsesReleaseDate(organizer: VideoOrganizer):
+    result = organizer._tmdbMovieRecord(
+        {"id": 27205, "title": "Inception", "release_date": "2010-07-16"}
+    )
+    assert result is not None
+    assert result["year"] == "2010"
+
+
+# ---------------------------------------------------------------------------
+# OMDb movie metadata — _fetchOmdbMovieMetadata
+# ---------------------------------------------------------------------------
+
+
+def testFetchOmdbMovieMetadataReturnsNoneWhenNoApiKey(organizer: VideoOrganizer):
+    with patch.dict("os.environ", {}, clear=True):
+        result = organizer._fetchOmdbMovieMetadata(
+            {"title": "Inception", "year": "2010"}
+        )
+    assert result is None
+
+
+def testFetchOmdbMovieMetadataSearchesByTitle(organizer: VideoOrganizer):
+    omdbResponse = {
+        "Response": "True",
+        "Title": "Inception",
+        "Year": "2010",
+        "imdbID": "tt1375666",
+        "Poster": "https://example.com/poster.jpg",
+    }
+    with patch.dict("os.environ", {"ORGANISEMYVIDEO_OMDB_API_KEY": "testkey"}):
+        with patch.object(organizer, "_requestJson", return_value=omdbResponse):
+            result = organizer._fetchOmdbMovieMetadata(
+                {"title": "Inception", "year": "2010"}
+            )
+
+    assert result is not None
+    assert result["imdbId"] == "tt1375666"
+    assert result["title"] == "Inception"
+    assert result["year"] == "2010"
+    assert result["posterUrl"] == "https://example.com/poster.jpg"
+    assert result["metadataSource"] == "omdb"
+
+
+def testFetchOmdbMovieMetadataReturnsFalseResponse(organizer: VideoOrganizer):
+    with patch.dict("os.environ", {"ORGANISEMYVIDEO_OMDB_API_KEY": "testkey"}):
+        with patch.object(
+            organizer, "_requestJson", return_value={"Response": "False"}
+        ):
+            result = organizer._fetchOmdbMovieMetadata({"title": "Unknown"})
+    assert result is None
+
+
+def testFetchOmdbMovieMetadataRequiresTitleOrImdb(organizer: VideoOrganizer):
+    with patch.dict("os.environ", {"ORGANISEMYVIDEO_OMDB_API_KEY": "testkey"}):
+        result = organizer._fetchOmdbMovieMetadata({})
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Artwork download — _downloadArtworkFile / _fetchMovieArtwork
+# ---------------------------------------------------------------------------
+
+
+def testDownloadArtworkFilePreservesExistingFile(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    dest = tmp_path / "folder.jpg"
+    dest.write_bytes(b"existing")
+    result = organizer._downloadArtworkFile("https://example.com/img.jpg", dest)
+    assert result is True
+    assert dest.read_bytes() == b"existing"
+
+
+def testDownloadArtworkFileRejectsNonHttps(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    dest = tmp_path / "folder.jpg"
+    result = organizer._downloadArtworkFile("http://example.com/img.jpg", dest)
+    assert result is False
+    assert not dest.exists()
+
+
+def testDownloadArtworkFileDryRunReturnsTrueWithoutWriting(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    dest = tmp_path / "folder.jpg"
+    result = organizer._downloadArtworkFile("https://example.com/img.jpg", dest)
+    assert result is True
+    assert not dest.exists()
+
+
+def testDownloadArtworkFileWritesBytes(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    dest = tmp_path / "folder.jpg"
+    import urllib.request
+    from unittest.mock import MagicMock
+
+    fakeResponse = MagicMock()
+    fakeResponse.__enter__ = lambda s: s
+    fakeResponse.__exit__ = MagicMock(return_value=False)
+    fakeResponse.headers = {"Content-Length": "5"}
+    fakeResponse.read = MagicMock(return_value=b"imgdt")
+
+    with patch("urllib.request.urlopen", return_value=fakeResponse):
+        result = confirmedOrganizer._downloadArtworkFile(
+            "https://example.com/poster.jpg", dest
+        )
+    assert result is True
+    assert dest.read_bytes() == b"imgdt"
+
+
+def testFetchMovieArtworkDownloadsPosterAndBackdrop(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    movieInfo = {
+        "posterPath": "/poster.jpg",
+        "backdropPath": "/backdrop.jpg",
+    }
+    with patch.object(
+        confirmedOrganizer, "_downloadArtworkFile", return_value=True
+    ) as mockDownload:
+        confirmedOrganizer._fetchMovieArtwork(movieInfo, tmp_path)
+
+    calls = {str(c.args[1].name): c.args[0] for c in mockDownload.call_args_list}
+    assert "folder.jpg" in calls
+    assert calls["folder.jpg"].endswith("/poster.jpg")
+    assert "backdrop.jpg" in calls
+    assert calls["backdrop.jpg"].endswith("/backdrop.jpg")
+
+
+def testFetchMovieArtworkFallsBackToOmdbPosterUrl(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    movieInfo = {
+        "posterUrl": "https://example.com/omdb-poster.jpg",
+    }
+    with patch.object(
+        confirmedOrganizer, "_downloadArtworkFile", return_value=True
+    ) as mockDownload:
+        confirmedOrganizer._fetchMovieArtwork(movieInfo, tmp_path)
+
+    posterCall = [c for c in mockDownload.call_args_list if "folder.jpg" in str(c.args[1])]
+    assert posterCall
+    assert posterCall[0].args[0] == "https://example.com/omdb-poster.jpg"
+
+
+def testFetchMovieArtworkSkipsNAOmdbPoster(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    movieInfo = {"posterUrl": "N/A"}
+    with patch.object(
+        confirmedOrganizer, "_downloadArtworkFile", return_value=True
+    ) as mockDownload:
+        confirmedOrganizer._fetchMovieArtwork(movieInfo, tmp_path)
+
+    assert not mockDownload.called
+
+
+def testMoveMovieFetchesArtworkViaEnrichedMetadata(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    """_replicateMovieMetadata calls _fetchMovieArtwork with enriched metadata."""
+    srcFile = confirmedOrganizer.sourceDir / "Inception (2010).mp4"
+    srcFile.write_bytes(b"x" * 100)
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+
+    movieInfo = {
+        "title": "Inception",
+        "year": "2010",
+        "imdbId": "tt1375666",
+        "tmdbId": "27205",
+        "extension": ".mp4",
+        "type": "movie",
+    }
+
+    with patch.object(
+        confirmedOrganizer, "_fetchMovieArtwork"
+    ) as mockArtwork:
+        result = confirmedOrganizer.moveMovie(
+            srcFile, movieInfo, [movieStorage], interactive=False
+        )
+
+    assert result is True
+    mockArtwork.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
 # moveTvShow — dry-run
 # ---------------------------------------------------------------------------
 

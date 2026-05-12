@@ -11,7 +11,7 @@ from typing import Callable, Optional
 
 from organiseMyProjects.logUtils import getLogger  # type: ignore
 
-from .constants import METADATA_LIBRARY_FILE, TVDB_API_BASE_URL
+from .constants import METADATA_LIBRARY_FILE, TMDB_API_BASE_URL, TMDB_IMAGE_BASE_URL, TVDB_API_BASE_URL
 
 logger = getLogger()
 _METADATA_SCAN_PLACEHOLDER_FILENAME = "__metadata_scan__.mkv"
@@ -780,3 +780,288 @@ class MetadataMixin:
                 "metadataUpdatedAt": self._metadataUpdatedAt(),
             }
         )
+
+    # -----------------------------------------------------------------------
+    # Movie metadata enrichment
+    # -----------------------------------------------------------------------
+
+    def _normaliseMovieMetadata(self, movieInfo: Optional[dict]) -> Optional[dict]:
+        """Return movie metadata in a stable shape."""
+        if not movieInfo:
+            return None
+
+        normalised = dict(movieInfo)
+        normalised["type"] = "movie"
+        normalised["title"] = normalised.get("title") or None
+        normalised["year"] = normalised.get("year") or None
+        normalised["imdbId"] = normalised.get("imdbId") or None
+        normalised["tmdbId"] = self._normaliseIdValue(normalised.get("tmdbId"))
+        normalised["metadataSource"] = normalised.get("metadataSource") or None
+        normalised["metadataUpdatedAt"] = (
+            normalised.get("metadataUpdatedAt") or self._metadataUpdatedAt()
+        )
+        return normalised
+
+    def _lookupMovieMetadataInLibrary(
+        self, movieInfo: Optional[dict]
+    ) -> Optional[dict]:
+        """Return the best matching movie metadata record from the library."""
+        if not movieInfo:
+            return None
+
+        library = self._loadMetadataLibrary()
+        merged = None
+        for key in self._movieLibraryKeys(movieInfo):
+            merged = self._mergeMetadata(merged, library["movies"].get(key))
+        return merged
+
+    def _enrichMovieMetadata(self, movieInfo: Optional[dict]) -> Optional[dict]:
+        """Resolve movie metadata from local hints, library cache, and optional scraper data."""
+        resolved = self._normaliseMovieMetadata(movieInfo)
+        if resolved is None:
+            return None
+
+        libraryMatch = self._lookupMovieMetadataInLibrary(resolved)
+        resolved = self._mergeMetadata(resolved, libraryMatch)
+
+        if resolved.get("imdbId") and resolved.get("tmdbId"):
+            return resolved
+
+        if not resolved.get("title"):
+            return resolved
+
+        logger.action(
+            "fetch movie metadata: %s (%s)",
+            resolved.get("title") or "unknown title",
+            resolved.get("year") or "unknown year",
+        )
+        if self.dryRun:
+            return resolved
+
+        scraped = self._fetchMovieMetadataFromScraper(resolved)
+        if not scraped:
+            return resolved
+
+        resolved = self._mergeMetadata(resolved, self._normaliseMovieMetadata(scraped))
+        self._updateMetadataLibraryFromHints(resolved)
+        return resolved
+
+    def _fetchMovieMetadataFromScraper(self, movieInfo: dict) -> Optional[dict]:
+        """Return scraped movie metadata using a custom fetcher or built-in providers."""
+        fetcher = getattr(self, "_movieMetadataFetcher", None)
+        if callable(fetcher):
+            try:
+                custom = fetcher(movieInfo)
+                if custom:
+                    return custom
+            except Exception as error:
+                logger.warning(
+                    "custom movie metadata fetcher failed for %s: %s", movieInfo, error
+                )
+        return self._fetchMovieMetadataFromProviders(movieInfo)
+
+    def _fetchMovieMetadataFromProviders(self, movieInfo: dict) -> Optional[dict]:
+        """Return movie metadata using the default provider order (TMDB then OMDb)."""
+        for fetcher in (self._fetchTmdbMovieMetadata, self._fetchOmdbMovieMetadata):
+            fetched = fetcher(movieInfo)
+            if fetched and (fetched.get("imdbId") or fetched.get("tmdbId")):
+                return fetched
+        return None
+
+    def _fetchTmdbMovieMetadata(self, movieInfo: dict) -> Optional[dict]:
+        """Fetch movie metadata from TMDB when configuration is available."""
+        apiKey = os.environ.get("ORGANISEMYVIDEO_TMDB_API_KEY")
+        if not apiKey:
+            return None
+
+        tmdbId = movieInfo.get("tmdbId")
+        title = movieInfo.get("title")
+
+        if tmdbId:
+            if apiKey.startswith("ey"):
+                data = self._requestJson(
+                    f"{TMDB_API_BASE_URL}/movie/{tmdbId}",
+                    headers={"Authorization": f"Bearer {apiKey}"},
+                )
+            else:
+                params = urllib.parse.urlencode({"api_key": apiKey})
+                data = self._requestJson(
+                    f"{TMDB_API_BASE_URL}/movie/{tmdbId}?{params}"
+                )
+            if data and isinstance(data, dict) and not data.get("status_code"):
+                return self._tmdbMovieRecord(data)
+
+        if not title:
+            return None
+
+        queryParams: dict = {"query": title}
+        if movieInfo.get("year"):
+            queryParams["year"] = movieInfo["year"]
+
+        if apiKey.startswith("ey"):
+            queryStr = urllib.parse.urlencode(queryParams)
+            searchData = self._requestJson(
+                f"{TMDB_API_BASE_URL}/search/movie?{queryStr}",
+                headers={"Authorization": f"Bearer {apiKey}"},
+            )
+        else:
+            queryParams["api_key"] = apiKey
+            queryStr = urllib.parse.urlencode(queryParams)
+            searchData = self._requestJson(
+                f"{TMDB_API_BASE_URL}/search/movie?{queryStr}"
+            )
+
+        if not isinstance(searchData, dict):
+            return None
+
+        results = searchData.get("results", [])
+        if not results:
+            return None
+
+        return self._tmdbMovieRecord(results[0])
+
+    def _tmdbMovieRecord(self, data: dict) -> Optional[dict]:
+        """Return a normalised movie record from a TMDB movie response."""
+        if not isinstance(data, dict):
+            return None
+
+        title = data.get("title") or data.get("original_title")
+        if not title:
+            return None
+
+        tmdbId = self._normaliseIdValue(data.get("id"))
+        imdbId = data.get("imdb_id") or None
+        releaseDate = data.get("release_date") or ""
+        year = releaseDate[:4] if len(releaseDate) >= 4 else None
+
+        return self._normaliseMovieMetadata(
+            {
+                "type": "movie",
+                "title": title,
+                "year": year,
+                "imdbId": imdbId,
+                "tmdbId": tmdbId,
+                "posterPath": data.get("poster_path") or None,
+                "backdropPath": data.get("backdrop_path") or None,
+                "metadataSource": "tmdb",
+                "metadataUpdatedAt": self._metadataUpdatedAt(),
+            }
+        )
+
+    def _fetchOmdbMovieMetadata(self, movieInfo: dict) -> Optional[dict]:
+        """Fetch movie metadata from OMDb when configuration is available."""
+        apiKey = os.environ.get("ORGANISEMYVIDEO_OMDB_API_KEY")
+        if not apiKey:
+            return None
+
+        query: dict = {"apikey": apiKey, "type": "movie"}
+        imdbId = movieInfo.get("imdbId")
+        if imdbId:
+            query["i"] = imdbId
+        elif movieInfo.get("title"):
+            query["t"] = movieInfo["title"]
+            if movieInfo.get("year"):
+                query["y"] = movieInfo["year"]
+        else:
+            return None
+
+        response = self._requestJson(
+            f"{_OMDB_API_BASE_URL}?{urllib.parse.urlencode(query)}"
+        )
+        if not isinstance(response, dict):
+            return None
+        if str(response.get("Response", "")).lower() == "false":
+            return None
+
+        title = response.get("Title")
+        if not title:
+            return None
+
+        year = response.get("Year")
+        if year and len(year) >= 4:
+            year = year[:4]
+
+        return self._normaliseMovieMetadata(
+            {
+                "type": "movie",
+                "title": title,
+                "year": year,
+                "imdbId": response.get("imdbID") or movieInfo.get("imdbId"),
+                "tmdbId": movieInfo.get("tmdbId"),
+                "posterUrl": response.get("Poster") or None,
+                "metadataSource": "omdb",
+                "metadataUpdatedAt": self._metadataUpdatedAt(),
+            }
+        )
+
+    def _downloadArtworkFile(self, url: str, destPath: Path) -> bool:
+        """
+        Download artwork from *url* and save it to *destPath*.
+
+        Returns True on success, False on failure.  Existing files are preserved.
+        """
+        if destPath.exists():
+            logger.value("preserving existing artwork", destPath)
+            return True
+
+        if not url or not url.startswith("https://"):
+            return False
+
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme != "https" or not parsed.netloc:
+            return False
+
+        logger.action("download artwork: %s -> %s", url, destPath)
+        if self.dryRun:
+            return True
+
+        request = urllib.request.Request(
+            url,
+            headers={"User-Agent": "organiseMyVideo"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                contentLength = response.headers.get("Content-Length")
+                if contentLength and int(contentLength) > 20_000_000:
+                    logger.warning("artwork response too large from %s", url)
+                    return False
+                raw = response.read(20_000_001)
+                if len(raw) > 20_000_000:
+                    logger.warning("artwork response too large from %s", url)
+                    return False
+                destPath.parent.mkdir(parents=True, exist_ok=True)
+                destPath.write_bytes(raw)
+                return True
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError) as error:
+            logger.warning("artwork download failed for %s: %s", url, error)
+            return False
+
+    def _fetchMovieArtwork(self, movieInfo: dict, destDir: Path) -> None:
+        """
+        Download movie artwork (poster → folder.jpg, backdrop → backdrop.jpg).
+
+        Uses TMDB paths when available, then falls back to the OMDb Poster URL.
+        Existing files are always preserved.
+        """
+        posterDest = destDir / "folder.jpg"
+        backdropDest = destDir / "backdrop.jpg"
+
+        posterUrl: Optional[str] = None
+        backdropUrl: Optional[str] = None
+
+        posterPath = movieInfo.get("posterPath")
+        backdropPath = movieInfo.get("backdropPath")
+        if posterPath:
+            posterUrl = f"{TMDB_IMAGE_BASE_URL}{posterPath}"
+        if backdropPath:
+            backdropUrl = f"{TMDB_IMAGE_BASE_URL}{backdropPath}"
+
+        if not posterUrl:
+            omdbPosterUrl = movieInfo.get("posterUrl")
+            if omdbPosterUrl and omdbPosterUrl != "N/A":
+                posterUrl = omdbPosterUrl
+
+        if posterUrl:
+            self._downloadArtworkFile(posterUrl, posterDest)
+        if backdropUrl:
+            self._downloadArtworkFile(backdropUrl, backdropDest)
