@@ -843,7 +843,7 @@ def testProcessFilesUsesMovieMcmHintsWhenFilenameCannotBeParsed(
     assert not srcFile.exists()
 
 
-def testProcessFilesLogsSeparatorBeforeEachFile(
+def testProcessFilesLogsSeparatorBeforeProcessingMessage(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
 ):
     srcFile = confirmedOrganizer.sourceDir / "Breaking.Bad.S01E01.Pilot.mkv"
