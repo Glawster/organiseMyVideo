@@ -3434,7 +3434,7 @@ def testMainConfiguresConsoleTimestampWithoutMilliseconds():
     consoleHandlers = [
         handler
         for handler in omv_main.logger.logger.handlers
-        if type(handler) is logging.StreamHandler
+        if isinstance(handler, logging.StreamHandler)
     ]
     assert consoleHandlers
     assert all(

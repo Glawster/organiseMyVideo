@@ -62,7 +62,7 @@ def main():
     )
     args = parser.parse_args()
 
-    dryRun = True if not args.confirm else False
+    dryRun = not args.confirm
 
     # Setup logging — dryRun passed so logger.action() applies [] prefix correctly.
     # logUtils._setupLogging guards console handler with isinstance(h, StreamHandler)
