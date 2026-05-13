@@ -2053,7 +2053,7 @@ def testPromptUserConfirmationWritesTextPromptToStderrWhenInteractive(
 
     assert result == {"name": "My Show", "type": "tv"}
     mockInput.assert_called_once_with()
-    assert "\nTV Show detected: 'My Show'\n" in fakeStderr.getvalue()
+    assert "TV Show detected: 'My Show'\n" in fakeStderr.getvalue()
     assert "Is this correct?  (y/n/q/t/m or enter new name): " in fakeStderr.getvalue()
     assert fakeStdout.getvalue() == ""
 
@@ -2086,7 +2086,7 @@ def testPromptUserConfirmationUsesCursesMenuWhenEnabled(organizer: VideoOrganize
         result = organizer.promptUserConfirmation("file.mkv", "My Show", "tv")
     assert result == {"name": "My Show", "type": "tv"}
     mockMenu.assert_called_once_with(
-        "\nTV Show detected: 'My Show'\nIs this correct?  (y/n/q/t/m or enter new name): ",
+        "TV Show detected: 'My Show'\nIs this correct?  (y/n/q/t/m or enter new name): ",
         validChoices={"y", "n", "q", "t", "m"},
         defaultChoice="y",
     )

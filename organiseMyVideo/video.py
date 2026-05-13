@@ -367,15 +367,16 @@ class VideoMixin:
                 if key == "\x04":
                     raise EOFError("single-key prompt cancelled by user (Ctrl+D)")
                 if key in ("\n", "\r") and defaultChoice is not None:
-                    print(defaultChoice, file=outputStream, flush=True)
+                    print(defaultChoice, end="\r\n", file=outputStream, flush=True)
                     return defaultChoice
                 if key:
                     lowered = key.lower()
                     if lowered in validChoices:
-                        print(lowered, file=outputStream, flush=True)
+                        print(lowered, end="\r\n", file=outputStream, flush=True)
                         return lowered
                 print(
-                    f"\nUse one of: {validChoiceText}",
+                    f"\r\nUse one of: {validChoiceText}",
+                    end="\r\n",
                     file=outputStream,
                     flush=True,
                 )
@@ -1060,12 +1061,14 @@ class VideoMixin:
             child.text = value
 
         destFile = destMetadataDir / f"{destStem or sourceFile.stem}.xml"
-        logger.action("create metadata: %s", destFile)
+        logger.action("create episode metadata template:")
+        logger.info(f"  {destFile.name}")
         if self.dryRun:
             return
 
         destMetadataDir.mkdir(parents=True, exist_ok=True)
         ET.ElementTree(item).write(destFile, encoding="utf-8", xml_declaration=True)
+        logger.info("  episode metadata written")
 
     def _updateEpisodeMetadataRoot(self, root: ET.Element, tvInfo: dict) -> ET.Element:
         """Update an episode XML root with resolved metadata values."""
@@ -1092,12 +1095,14 @@ class VideoMixin:
 
     def _writeEpisodeMetadataFile(self, destFile: Path, root: ET.Element) -> None:
         """Write an episode metadata XML file to *destFile*."""
-        logger.action("create metadata: %s", destFile)
+        logger.action("update episode metadata:")
+        logger.info(f"  {destFile.name}")
         if self.dryRun:
             return
 
         destFile.parent.mkdir(parents=True, exist_ok=True)
         ET.ElementTree(root).write(destFile, encoding="utf-8", xml_declaration=True)
+        logger.info("  episode metadata written")
 
     def _replicateTvMetadata(
         self,
@@ -1120,6 +1125,8 @@ class VideoMixin:
         sourceSeasonDir = sourceFile.parent
         if sourceSeasonDir == self.sourceDir or not sourceSeasonDir.is_dir():
             return
+
+        logger.info("replicating MCM metadata")
 
         if re.match(r"^season\b", sourceSeasonDir.name, re.IGNORECASE):
             sourceShowDir = sourceSeasonDir.parent
@@ -1192,12 +1199,12 @@ class VideoMixin:
 
         if fileType == "tv":
             prompt = (
-                f"\nTV Show detected: '{defaultName}'\n"
+                f"TV Show detected: '{defaultName}'\n"
                 "Is this correct?  (y/n/q/t/m or enter new name): "
             )
         else:
             prompt = (
-                f"\nMovie detected: '{defaultName}'\n"
+                f"Movie detected: '{defaultName}'\n"
                 "Is this correct?  (y/n/q/t/m or enter new name): "
             )
 
@@ -1281,7 +1288,8 @@ class VideoMixin:
         title = movieInfo["title"]
         year = movieInfo["year"]
 
-        logger.value("processing movie", sourceFile.name)
+        logger.info("processing movie:")
+        logger.info(f"  {sourceFile.name}")
 
         # Check if user confirmation needed
         if interactive:
@@ -1338,8 +1346,9 @@ class VideoMixin:
 
         destFile = destDir / sourceFile.name
 
-        logger.value("movie", sourceFile.name)
-        logger.value("  ->", destFile)
+        logger.info("moving movie:")
+        logger.info(f"  {sourceFile.name}")
+        logger.info(f"  -> {destFile}")
 
         if self.dryRun:
             logger.action(f"move to: {destFile}")
@@ -1381,7 +1390,8 @@ class VideoMixin:
         showName = tvInfo["showName"]
         season = tvInfo["season"]
 
-        logger.value("processing TV show", sourceFile.name)
+        logger.info("processing TV show:")
+        logger.info(f"  {sourceFile.name}")
 
         # Check if user confirmation needed
         if interactive:
@@ -1429,8 +1439,9 @@ class VideoMixin:
         seasonDir = showDir / f"Season {season:02d}"
         destFile = seasonDir / self._buildTvDestinationFilename(sourceFile, tvInfo)
 
-        logger.value("TV Show", sourceFile.name)
-        logger.value("  ->", destFile)
+        logger.info("moving TV show:")
+        logger.info(f"  {sourceFile.name}")
+        logger.info(f"  -> {destFile}")
 
         if self.dryRun:
             logger.action(f"move to: {destFile}")
@@ -1620,6 +1631,7 @@ class VideoMixin:
         stats = {"movies": 0, "tv": 0, "skipped": 0, "errors": 0}
 
         for videoFile in videoFiles:
+            logger.info("-" * 40)
             mcmHints = self._readMcmHints(videoFile)
             tvInfo, movieInfo = self._classifyVideoFile(videoFile, mcmHints)
             if tvInfo and videoDirs:
