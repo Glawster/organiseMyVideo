@@ -1358,7 +1358,7 @@ class VideoMixin:
             destDir.mkdir(parents=True, exist_ok=True)
             self._moveFileWithProgress(sourceFile, destFile)
             self._replicateMovieMetadata(sourceFile, destDir)
-            logger.action(f"movie moved successfully: {destFile}")
+            logger.done("movie moved successfully")
             return True
         except Exception as e:
             logger.error(f"Failed to move movie: {e}")
@@ -1453,7 +1453,7 @@ class VideoMixin:
             self._replicateTvMetadata(
                 sourceFile, showDir, seasonDir, tvInfo, destFile=destFile
             )
-            logger.action(f"TV show moved successfully: {destFile}")
+            logger.done("TV show moved successfully")
             return True
         except Exception as e:
             logger.error(f"Failed to move TV show: {e}")
