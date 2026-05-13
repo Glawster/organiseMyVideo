@@ -33,6 +33,8 @@ METADATA_LIBRARY_FILE = (
     Path.home() / ".config" / "organiseMyVideo" / "metadataLibrary.json"
 )
 TVDB_API_BASE_URL = "https://api4.thetvdb.com/v4"
+TMDB_API_BASE_URL = "https://api.themoviedb.org/3"
+TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/original"
 
 # JavaScript snippet injected into every page of every context to remove the
 # navigator.webdriver property that Playwright exposes by default.

@@ -1062,15 +1062,111 @@ class VideoMixin:
             value is not None and value != "" for value in metadataValues.values()
         )
 
-    def _replicateMovieMetadata(self, sourceFile: Path, destDir: Path) -> None:
-        """Copy supported MCM movie companion files into the destination folder."""
-        if sourceFile.parent == self.sourceDir:
+    def _buildMovieDvdIdFilename(self, movieInfo: dict) -> Optional[str]:
+        """
+        Return a deterministic movie MCM dvdid filename using resolved IDs.
+
+        Naming order is: imdb+tmdb, imdb-only, then tmdb-only.
+        """
+        imdbId = self._safeMcmIdFilenamePart(movieInfo.get("imdbId"))
+        tmdbId = self._safeMcmIdFilenamePart(movieInfo.get("tmdbId"))
+        if imdbId and tmdbId:
+            return f"mcm_id__{imdbId}-{tmdbId}.dvdid.xml"
+        if imdbId:
+            return f"mcm_id__{imdbId}.dvdid.xml"
+        if tmdbId:
+            return f"mcm_id__{tmdbId}.dvdid.xml"
+        return None
+
+    def _ensureMovieDvdIdMetadata(self, destDir: Path, movieInfo: dict) -> None:
+        """
+        Create a movie-level ``mcm_id__*.dvdid.xml`` only when missing.
+
+        Args:
+            destDir: Destination movie directory for the dvdid XML file.
+            movieInfo: Resolved movie metadata.
+        """
+        existing = self._collectMatchingFiles(destDir, ("mcm_id__*.dvdid.xml",))
+        if existing:
+            logger.value("preserving existing metadata files", len(existing))
             return
 
-        movieMetadataFiles = self._collectMatchingFiles(
-            sourceFile.parent, self._MOVIE_MCM_PATTERNS
-        )
-        self._copyFilesIntoDir(movieMetadataFiles, destDir)
+        dvdIdFilename = self._buildMovieDvdIdFilename(movieInfo)
+        if not dvdIdFilename:
+            return
+
+        imdbId = movieInfo.get("imdbId")
+        tmdbId = movieInfo.get("tmdbId")
+        dvdIdFile = destDir / dvdIdFilename
+        root = ET.Element("Item")
+        if imdbId:
+            ET.SubElement(root, "IMDbId").text = imdbId
+        if tmdbId:
+            ET.SubElement(root, "TMDbId").text = tmdbId
+        ET.SubElement(root, "Type").text = "movie"
+
+        logger.action("create metadata: %s", dvdIdFile)
+        if self.dryRun:
+            return
+        destDir.mkdir(parents=True, exist_ok=True)
+        ET.ElementTree(root).write(dvdIdFile, encoding="utf-8", xml_declaration=True)
+
+    def _writeMovieMcmTemplate(self, destDir: Path, movieInfo: dict) -> None:
+        """Create a starter ``movie.xml`` when enough movie metadata is known."""
+        title = movieInfo.get("title")
+        if not title:
+            return
+
+        root = ET.Element("Title")
+        ET.SubElement(root, "LocalTitle").text = title
+        ET.SubElement(root, "OriginalTitle").text = title
+        ET.SubElement(root, "ProductionYear").text = movieInfo.get("year") or ""
+        ET.SubElement(root, "IMDbId").text = movieInfo.get("imdbId") or ""
+        ET.SubElement(root, "TMDbId").text = movieInfo.get("tmdbId") or ""
+
+        self._writeMovieMetadataFile(destDir / "movie.xml", root)
+
+    def _writeMovieMetadataFile(self, movieFile: Path, root: ET.Element) -> None:
+        """Write ``movie.xml`` to *movieFile*."""
+        if movieFile.exists():
+            logger.value("preserving existing metadata", movieFile)
+            return
+        logger.action("create metadata: %s", movieFile)
+        if self.dryRun:
+            return
+        movieFile.parent.mkdir(parents=True, exist_ok=True)
+        ET.ElementTree(root).write(movieFile, encoding="utf-8", xml_declaration=True)
+
+    def _ensureMovieMetadata(self, destDir: Path, movieInfo: dict) -> None:
+        """Create destination ``movie.xml`` only when missing; preserve existing files."""
+        title = movieInfo.get("title")
+        if not title:
+            return
+        movieFile = destDir / "movie.xml"
+        if movieFile.exists():
+            logger.value("preserving existing metadata", movieFile)
+            return
+        self._writeMovieMcmTemplate(destDir, movieInfo)
+
+    def _replicateMovieMetadata(
+        self, sourceFile: Path, destDir: Path, movieInfo: Optional[dict] = None
+    ) -> None:
+        """Copy supported MCM movie companion files into the destination folder."""
+        if sourceFile.parent != self.sourceDir:
+            movieMetadataFiles = self._collectMatchingFiles(
+                sourceFile.parent, self._MOVIE_MCM_PATTERNS
+            )
+            self._copyFilesIntoDir(movieMetadataFiles, destDir)
+
+        if not movieInfo:
+            return
+
+        enriched = self._enrichMovieMetadata(movieInfo)
+        resolved = enriched or movieInfo
+
+        self._ensureMovieMetadata(destDir, resolved)
+        self._ensureMovieDvdIdMetadata(destDir, resolved)
+        self._fetchMovieArtwork(resolved, destDir)
 
     def _sanitiseFilenamePart(self, value: str) -> str:
         """Return a dot-separated, filesystem-safe filename fragment."""
@@ -1579,7 +1675,7 @@ class VideoMixin:
         try:
             destDir.mkdir(parents=True, exist_ok=True)
             self._moveFileWithProgress(sourceFile, destFile)
-            self._replicateMovieMetadata(sourceFile, destDir)
+            self._replicateMovieMetadata(sourceFile, destDir, movieInfo)
             logger.action(f"movie moved successfully: {destFile}")
             return True
         except Exception as e:
