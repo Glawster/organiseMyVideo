@@ -1288,8 +1288,7 @@ class VideoMixin:
         title = movieInfo["title"]
         year = movieInfo["year"]
 
-        logger.info("processing movie:")
-        logger.info(f"  {sourceFile.name}")
+        logger.value("processing movie", sourceFile.name)
 
         # Check if user confirmation needed
         if interactive:
@@ -1346,12 +1345,13 @@ class VideoMixin:
 
         destFile = destDir / sourceFile.name
 
-        logger.info("moving movie:")
-        logger.info(f"  {sourceFile.name}")
-        logger.info(f"  -> {destFile}")
+        logger.action(
+            f"moving movie:\n"
+            f"     {sourceFile.name}\n"
+            f"     -> {destFile}"
+        )
 
         if self.dryRun:
-            logger.action(f"move to: {destFile}")
             return True
 
         try:
@@ -1390,8 +1390,7 @@ class VideoMixin:
         showName = tvInfo["showName"]
         season = tvInfo["season"]
 
-        logger.info("processing TV show:")
-        logger.info(f"  {sourceFile.name}")
+        logger.value("processing TV show", sourceFile.name)
 
         # Check if user confirmation needed
         if interactive:
@@ -1439,12 +1438,13 @@ class VideoMixin:
         seasonDir = showDir / f"Season {season:02d}"
         destFile = seasonDir / self._buildTvDestinationFilename(sourceFile, tvInfo)
 
-        logger.info("moving TV show:")
-        logger.info(f"  {sourceFile.name}")
-        logger.info(f"  -> {destFile}")
+        logger.action(
+            f"moving TV show:\n"
+            f"     {sourceFile.name}\n"
+            f"     -> {destFile}"
+        )
 
         if self.dryRun:
-            logger.action(f"move to: {destFile}")
             return True
 
         try:

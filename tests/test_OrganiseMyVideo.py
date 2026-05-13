@@ -1604,7 +1604,7 @@ def testMoveMovieNoStorageReturnsFalse(organizer: VideoOrganizer):
 
 
 def testMoveTvShowDryRunReturnsTrueWithoutMoving(
-    tmp_path: Path, organizer: VideoOrganizer
+    tmp_path: Path, organizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
 ):
     srcFile = organizer.sourceDir / "Breaking.Bad.S01E01.Pilot.mkv"
     srcFile.write_bytes(b"x" * 100)
@@ -1621,11 +1621,18 @@ def testMoveTvShowDryRunReturnsTrueWithoutMoving(
     }
 
     with patch.object(organizer, "_moveFileWithProgress") as mockMove:
-        result = organizer.moveTvShow(srcFile, tvInfo, [tvStorage], interactive=False)
+        with caplog.at_level("INFO"):
+            result = organizer.moveTvShow(srcFile, tvInfo, [tvStorage], interactive=False)
 
     assert result is True
     mockMove.assert_not_called()
     assert srcFile.exists()
+    expectedDest = tvStorage / "Breaking Bad" / "Season 01" / "Breaking.Bad.S01E01.Pilot.mkv"
+    assert (
+        f"...moving TV show:\n"
+        f"     Breaking.Bad.S01E01.Pilot.mkv\n"
+        f"     -> {expectedDest}"
+    ) in caplog.text
 
 
 class _FakeTtyStream(io.StringIO):
