@@ -1205,7 +1205,7 @@ class VideoMixin:
         title = movieInfo.get("title")
         year = movieInfo.get("year")
         extension = movieInfo.get("extension") or sourceFile.suffix
-        if extension and not str(extension).startswith("."):
+        if extension and not extension.startswith("."):
             extension = f".{extension}"
 
         if not title or not year:
@@ -1618,7 +1618,10 @@ class VideoMixin:
         Returns:
             True if successful, False otherwise
         """
-        resolvedMovieInfo = self._enrichMovieMetadata(dict(movieInfo)) or dict(movieInfo)
+        resolvedMovieInfo = dict(movieInfo)
+        enrichedMovieInfo = self._enrichMovieMetadata(resolvedMovieInfo)
+        if enrichedMovieInfo:
+            resolvedMovieInfo = enrichedMovieInfo
         title = resolvedMovieInfo["title"]
         year = resolvedMovieInfo["year"]
 
