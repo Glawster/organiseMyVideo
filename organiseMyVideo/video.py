@@ -1668,6 +1668,9 @@ class VideoMixin:
             resolvedMovieInfo["title"] = title
             resolvedMovieInfo["year"] = year
 
+        title = resolvedMovieInfo["title"]
+        year = resolvedMovieInfo["year"]
+
         # Find existing directory or choose storage location
         existingDir = self.findExistingMovieDir(title, year, movieDirs)
 
