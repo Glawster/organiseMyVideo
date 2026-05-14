@@ -73,3 +73,4 @@ class VideoOrganizer(MetadataMixin, VideoMixin, TorrentMixin):
         self._metadataMovieLogStarted = False
         self._metadataShowLogStarted = False
         self._tvMetadataFetcher = None
+        self._movieMetadataFetcher = None

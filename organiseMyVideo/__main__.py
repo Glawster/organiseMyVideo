@@ -22,47 +22,47 @@ def main():
         "-s",
         "--source",
         default="/mnt/video2/toFile",
-        help="Source directory containing files to organize (default: /mnt/video2/toFile)"
+        help="Source directory containing files to organize (default: /mnt/video2/toFile)",
     )
     parser.add_argument(
         "-y",
-        '--confirm',
+        "--confirm",
         default=False,
-        action='store_true',
-        help='confirm execution — actually make changes (default is dry-run)',
+        action="store_true",
+        help="confirm execution — actually make changes (default is dry-run)",
     )
     parser.add_argument(
         "--clean",
         action="store_true",
-        help="remove empty sub-folders from source directory (folders with only sample content are treated as empty)"
+        help="remove empty sub-folders from source directory (folders with only sample content are treated as empty)",
     )
     parser.add_argument(
         "--non-interactive",
         dest="non_interactive",
         action="store_true",
-        help="Run without user prompts (skip files that cannot be auto-detected)"
+        help="Run without user prompts (skip files that cannot be auto-detected)",
     )
     parser.add_argument(
         "--refresh",
         dest="refresh_metadata_library",
         action="store_true",
-        help="rebuild the saved metadata library from storage before processing"
+        help="rebuild the saved metadata library from storage before processing",
     )
     parser.add_argument(
         "--no-curses",
         dest="curses",
         action="store_false",
         default=True,
-        help="use line-based prompts instead of the default curses single-key menus"
+        help="use line-based prompts instead of the default curses single-key menus",
     )
     parser.add_argument(
         "--torrent",
         action="store_true",
-        help="scan the torrent download directory for .torrent files and delete those already in the library (dry-run by default; use --confirm to delete)"
+        help="scan the torrent download directory for .torrent files and delete those already in the library (dry-run by default; use --confirm to delete)",
     )
     args = parser.parse_args()
-    
-    dryRun = True if not args.confirm else False
+
+    dryRun = not args.confirm
 
     # Setup logging — dryRun passed so logger.action() applies [] prefix correctly.
     # logUtils._setupLogging guards console handler with isinstance(h, StreamHandler)
@@ -71,15 +71,25 @@ def main():
     logger = getLogger(includeConsole=True, dryRun=dryRun)
     if not any(type(h) is logging.StreamHandler for h in logger.logger.handlers):
         _ch = logging.StreamHandler()
-        _ch.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+        _ch.setFormatter(
+            logging.Formatter(
+                "%(asctime)s - %(levelname)s - %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+        )
         logger.logger.addHandler(_ch)
     else:
         # Update the existing console handler formatter to include timestamp
         for h in logger.logger.handlers:
             if type(h) is logging.StreamHandler:
-                h.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+                h.setFormatter(
+                    logging.Formatter(
+                        "%(asctime)s - %(levelname)s - %(message)s",
+                        datefmt="%Y-%m-%d %H:%M:%S",
+                    )
+                )
     logger.doing("organiseMyVideo starting")
-    
+
     if dryRun:
         logger.info("entering dry-run mode, use --confirm to execute")
     else:
@@ -109,7 +119,11 @@ def main():
 
     if args.torrent:
         logger.doing("running torrent maintenance")
-        torrentDir = organizer.sourceDir.parent / "Downloads" if organizer.sourceDir else Path("/mnt/video2/Downloads")
+        torrentDir = (
+            organizer.sourceDir.parent / "Downloads"
+            if organizer.sourceDir
+            else Path("/mnt/video2/Downloads")
+        )
         nameStats = {"renamed": 0, "skipped": 0, "errors": 0}
         if args.clean:
             nameStats = organizer.cleanTorrentNames(torrentDir=torrentDir)

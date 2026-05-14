@@ -3,6 +3,7 @@
 import errno
 import io
 import json
+import logging
 import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -12,7 +13,7 @@ import pytest
 # conftest.py stubs organiseMyProjects before this import
 import organiseMyVideo.__main__ as omv_main
 from organiseMyVideo import VideoOrganizer
-from organiseMyVideo.video import _XML_BINARY_CHECK_WINDOW
+from organiseMyVideo.video import _FILE_PROCESS_SEPARATOR, _XML_BINARY_CHECK_WINDOW
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -218,6 +219,11 @@ def testReadMcmHintsReturnsMovieMetadata(sourceDir: Path, organizer: VideoOrgani
         "imdbId": "tt8134742",
         "tmdbId": "489064",
         "metadataSource": "mcm",
+        "mcm": {
+            "movieXmlExists": True,
+            "dvdIdXmlExists": False,
+            "artworkExists": False,
+        },
     }
 
 
@@ -262,6 +268,13 @@ def testReadMcmHintsReturnsTvMetadata(sourceDir: Path, organizer: VideoOrganizer
         "seriesId": "347507",
         "episodeId": "10751471",
         "metadataSource": "mcm",
+        "mcm": {
+            "showXmlExists": True,
+            "dvdIdXmlExists": False,
+            "seasonMetadataFolderExists": True,
+            "episodeXmlExists": True,
+            "artworkExists": False,
+        },
     }
 
 
@@ -295,6 +308,13 @@ def testReadMcmHintsInfersTvSeasonFromSeriesAndPath(
         "seriesId": "117581",
         "episodeId": None,
         "metadataSource": "mcm",
+        "mcm": {
+            "showXmlExists": True,
+            "dvdIdXmlExists": False,
+            "seasonMetadataFolderExists": False,
+            "episodeXmlExists": False,
+            "artworkExists": False,
+        },
     }
 
 
@@ -331,8 +351,67 @@ def testReadMcmHintsIgnoresBinaryEpisodeXmlWithoutWarning(
         "seriesId": "999999",
         "episodeId": None,
         "metadataSource": "mcm",
+        "mcm": {
+            "showXmlExists": True,
+            "dvdIdXmlExists": False,
+            "seasonMetadataFolderExists": True,
+            "episodeXmlExists": True,
+            "artworkExists": False,
+        },
     }
     assert "could not parse metadata XML" not in caplog.text
+
+
+def testReadMcmHintsDetectsMovieArtworkWithoutMovieXml(
+    sourceDir: Path, organizer: VideoOrganizer
+):
+    movieDir = sourceDir / "3 from Hell (2019)"
+    movieDir.mkdir()
+    movieFile = movieDir / "clip.mp4"
+    movieFile.write_bytes(b"x" * 50)
+    (movieDir / "folder.jpg").write_bytes(b"poster")
+    (movieDir / "mcm_id__tt8134742-489064.dvdid.xml").write_text(
+        "<Disc />", encoding="utf-8"
+    )
+
+    hints = organizer._readMcmHints(movieFile)
+
+    assert hints == {
+        "type": "movie",
+        "title": None,
+        "year": None,
+        "imdbId": None,
+        "tmdbId": None,
+        "metadataSource": "mcm",
+        "mcm": {
+            "movieXmlExists": False,
+            "dvdIdXmlExists": True,
+            "artworkExists": True,
+        },
+    }
+
+
+def testReadTvSeriesMcmHintsReportsShowEpisodeXmlAndArtwork(
+    sourceDir: Path, organizer: VideoOrganizer
+):
+    showDir = sourceDir / "After Life"
+    seasonDir = showDir / "Season 1"
+    metadataDir = seasonDir / "metadata"
+    metadataDir.mkdir(parents=True)
+    (showDir / "series.xml").write_text("<Series />", encoding="utf-8")
+    (showDir / "folder.jpg").write_bytes(b"poster")
+    (metadataDir / "episode.xml").write_text("<Item />", encoding="utf-8")
+
+    hints = organizer._readTvSeriesMcmHints(showDir)
+
+    assert hints is not None
+    assert hints["mcm"] == {
+        "showXmlExists": True,
+        "dvdIdXmlExists": False,
+        "seasonMetadataFolderExists": True,
+        "episodeXmlExists": True,
+        "artworkExists": True,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -764,6 +843,38 @@ def testProcessFilesUsesMovieMcmHintsWhenFilenameCannotBeParsed(
     assert not srcFile.exists()
 
 
+def testProcessFilesLogsSeparatorBeforeProcessingMessage(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
+):
+    srcFile = confirmedOrganizer.sourceDir / "Breaking.Bad.S01E01.Pilot.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    with patch.object(
+        confirmedOrganizer, "scanStorageLocations", return_value=([], [tvStorage])
+    ):
+        with caplog.at_level("INFO"):
+            confirmedOrganizer.processFiles(interactive=False)
+
+    messages = [record.getMessage() for record in caplog.records]
+    separatorIndex = next(
+        (
+            i
+            for i, message in enumerate(messages)
+            if message.endswith(_FILE_PROCESS_SEPARATOR)
+        ),
+        None,
+    )
+    processingIndex = next(
+        (i for i, message in enumerate(messages) if "processing TV show:" in message),
+        None,
+    )
+    assert separatorIndex is not None, f"missing separator log in: {messages}"
+    assert processingIndex is not None, f"missing processing log in: {messages}"
+    assert separatorIndex < processingIndex
+
+
 def testProcessFilesPrefersMovieMcmHintsBeforeFilenameClassification(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer
 ):
@@ -844,6 +955,55 @@ def testProcessFilesUsesTvMcmHintsWhenFilenameCannotBeParsed(
         / "After Life"
         / "Season 01"
         / "After.Life.S01E04.Sic.Semper.Systema.mkv"
+    )
+    assert destFile.exists()
+    assert not srcFile.exists()
+
+
+def testProcessFilesPrefersTvMcmShowNameOverFilenameMismatch(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    showDir = confirmedOrganizer.sourceDir / "Breaking Bad"
+    seasonDir = showDir / "Season 1"
+    metadataDir = seasonDir / "metadata"
+    metadataDir.mkdir(parents=True)
+    srcFile = seasonDir / "Braking.Bad.S01E01.Pilot.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    (showDir / "series.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Series>
+    <SeriesName>Breaking Bad</SeriesName>
+    <SeriesID>81189</SeriesID>
+</Series>
+""",
+        encoding="utf-8",
+    )
+    (metadataDir / "Braking.Bad.S01E01.Pilot.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Item>
+    <EpisodeID>3492321</EpisodeID>
+    <EpisodeNumber>1</EpisodeNumber>
+    <SeasonNumber>1</SeasonNumber>
+    <EpisodeName>Pilot</EpisodeName>
+</Item>
+""",
+        encoding="utf-8",
+    )
+
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    with patch.object(
+        confirmedOrganizer,
+        "scanStorageLocations",
+        return_value=([movieStorage], [tvStorage]),
+    ):
+        confirmedOrganizer.processFiles(interactive=False)
+
+    destFile = (
+        tvStorage / "Breaking Bad" / "Season 01" / "Breaking.Bad.S01E01.Pilot.mkv"
     )
     assert destFile.exists()
     assert not srcFile.exists()
@@ -1041,6 +1201,73 @@ def testProcessFilesScrapesMissingEpisodeTitleAndWritesItBack(
     mockFetch.assert_called_once()
 
 
+def testProcessFilesUsesLibraryCanonicalShowNameForPunctuationVariants(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    libraryPath = tmp_path / "metadataLibrary.json"
+    libraryPath.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "movies": {},
+                "tv": {
+                    "series": {
+                        "show:lawordersvu": {
+                            "type": "tv",
+                            "showName": "Law & Order: SVU",
+                            "seriesId": "75692",
+                            "imdbId": None,
+                            "metadataSource": "mcm",
+                            "metadataUpdatedAt": "2026-05-11T00:00:00+00:00",
+                        }
+                    },
+                    "episodes": {
+                        "show:lawordersvu:s03e02": {
+                            "type": "tv",
+                            "showName": "Law & Order: SVU",
+                            "season": 3,
+                            "episode": 2,
+                            "episodeTitle": "Wrath",
+                            "seriesId": "75692",
+                            "episodeId": "102",
+                            "metadataSource": "mcm",
+                            "metadataUpdatedAt": "2026-05-11T00:00:00+00:00",
+                        }
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    srcFile = confirmedOrganizer.sourceDir / "Law.Order.SVU.S03E02.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    with patch.object(
+        confirmedOrganizer, "_getMetadataLibraryPath", return_value=libraryPath
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([movieStorage], [tvStorage]),
+        ):
+            with patch.object(
+                confirmedOrganizer, "_fetchTvMetadataFromScraper"
+            ) as mockFetch:
+                confirmedOrganizer.processFiles(interactive=False)
+
+    destFile = (
+        tvStorage / "Law & Order: SVU" / "Season 03" / "Law.Order.SVU.S03E02.Wrath.mkv"
+    )
+    assert destFile.exists()
+    assert not srcFile.exists()
+    mockFetch.assert_not_called()
+
+
 def testUpdateMetadataLibraryLogsShowAddition(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
 ):
@@ -1169,7 +1396,10 @@ def testUpdateMetadataLibraryIgnoresEpisodeOnlySeriesChurnInLogs(
             "metadataUpdatedAt"
         ],
     }
-    assert library["tv"]["episodes"]["episode:600002"]["episodeTitle"] == "Three River Strokes"
+    assert (
+        library["tv"]["episodes"]["episode:600002"]["episodeTitle"]
+        == "Three River Strokes"
+    )
 
 
 def testUpdateMetadataLibraryLogsMovieAddition(
@@ -1297,11 +1527,7 @@ def testProcessFilesBuildsMetadataLibraryFromStorageBeforeSourceProcessing(
 
     def _findLogMessageIndex(searchText: str) -> int | None:
         return next(
-            (
-                i
-                for i, message in enumerate(messages)
-                if searchText in message
-            ),
+            (i for i, message in enumerate(messages) if searchText in message),
             None,
         )
 
@@ -1406,7 +1632,9 @@ def testProcessFilesRefreshMetadataLibraryRebuildsStorageCache(tmp_path: Path):
         refreshMetadataLibrary=True,
     )
     libraryPath = tmp_path / "metadataLibrary.json"
-    libraryPath.write_text(json.dumps({"version": 1, "movies": {}, "tv": {}}), encoding="utf-8")
+    libraryPath.write_text(
+        json.dumps({"version": 1, "movies": {}, "tv": {}}), encoding="utf-8"
+    )
     movieStorage = tmp_path / "movie1"
     movieStorage.mkdir()
     tvStorage = tmp_path / "video1" / "TV"
@@ -1418,7 +1646,9 @@ def testProcessFilesRefreshMetadataLibraryRebuildsStorageCache(tmp_path: Path):
             "scanStorageLocations",
             return_value=([movieStorage], [tvStorage]),
         ):
-            with patch.object(organizer, "_buildMetadataLibraryFromStorage") as mockBuild:
+            with patch.object(
+                organizer, "_buildMetadataLibraryFromStorage"
+            ) as mockBuild:
                 organizer.processFiles(interactive=False)
 
     mockBuild.assert_called_once_with([movieStorage], [tvStorage])
@@ -1460,6 +1690,138 @@ def testProcessFilesKeepsSourceNameWhenScraperCannotFillEpisodeTitle(
     destFile = tvStorage / "Virgin River" / "Season 06" / "Virgin.River.S06E01.mkv"
     assert destFile.exists()
     assert not srcFile.exists()
+
+
+def testFetchTvMetadataFromProvidersUsesTvdbBeforeImdb(organizer: VideoOrganizer):
+    tvInfo = {"showName": "Breaking Bad", "season": 1, "episode": 1, "type": "tv"}
+    tvdbRecord = {"type": "tv", "episodeTitle": "Pilot", "metadataSource": "tvdb"}
+    imdbRecord = {"type": "tv", "episodeTitle": "Pilot", "metadataSource": "imdb"}
+
+    with patch.object(organizer, "_fetchTvdbMetadata", return_value=tvdbRecord) as tvdb:
+        with patch.object(
+            organizer, "_fetchImdbMetadata", return_value=imdbRecord
+        ) as imdb:
+            result = organizer._fetchTvMetadataFromProviders(tvInfo)
+
+    assert result == tvdbRecord
+    tvdb.assert_called_once_with(tvInfo)
+    imdb.assert_not_called()
+
+
+def testFetchTvMetadataFromProvidersFallsBackToImdb(organizer: VideoOrganizer):
+    tvInfo = {"showName": "Breaking Bad", "season": 1, "episode": 2, "type": "tv"}
+    imdbRecord = {
+        "type": "tv",
+        "showName": "Breaking Bad",
+        "season": 1,
+        "episode": 2,
+        "episodeTitle": "Cat's in the Bag...",
+        "metadataSource": "imdb",
+    }
+
+    with patch.object(organizer, "_fetchTvdbMetadata", return_value=None) as tvdb:
+        with patch.object(
+            organizer, "_fetchImdbMetadata", return_value=imdbRecord
+        ) as imdb:
+            result = organizer._fetchTvMetadataFromProviders(tvInfo)
+
+    assert result == imdbRecord
+    tvdb.assert_called_once_with(tvInfo)
+    imdb.assert_called_once_with(tvInfo)
+
+
+def testFetchTvMetadataFromProvidersReturnsNoneWhenAllProvidersMiss(
+    organizer: VideoOrganizer,
+):
+    tvInfo = {"showName": "Unknown Show", "season": 1, "episode": 1, "type": "tv"}
+
+    with patch.object(organizer, "_fetchTvdbMetadata", return_value=None) as tvdb:
+        with patch.object(organizer, "_fetchImdbMetadata", return_value=None) as imdb:
+            result = organizer._fetchTvMetadataFromProviders(tvInfo)
+
+    assert result is None
+    tvdb.assert_called_once_with(tvInfo)
+    imdb.assert_called_once_with(tvInfo)
+
+
+def testProcessFilesCachesImdbFallbackEpisodeTitleForLaterRuns(tmp_path: Path):
+    libraryPath = tmp_path / "metadataLibrary.json"
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    firstSource = tmp_path / "source1"
+    firstSource.mkdir()
+    firstOrganizer = VideoOrganizer(sourceDir=str(firstSource), dryRun=False)
+    firstShowDir = firstOrganizer.sourceDir / "Virgin River"
+    firstSeasonDir = firstShowDir / "Season 6"
+    firstSeasonDir.mkdir(parents=True)
+    firstFile = firstSeasonDir / "Virgin.River.S06E01.mkv"
+    firstFile.write_bytes(b"x" * 100)
+    (firstShowDir / "series.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Series>
+    <SeriesName>Virgin River</SeriesName>
+    <SeriesID>117581</SeriesID>
+</Series>
+""",
+        encoding="utf-8",
+    )
+
+    imdbScraped = {
+        "type": "tv",
+        "showName": "Virgin River",
+        "season": 6,
+        "episode": 1,
+        "episodeTitle": "The Beginning",
+        "seriesId": "117581",
+        "episodeId": "9999",
+        "metadataSource": "imdb",
+    }
+
+    with patch.object(
+        firstOrganizer, "_getMetadataLibraryPath", return_value=libraryPath
+    ):
+        with patch.object(
+            firstOrganizer,
+            "scanStorageLocations",
+            return_value=([movieStorage], [tvStorage]),
+        ):
+            with patch.object(firstOrganizer, "_fetchTvdbMetadata", return_value=None):
+                with patch.object(
+                    firstOrganizer, "_fetchImdbMetadata", return_value=imdbScraped
+                ):
+                    firstOrganizer.processFiles(interactive=False)
+
+    secondSource = tmp_path / "source2"
+    secondSource.mkdir()
+    secondOrganizer = VideoOrganizer(sourceDir=str(secondSource), dryRun=False)
+    secondFile = secondOrganizer.sourceDir / "Virgin.River.S06E01.mkv"
+    secondFile.write_bytes(b"x" * 100)
+
+    with patch.object(
+        secondOrganizer, "_getMetadataLibraryPath", return_value=libraryPath
+    ):
+        with patch.object(
+            secondOrganizer,
+            "scanStorageLocations",
+            return_value=([movieStorage], [tvStorage]),
+        ):
+            with patch.object(secondOrganizer, "_fetchTvdbMetadata") as mockTvdb:
+                with patch.object(secondOrganizer, "_fetchImdbMetadata") as mockImdb:
+                    secondOrganizer.processFiles(interactive=False)
+
+    cachedDest = (
+        tvStorage
+        / "Virgin River"
+        / "Season 06"
+        / "Virgin.River.S06E01.The.Beginning.mkv"
+    )
+    assert cachedDest.exists()
+    assert not secondFile.exists()
+    mockTvdb.assert_not_called()
+    mockImdb.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -1561,6 +1923,34 @@ def testMoveMovieReplicatesMcmCompanionFiles(
     ) == "<Disc />"
 
 
+def testMoveMoviePreservesExistingMcmCompanionFilesInDestination(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    movieSourceDir = confirmedOrganizer.sourceDir / "3 from Hell (2019)"
+    movieSourceDir.mkdir()
+    srcFile = movieSourceDir / "3 from Hell (2019).mp4"
+    srcFile.write_bytes(b"x" * 100)
+    (movieSourceDir / "folder.jpg").write_bytes(b"new-poster")
+
+    movieStorage = tmp_path / "movie1"
+    destDir = movieStorage / "3 from Hell (2019)"
+    destDir.mkdir(parents=True)
+    (destDir / "folder.jpg").write_bytes(b"existing-poster")
+
+    movieInfo = {
+        "title": "3 from Hell",
+        "year": "2019",
+        "extension": ".mp4",
+        "type": "movie",
+    }
+    result = confirmedOrganizer.moveMovie(
+        srcFile, movieInfo, [movieStorage], interactive=False
+    )
+
+    assert result is True
+    assert (destDir / "folder.jpg").read_bytes() == b"existing-poster"
+
+
 def testMoveMovieUsesExistingDir(tmp_path: Path, confirmedOrganizer: VideoOrganizer):
     srcFile = confirmedOrganizer.sourceDir / "Inception (2010).mp4"
     srcFile.write_bytes(b"x" * 100)
@@ -1596,6 +1986,565 @@ def testMoveMovieNoStorageReturnsFalse(organizer: VideoOrganizer):
     org = VideoOrganizer(sourceDir=str(organizer.sourceDir), dryRun=False)
     result = org.moveMovie(srcFile, movieInfo, [], interactive=False)
     assert result is False
+
+
+# ---------------------------------------------------------------------------
+# Movie MCM metadata generation — _ensureMovieMetadata / _ensureMovieDvdIdMetadata
+# ---------------------------------------------------------------------------
+
+
+def testMoveMovieCreatesMovieXmlWhenMissingAndMetadataConfident(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "Inception (2010).mp4"
+    srcFile.write_bytes(b"x" * 100)
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+
+    movieInfo = {
+        "title": "Inception",
+        "year": "2010",
+        "imdbId": "tt1375666",
+        "tmdbId": "27205",
+        "extension": ".mp4",
+        "type": "movie",
+    }
+    result = confirmedOrganizer.moveMovie(
+        srcFile, movieInfo, [movieStorage], interactive=False
+    )
+
+    assert result is True
+    destDir = movieStorage / "Inception (2010)"
+    movieXml = destDir / "movie.xml"
+    assert movieXml.exists()
+    movieXmlText = movieXml.read_text(encoding="utf-8")
+    assert "<LocalTitle>Inception</LocalTitle>" in movieXmlText
+    assert "<ProductionYear>2010</ProductionYear>" in movieXmlText
+    assert "<IMDbId>tt1375666</IMDbId>" in movieXmlText
+    assert "<TMDbId>27205</TMDbId>" in movieXmlText
+
+
+def testMoveMovieCreatesDvdIdXmlWhenMissingWithBothIds(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "Inception (2010).mp4"
+    srcFile.write_bytes(b"x" * 100)
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+
+    movieInfo = {
+        "title": "Inception",
+        "year": "2010",
+        "imdbId": "tt1375666",
+        "tmdbId": "27205",
+        "extension": ".mp4",
+        "type": "movie",
+    }
+    result = confirmedOrganizer.moveMovie(
+        srcFile, movieInfo, [movieStorage], interactive=False
+    )
+
+    assert result is True
+    destDir = movieStorage / "Inception (2010)"
+    dvdIdXml = destDir / "mcm_id__tt1375666-27205.dvdid.xml"
+    assert dvdIdXml.exists()
+    dvdIdText = dvdIdXml.read_text(encoding="utf-8")
+    assert "<IMDbId>tt1375666</IMDbId>" in dvdIdText
+    assert "<TMDbId>27205</TMDbId>" in dvdIdText
+    assert "<Type>movie</Type>" in dvdIdText
+
+
+def testMoveMovieCreatesDvdIdXmlWithImdbOnlyWhenTmdbMissing(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    destDir = tmp_path / "Inception (2010)"
+    destDir.mkdir()
+    movieInfo = {"imdbId": "tt1375666", "tmdbId": None}
+    confirmedOrganizer._ensureMovieDvdIdMetadata(destDir, movieInfo)
+    dvdIdXml = destDir / "mcm_id__tt1375666.dvdid.xml"
+    assert dvdIdXml.exists()
+
+
+def testMoveMovieCreatesDvdIdXmlWithTmdbOnlyWhenImdbMissing(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    destDir = tmp_path / "Inception (2010)"
+    destDir.mkdir()
+    movieInfo = {"imdbId": None, "tmdbId": "27205"}
+    confirmedOrganizer._ensureMovieDvdIdMetadata(destDir, movieInfo)
+    dvdIdXml = destDir / "mcm_id__27205.dvdid.xml"
+    assert dvdIdXml.exists()
+
+
+def testMoveMovieSkipsDvdIdXmlWhenNoIds(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    destDir = tmp_path / "Inception (2010)"
+    destDir.mkdir()
+    movieInfo = {}
+    confirmedOrganizer._ensureMovieDvdIdMetadata(destDir, movieInfo)
+    dvdIdFiles = list(destDir.glob("mcm_id__*.dvdid.xml"))
+    assert dvdIdFiles == []
+
+
+def testMoveMoviePreservesExistingMovieXmlWithoutOverwriting(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    movieSourceDir = confirmedOrganizer.sourceDir / "Inception (2010)"
+    movieSourceDir.mkdir()
+    srcFile = movieSourceDir / "Inception (2010).mp4"
+    srcFile.write_bytes(b"x" * 100)
+
+    movieStorage = tmp_path / "movie1"
+    destDir = movieStorage / "Inception (2010)"
+    destDir.mkdir(parents=True)
+    existingXml = "<Title><LocalTitle>Existing</LocalTitle></Title>"
+    (destDir / "movie.xml").write_text(existingXml, encoding="utf-8")
+
+    movieInfo = {
+        "title": "Inception",
+        "year": "2010",
+        "imdbId": "tt1375666",
+        "extension": ".mp4",
+        "type": "movie",
+    }
+    result = confirmedOrganizer.moveMovie(
+        srcFile, movieInfo, [movieStorage], interactive=False
+    )
+
+    assert result is True
+    assert (destDir / "movie.xml").read_text(encoding="utf-8") == existingXml
+
+
+def testMoveMoviePreservesExistingDvdIdXmlWithoutCreatingDuplicate(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "Inception (2010).mp4"
+    srcFile.write_bytes(b"x" * 100)
+    movieStorage = tmp_path / "movie1"
+    destDir = movieStorage / "Inception (2010)"
+    destDir.mkdir(parents=True)
+    (destDir / "mcm_id__existing.dvdid.xml").write_text("<Item />", encoding="utf-8")
+
+    movieInfo = {
+        "title": "Inception",
+        "year": "2010",
+        "imdbId": "tt1375666",
+        "tmdbId": "27205",
+        "extension": ".mp4",
+        "type": "movie",
+    }
+    result = confirmedOrganizer.moveMovie(
+        srcFile, movieInfo, [movieStorage], interactive=False
+    )
+
+    assert result is True
+    dvdIdFiles = list(destDir.glob("mcm_id__*.dvdid.xml"))
+    assert len(dvdIdFiles) == 1
+    assert dvdIdFiles[0].name == "mcm_id__existing.dvdid.xml"
+
+
+def testMoveMovieDryRunDoesNotCreateMetadataFiles(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    srcFile = organizer.sourceDir / "Inception (2010).mp4"
+    srcFile.write_bytes(b"x" * 100)
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+
+    movieInfo = {
+        "title": "Inception",
+        "year": "2010",
+        "imdbId": "tt1375666",
+        "tmdbId": "27205",
+        "extension": ".mp4",
+        "type": "movie",
+    }
+    result = organizer.moveMovie(srcFile, movieInfo, [movieStorage], interactive=False)
+
+    assert result is True
+    destDir = movieStorage / "Inception (2010)"
+    assert not (destDir / "movie.xml").exists()
+    assert not list(destDir.glob("mcm_id__*.dvdid.xml"))
+
+
+def testBuildMovieDvdIdFilenameWithBothIds(organizer: VideoOrganizer):
+    movieInfo = {"imdbId": "tt1375666", "tmdbId": "27205"}
+    assert (
+        organizer._buildMovieDvdIdFilename(movieInfo)
+        == "mcm_id__tt1375666-27205.dvdid.xml"
+    )
+
+
+def testBuildMovieDvdIdFilenameImdbOnly(organizer: VideoOrganizer):
+    movieInfo = {"imdbId": "tt1375666"}
+    assert (
+        organizer._buildMovieDvdIdFilename(movieInfo) == "mcm_id__tt1375666.dvdid.xml"
+    )
+
+
+def testBuildMovieDvdIdFilenameTmdbOnly(organizer: VideoOrganizer):
+    movieInfo = {"tmdbId": "27205"}
+    assert organizer._buildMovieDvdIdFilename(movieInfo) == "mcm_id__27205.dvdid.xml"
+
+
+def testBuildMovieDvdIdFilenameNoIds(organizer: VideoOrganizer):
+    assert organizer._buildMovieDvdIdFilename({}) is None
+
+
+# ---------------------------------------------------------------------------
+# Movie metadata enrichment — _normaliseMovieMetadata / _enrichMovieMetadata
+# ---------------------------------------------------------------------------
+
+
+def testNormaliseMovieMetadataReturnsNoneForNone(organizer: VideoOrganizer):
+    assert organizer._normaliseMovieMetadata(None) is None
+
+
+def testNormaliseMovieMetadataSetsType(organizer: VideoOrganizer):
+    result = organizer._normaliseMovieMetadata({"title": "Inception", "year": "2010"})
+    assert result is not None
+    assert result["type"] == "movie"
+
+
+def testNormaliseMovieMetadataNormalisesEmptyStringsToNone(organizer: VideoOrganizer):
+    result = organizer._normaliseMovieMetadata(
+        {"title": "", "year": "", "imdbId": "", "tmdbId": ""}
+    )
+    assert result is not None
+    assert result["title"] is None
+    assert result["year"] is None
+    assert result["imdbId"] is None
+    assert result["tmdbId"] is None
+
+
+def testEnrichMovieMetadataReturnsNoneForNone(organizer: VideoOrganizer):
+    assert organizer._enrichMovieMetadata(None) is None
+
+
+def testEnrichMovieMetadataSkipsScraperWhenBothIdsPresent(organizer: VideoOrganizer):
+    movieInfo = {
+        "title": "Inception",
+        "year": "2010",
+        "imdbId": "tt1375666",
+        "tmdbId": "27205",
+        "type": "movie",
+    }
+    with patch.object(
+        organizer, "_fetchMovieMetadataFromScraper"
+    ) as mockScraper:
+        result = organizer._enrichMovieMetadata(movieInfo)
+
+    mockScraper.assert_not_called()
+    assert result is not None
+    assert result["imdbId"] == "tt1375666"
+    assert result["tmdbId"] == "27205"
+
+
+def testEnrichMovieMetadataSkipsScraperInDryRun(organizer: VideoOrganizer):
+    """In dry-run mode enrichment logs but does not call the scraper."""
+    movieInfo = {
+        "title": "Inception",
+        "year": "2010",
+        "imdbId": None,
+        "type": "movie",
+    }
+    with patch.object(
+        organizer, "_fetchMovieMetadataFromScraper"
+    ) as mockScraper:
+        result = organizer._enrichMovieMetadata(movieInfo)
+
+    mockScraper.assert_not_called()
+    assert result is not None
+
+
+def testEnrichMovieMetadataCallsScraperWhenIdsMissing(organizer: VideoOrganizer):
+    """In confirm mode, enrichment fetches from scraper when IDs are missing."""
+    organizer.dryRun = False
+    movieInfo = {
+        "title": "Inception",
+        "year": "2010",
+        "type": "movie",
+    }
+    scraped = {
+        "type": "movie",
+        "title": "Inception",
+        "year": "2010",
+        "imdbId": "tt1375666",
+        "tmdbId": "27205",
+        "metadataSource": "tmdb",
+    }
+    emptyLibrary = organizer._newMetadataLibrary()
+    with patch.object(organizer, "_loadMetadataLibrary", return_value=emptyLibrary):
+        with patch.object(
+            organizer, "_fetchMovieMetadataFromScraper", return_value=scraped
+        ) as mockScraper:
+            with patch.object(organizer, "_saveMetadataLibrary"):
+                result = organizer._enrichMovieMetadata(movieInfo)
+
+    mockScraper.assert_called_once()
+    assert result is not None
+    assert result["imdbId"] == "tt1375666"
+    assert result["tmdbId"] == "27205"
+
+
+# ---------------------------------------------------------------------------
+# TMDB movie metadata — _fetchTmdbMovieMetadata / _tmdbMovieRecord
+# ---------------------------------------------------------------------------
+
+
+def testFetchTmdbMovieMetadataReturnsNoneWhenNoApiKey(organizer: VideoOrganizer):
+    with patch.dict("os.environ", {}, clear=True):
+        result = organizer._fetchTmdbMovieMetadata(
+            {"title": "Inception", "year": "2010"}
+        )
+    assert result is None
+
+
+def testFetchTmdbMovieMetadataSearchesByTitle(organizer: VideoOrganizer):
+    tmdbResponse = {
+        "results": [
+            {
+                "id": 27205,
+                "title": "Inception",
+                "release_date": "2010-07-16",
+                "poster_path": "/poster.jpg",
+                "backdrop_path": "/backdrop.jpg",
+            }
+        ]
+    }
+    with patch.dict("os.environ", {"ORGANISEMYVIDEO_TMDB_API_KEY": "testkey"}):
+        with patch.object(organizer, "_requestJson", return_value=tmdbResponse):
+            result = organizer._fetchTmdbMovieMetadata(
+                {"title": "Inception", "year": "2010"}
+            )
+
+    assert result is not None
+    assert result["tmdbId"] == "27205"
+    assert result["title"] == "Inception"
+    assert result["year"] == "2010"
+    assert result["posterPath"] == "/poster.jpg"
+    assert result["backdropPath"] == "/backdrop.jpg"
+    assert result["metadataSource"] == "tmdb"
+
+
+def testFetchTmdbMovieMetadataFetchesById(organizer: VideoOrganizer):
+    tmdbDetail = {
+        "id": 27205,
+        "title": "Inception",
+        "release_date": "2010-07-16",
+        "imdb_id": "tt1375666",
+        "poster_path": "/poster.jpg",
+        "backdrop_path": None,
+    }
+    with patch.dict("os.environ", {"ORGANISEMYVIDEO_TMDB_API_KEY": "testkey"}):
+        with patch.object(organizer, "_requestJson", return_value=tmdbDetail):
+            result = organizer._fetchTmdbMovieMetadata(
+                {"title": "Inception", "tmdbId": "27205"}
+            )
+
+    assert result is not None
+    assert result["tmdbId"] == "27205"
+    assert result["imdbId"] == "tt1375666"
+    assert result["posterPath"] == "/poster.jpg"
+    assert result["backdropPath"] is None
+
+
+def testTmdbMovieRecordReturnsNoneForNonDict(organizer: VideoOrganizer):
+    assert organizer._tmdbMovieRecord(None) is None  # type: ignore[arg-type]
+    assert organizer._tmdbMovieRecord("bad") is None  # type: ignore[arg-type]
+
+
+def testTmdbMovieRecordReturnsNoneWhenNoTitle(organizer: VideoOrganizer):
+    assert organizer._tmdbMovieRecord({"id": 123}) is None
+
+
+def testTmdbMovieRecordParsesReleaseDate(organizer: VideoOrganizer):
+    result = organizer._tmdbMovieRecord(
+        {"id": 27205, "title": "Inception", "release_date": "2010-07-16"}
+    )
+    assert result is not None
+    assert result["year"] == "2010"
+
+
+# ---------------------------------------------------------------------------
+# OMDb movie metadata — _fetchOmdbMovieMetadata
+# ---------------------------------------------------------------------------
+
+
+def testFetchOmdbMovieMetadataReturnsNoneWhenNoApiKey(organizer: VideoOrganizer):
+    with patch.dict("os.environ", {}, clear=True):
+        result = organizer._fetchOmdbMovieMetadata(
+            {"title": "Inception", "year": "2010"}
+        )
+    assert result is None
+
+
+def testFetchOmdbMovieMetadataSearchesByTitle(organizer: VideoOrganizer):
+    omdbResponse = {
+        "Response": "True",
+        "Title": "Inception",
+        "Year": "2010",
+        "imdbID": "tt1375666",
+        "Poster": "https://example.com/poster.jpg",
+    }
+    with patch.dict("os.environ", {"ORGANISEMYVIDEO_OMDB_API_KEY": "testkey"}):
+        with patch.object(organizer, "_requestJson", return_value=omdbResponse):
+            result = organizer._fetchOmdbMovieMetadata(
+                {"title": "Inception", "year": "2010"}
+            )
+
+    assert result is not None
+    assert result["imdbId"] == "tt1375666"
+    assert result["title"] == "Inception"
+    assert result["year"] == "2010"
+    assert result["posterUrl"] == "https://example.com/poster.jpg"
+    assert result["metadataSource"] == "omdb"
+
+
+def testFetchOmdbMovieMetadataReturnsFalseResponse(organizer: VideoOrganizer):
+    with patch.dict("os.environ", {"ORGANISEMYVIDEO_OMDB_API_KEY": "testkey"}):
+        with patch.object(
+            organizer, "_requestJson", return_value={"Response": "False"}
+        ):
+            result = organizer._fetchOmdbMovieMetadata({"title": "Unknown"})
+    assert result is None
+
+
+def testFetchOmdbMovieMetadataRequiresTitleOrImdb(organizer: VideoOrganizer):
+    with patch.dict("os.environ", {"ORGANISEMYVIDEO_OMDB_API_KEY": "testkey"}):
+        result = organizer._fetchOmdbMovieMetadata({})
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Artwork download — _downloadArtworkFile / _fetchMovieArtwork
+# ---------------------------------------------------------------------------
+
+
+def testDownloadArtworkFilePreservesExistingFile(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    dest = tmp_path / "folder.jpg"
+    dest.write_bytes(b"existing")
+    result = organizer._downloadArtworkFile("https://example.com/img.jpg", dest)
+    assert result is True
+    assert dest.read_bytes() == b"existing"
+
+
+def testDownloadArtworkFileRejectsNonHttps(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    dest = tmp_path / "folder.jpg"
+    result = organizer._downloadArtworkFile("http://example.com/img.jpg", dest)
+    assert result is False
+    assert not dest.exists()
+
+
+def testDownloadArtworkFileDryRunReturnsTrueWithoutWriting(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    dest = tmp_path / "folder.jpg"
+    result = organizer._downloadArtworkFile("https://example.com/img.jpg", dest)
+    assert result is True
+    assert not dest.exists()
+
+
+def testDownloadArtworkFileWritesBytes(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    dest = tmp_path / "folder.jpg"
+    import urllib.request
+    from unittest.mock import MagicMock
+
+    fakeResponse = MagicMock()
+    fakeResponse.__enter__ = lambda s: s
+    fakeResponse.__exit__ = MagicMock(return_value=False)
+    fakeResponse.headers = {"Content-Length": "5"}
+    fakeResponse.read = MagicMock(return_value=b"imgdt")
+
+    with patch("urllib.request.urlopen", return_value=fakeResponse):
+        result = confirmedOrganizer._downloadArtworkFile(
+            "https://example.com/poster.jpg", dest
+        )
+    assert result is True
+    assert dest.read_bytes() == b"imgdt"
+
+
+def testFetchMovieArtworkDownloadsPosterAndBackdrop(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    movieInfo = {
+        "posterPath": "/poster.jpg",
+        "backdropPath": "/backdrop.jpg",
+    }
+    with patch.object(
+        confirmedOrganizer, "_downloadArtworkFile", return_value=True
+    ) as mockDownload:
+        confirmedOrganizer._fetchMovieArtwork(movieInfo, tmp_path)
+
+    calls = {str(c.args[1].name): c.args[0] for c in mockDownload.call_args_list}
+    assert "folder.jpg" in calls
+    assert calls["folder.jpg"].endswith("/poster.jpg")
+    assert "backdrop.jpg" in calls
+    assert calls["backdrop.jpg"].endswith("/backdrop.jpg")
+
+
+def testFetchMovieArtworkFallsBackToOmdbPosterUrl(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    movieInfo = {
+        "posterUrl": "https://example.com/omdb-poster.jpg",
+    }
+    with patch.object(
+        confirmedOrganizer, "_downloadArtworkFile", return_value=True
+    ) as mockDownload:
+        confirmedOrganizer._fetchMovieArtwork(movieInfo, tmp_path)
+
+    posterCall = [c for c in mockDownload.call_args_list if "folder.jpg" in str(c.args[1])]
+    assert posterCall
+    assert posterCall[0].args[0] == "https://example.com/omdb-poster.jpg"
+
+
+def testFetchMovieArtworkSkipsNAOmdbPoster(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    movieInfo = {"posterUrl": "N/A"}
+    with patch.object(
+        confirmedOrganizer, "_downloadArtworkFile", return_value=True
+    ) as mockDownload:
+        confirmedOrganizer._fetchMovieArtwork(movieInfo, tmp_path)
+
+    assert not mockDownload.called
+
+
+def testMoveMovieFetchesArtworkViaEnrichedMetadata(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    """_replicateMovieMetadata calls _fetchMovieArtwork with enriched metadata."""
+    srcFile = confirmedOrganizer.sourceDir / "Inception (2010).mp4"
+    srcFile.write_bytes(b"x" * 100)
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+
+    movieInfo = {
+        "title": "Inception",
+        "year": "2010",
+        "imdbId": "tt1375666",
+        "tmdbId": "27205",
+        "extension": ".mp4",
+        "type": "movie",
+    }
+
+    with patch.object(
+        confirmedOrganizer, "_fetchMovieArtwork"
+    ) as mockArtwork:
+        result = confirmedOrganizer.moveMovie(
+            srcFile, movieInfo, [movieStorage], interactive=False
+        )
+
+    assert result is True
+    mockArtwork.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -1830,13 +2779,225 @@ def testMoveTvShowReplicatesMcmCompanionFiles(
         / "metadata"
         / "Daredevil.Born.Again.S01E04.Sic.Semper.Systema.xml"
     ).read_text(encoding="utf-8")
+    assert destMetadata.startswith("<?xml")
     assert "<filename>/67da18725f220.jpg</filename>" in destMetadata
-    assert "<EpisodeNumber>4</EpisodeNumber>" in destMetadata
-    assert "<SeasonNumber>1</SeasonNumber>" in destMetadata
-    assert "<EpisodeName>Sic Semper Systema</EpisodeName>" in destMetadata
+    assert "<EpisodeNumber>4</EpisodeNumber>" not in destMetadata
+    assert "<SeasonNumber>1</SeasonNumber>" not in destMetadata
+    assert "<EpisodeName>Sic Semper Systema</EpisodeName>" not in destMetadata
     assert (
         seasonDestDir / "metadata" / "67da18725f220.jpg"
     ).read_bytes() == b"episode-thumb"
+
+
+def testMoveTvShowPreservesExistingEpisodeMetadataInDestination(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    showSourceDir = confirmedOrganizer.sourceDir / "Daredevil Born Again"
+    seasonSourceDir = showSourceDir / "Season 1"
+    metadataSourceDir = seasonSourceDir / "metadata"
+    metadataSourceDir.mkdir(parents=True)
+    srcFile = seasonSourceDir / "Daredevil.Born.Again.S01E04.Sic.Semper.Systema.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    (
+        metadataSourceDir / "Daredevil.Born.Again.S01E04.Sic.Semper.Systema.xml"
+    ).write_text("<Item><EpisodeName>new</EpisodeName></Item>", encoding="utf-8")
+
+    tvStorage = tmp_path / "video1" / "TV"
+    metadataDestDir = tvStorage / "Daredevil Born Again" / "Season 01" / "metadata"
+    metadataDestDir.mkdir(parents=True)
+    (metadataDestDir / "Daredevil.Born.Again.S01E04.Sic.Semper.Systema.xml").write_text(
+        "<Item><EpisodeName>existing</EpisodeName></Item>", encoding="utf-8"
+    )
+
+    tvInfo = {
+        "showName": "Daredevil Born Again",
+        "season": 1,
+        "episode": 4,
+        "episodeTitle": "Sic Semper Systema",
+        "seriesId": "12345",
+        "imdbId": "tt12345",
+        "extension": ".mkv",
+        "type": "tv",
+    }
+    result = confirmedOrganizer.moveTvShow(
+        srcFile, tvInfo, [tvStorage], interactive=False
+    )
+
+    assert result is True
+    assert (
+        metadataDestDir / "Daredevil.Born.Again.S01E04.Sic.Semper.Systema.xml"
+    ).read_text(encoding="utf-8") == "<Item><EpisodeName>existing</EpisodeName></Item>"
+
+
+def testMoveTvShowCreatesSeriesXmlWhenMissingAndMetadataConfident(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "Virgin.River.S06E01.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    tvInfo = {
+        "showName": "Virgin River",
+        "season": 6,
+        "episode": 1,
+        "episodeTitle": "The Beginning",
+        "seriesId": "117581",
+        "imdbId": "tt9077530",
+        "extension": ".mkv",
+        "type": "tv",
+    }
+    result = confirmedOrganizer.moveTvShow(
+        srcFile, tvInfo, [tvStorage], interactive=False
+    )
+
+    assert result is True
+    showDestDir = tvStorage / "Virgin River"
+    seriesXml = showDestDir / "series.xml"
+    assert seriesXml.exists()
+    seriesText = seriesXml.read_text(encoding="utf-8")
+    assert "<SeriesName>Virgin River</SeriesName>" in seriesText
+    assert "<SeriesID>117581</SeriesID>" in seriesText
+    assert "<IMDB_ID>tt9077530</IMDB_ID>" in seriesText
+    assert (showDestDir / "mcm_id__tt9077530-117581.dvdid.xml").exists()
+    assert (
+        showDestDir / "Season 06" / "metadata" / "Virgin.River.S06E01.The.Beginning.xml"
+    ).exists()
+
+
+def testMoveTvShowPreservesExistingDvdIdXmlWithoutCreatingDuplicate(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "Virgin.River.S06E01.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    tvStorage = tmp_path / "video1" / "TV"
+    showDestDir = tvStorage / "Virgin River"
+    showDestDir.mkdir(parents=True)
+    (showDestDir / "mcm_id__existing.dvdid.xml").write_text(
+        "<Item><SeriesID>existing</SeriesID></Item>", encoding="utf-8"
+    )
+
+    tvInfo = {
+        "showName": "Virgin River",
+        "season": 6,
+        "episode": 1,
+        "seriesId": "117581",
+        "imdbId": "tt9077530",
+        "extension": ".mkv",
+        "type": "tv",
+    }
+    result = confirmedOrganizer.moveTvShow(
+        srcFile, tvInfo, [tvStorage], interactive=False
+    )
+
+    assert result is True
+    assert (showDestDir / "mcm_id__existing.dvdid.xml").exists()
+    assert len(list(showDestDir.glob("mcm_id__*.dvdid.xml"))) == 1
+
+
+def testMoveTvShowLeavesMultipleExistingDvdIdXmlFilesUnchanged(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "Virgin.River.S06E01.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    tvStorage = tmp_path / "video1" / "TV"
+    showDestDir = tvStorage / "Virgin River"
+    showDestDir.mkdir(parents=True)
+    (showDestDir / "mcm_id__first.dvdid.xml").write_text(
+        "<Item><SeriesID>first</SeriesID></Item>", encoding="utf-8"
+    )
+    (showDestDir / "mcm_id__second.dvdid.xml").write_text(
+        "<Item><SeriesID>second</SeriesID></Item>", encoding="utf-8"
+    )
+
+    tvInfo = {
+        "showName": "Virgin River",
+        "season": 6,
+        "episode": 1,
+        "seriesId": "117581",
+        "imdbId": "tt9077530",
+        "extension": ".mkv",
+        "type": "tv",
+    }
+    result = confirmedOrganizer.moveTvShow(
+        srcFile, tvInfo, [tvStorage], interactive=False
+    )
+
+    assert result is True
+    assert (showDestDir / "mcm_id__first.dvdid.xml").exists()
+    assert (showDestDir / "mcm_id__second.dvdid.xml").exists()
+    assert len(list(showDestDir.glob("mcm_id__*.dvdid.xml"))) == 2
+
+
+def testMoveTvShowCreatesSeriesIdOnlyDvdIdXmlWhenImdbMissing(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "Virgin.River.S06E01.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    tvInfo = {
+        "showName": "Virgin River",
+        "season": 6,
+        "episode": 1,
+        "seriesId": "117581",
+        "extension": ".mkv",
+        "type": "tv",
+    }
+    result = confirmedOrganizer.moveTvShow(
+        srcFile, tvInfo, [tvStorage], interactive=False
+    )
+
+    assert result is True
+    dvdIdXml = tvStorage / "Virgin River" / "mcm_id__117581.dvdid.xml"
+    assert dvdIdXml.exists()
+    dvdIdContent = dvdIdXml.read_text(encoding="utf-8")
+    assert "<SeriesID>117581</SeriesID>" in dvdIdContent
+    assert "<IMDB_ID>" not in dvdIdContent
+
+
+def testMoveTvShowPreservesExistingSeriesXmlWithoutOverwriting(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    showSourceDir = confirmedOrganizer.sourceDir / "Alias Name"
+    seasonSourceDir = showSourceDir / "Season 1"
+    seasonSourceDir.mkdir(parents=True)
+    srcFile = seasonSourceDir / "Alias.Name.S01E01.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    (showSourceDir / "series.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Series>
+    <SeriesName>Existing Canonical Name</SeriesName>
+    <SeriesID>990001</SeriesID>
+</Series>
+""",
+        encoding="utf-8",
+    )
+
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+    tvInfo = {
+        "showName": "New Alias Name",
+        "season": 1,
+        "episode": 1,
+        "seriesId": "990001",
+        "imdbId": "tt8398600",
+        "extension": ".mkv",
+        "type": "tv",
+    }
+
+    result = confirmedOrganizer.moveTvShow(
+        srcFile, tvInfo, [tvStorage], interactive=False
+    )
+    assert result is True
+
+    seriesText = (tvStorage / "New Alias Name" / "series.xml").read_text(
+        encoding="utf-8"
+    )
+    assert "<SeriesName>Existing Canonical Name</SeriesName>" in seriesText
+    assert "<SeriesID>990001</SeriesID>" in seriesText
+    assert "<IMDB_ID>" not in seriesText
 
 
 def testMoveTvShowUsesCanonicalEpisodeTitleFilename(
@@ -2076,8 +3237,12 @@ def testPromptUserConfirmationReusesConfirmedTvShow(organizer: VideoOrganizer):
 
 def testPromptUserConfirmationDoesNotReuseMovieChoices(organizer: VideoOrganizer):
     with patch("builtins.input", side_effect=["y", "y"]) as mockInput:
-        first = organizer.promptUserConfirmation("file1.mkv", "Inception (2010)", "movie")
-        second = organizer.promptUserConfirmation("file2.mkv", "Inception (2010)", "movie")
+        first = organizer.promptUserConfirmation(
+            "file1.mkv", "Inception (2010)", "movie"
+        )
+        second = organizer.promptUserConfirmation(
+            "file2.mkv", "Inception (2010)", "movie"
+        )
     assert first == {"name": "Inception (2010)", "type": "movie"}
     assert second == {"name": "Inception (2010)", "type": "movie"}
     assert mockInput.call_count == 2
@@ -2290,14 +3455,14 @@ def testMoveTvShowReusesConfirmedChoiceWithoutSecondPrompt(
 
     with patch("builtins.input", side_effect=["y"]) as mockInput:
         firstResult = confirmedOrganizer.moveTvShow(firstFile, firstTvInfo, [tvStorage])
-        secondResult = confirmedOrganizer.moveTvShow(secondFile, secondTvInfo, [tvStorage])
+        secondResult = confirmedOrganizer.moveTvShow(
+            secondFile, secondTvInfo, [tvStorage]
+        )
 
     assert firstResult is True
     assert secondResult is True
     assert mockInput.call_count == 1
-    assert (
-        tvStorage / "The Pitt" / "Season 01" / "The.Pitt.S01E13.Pilot.mkv"
-    ).exists()
+    assert (tvStorage / "The Pitt" / "Season 01" / "The.Pitt.S01E13.Pilot.mkv").exists()
     assert (tvStorage / "The Pitt" / "Season 02" / "The.Pitt.S02E07.Hour.mkv").exists()
 
 
@@ -2775,7 +3940,9 @@ def testMainLogsStartupProgressBeforeProcessing(caplog: pytest.LogCaptureFixture
     """CLI startup should log source/mode progress before processing begins."""
     organizerInstance = MagicMock()
 
-    with patch("organiseMyVideo.VideoOrganizer", return_value=organizerInstance) as mockOrganizer:
+    with patch(
+        "organiseMyVideo.VideoOrganizer", return_value=organizerInstance
+    ) as mockOrganizer:
         with patch(
             "sys.argv",
             ["organiseMyVideo", "--source", "/tmp/source"],
@@ -2800,7 +3967,9 @@ def testMainLogsStartupProgressBeforeProcessing(caplog: pytest.LogCaptureFixture
 def testMainPassesRefreshAndNoCursesFlagsToOrganizer():
     organizerInstance = MagicMock()
 
-    with patch("organiseMyVideo.VideoOrganizer", return_value=organizerInstance) as mockOrganizer:
+    with patch(
+        "organiseMyVideo.VideoOrganizer", return_value=organizerInstance
+    ) as mockOrganizer:
         with patch(
             "sys.argv",
             [
@@ -2818,4 +3987,24 @@ def testMainPassesRefreshAndNoCursesFlagsToOrganizer():
         dryRun=True,
         refreshMetadataLibrary=True,
         useCurses=False,
+    )
+
+
+def testMainConfiguresConsoleTimestampWithoutMilliseconds():
+    organizerInstance = MagicMock()
+
+    with patch("organiseMyVideo.VideoOrganizer", return_value=organizerInstance):
+        with patch("sys.argv", ["organiseMyVideo", "--source", "/tmp/source"]):
+            omv_main.main()
+
+    consoleHandlers = [
+        handler
+        for handler in omv_main.logger.logger.handlers
+        if isinstance(handler, logging.StreamHandler)
+    ]
+    assert consoleHandlers
+    assert all(
+        handler.formatter is not None
+        and handler.formatter.datefmt == "%Y-%m-%d %H:%M:%S"
+        for handler in consoleHandlers
     )
