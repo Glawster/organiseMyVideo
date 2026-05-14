@@ -3421,7 +3421,7 @@ def testMoveTvShowSwitchesToMovie(tmp_path: Path, confirmedOrganizer: VideoOrgan
         )
     assert result is True
     destFile = (
-        movieStorage / "Breaking Bad Movie (2013)" / "Breaking.Bad.S01E01.Pilot.mkv"
+        movieStorage / "Breaking Bad Movie (2013)" / "Breaking Bad Movie (2013).mkv"
     )
     assert destFile.exists()
     assert not srcFile.exists()
