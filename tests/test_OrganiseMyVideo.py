@@ -804,7 +804,7 @@ def testProcessFilesFindsVideoInSubdirectory(
         ):
             confirmedOrganizer.processFiles(interactive=True)
 
-    destFile = movieStorage / "One Mile (2026)" / "One.Mile.2026.1080p.WEBRip.x264.mp4"
+    destFile = movieStorage / "One Mile (2026)" / "One Mile (2026).mp4"
     assert destFile.exists()
     assert not srcFile.exists()
 
@@ -838,7 +838,7 @@ def testProcessFilesUsesMovieMcmHintsWhenFilenameCannotBeParsed(
     ):
         confirmedOrganizer.processFiles(interactive=False)
 
-    destFile = movieStorage / "3 from Hell (2019)" / "clip.mp4"
+    destFile = movieStorage / "3 from Hell (2019)" / "3 from Hell (2019).mp4"
     assert destFile.exists()
     assert not srcFile.exists()
 

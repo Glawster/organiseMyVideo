@@ -1200,6 +1200,18 @@ class VideoMixin:
             parts.append(titlePart)
         return f"{'.'.join(parts)}{extension}"
 
+    def _buildMovieDestinationFilename(self, sourceFile: Path, movieInfo: dict) -> str:
+        """Return the destination movie filename, preferring canonical metadata names."""
+        title = movieInfo.get("title")
+        year = movieInfo.get("year")
+        extension = movieInfo.get("extension") or sourceFile.suffix
+        if extension and not str(extension).startswith("."):
+            extension = f".{extension}"
+
+        if not title or not year:
+            return sourceFile.name
+        return f"{title} ({year}){extension}"
+
     def _writeEpisodeMcmTemplate(
         self,
         sourceFile: Path,
@@ -1606,8 +1618,9 @@ class VideoMixin:
         Returns:
             True if successful, False otherwise
         """
-        title = movieInfo["title"]
-        year = movieInfo["year"]
+        resolvedMovieInfo = self._enrichMovieMetadata(dict(movieInfo)) or dict(movieInfo)
+        title = resolvedMovieInfo["title"]
+        year = resolvedMovieInfo["year"]
 
         logger.value("processing movie", sourceFile.name)
 
@@ -1649,6 +1662,8 @@ class VideoMixin:
                     year = match.group(2)
                 else:
                     title = confirmedTitle
+            resolvedMovieInfo["title"] = title
+            resolvedMovieInfo["year"] = year
 
         # Find existing directory or choose storage location
         existingDir = self.findExistingMovieDir(title, year, movieDirs)
@@ -1664,7 +1679,9 @@ class VideoMixin:
 
             destDir = storage / f"{title} ({year})"
 
-        destFile = destDir / sourceFile.name
+        destFile = destDir / self._buildMovieDestinationFilename(
+            sourceFile, resolvedMovieInfo
+        )
 
         logger.action(
             f"moving movie:\n"
@@ -1678,7 +1695,7 @@ class VideoMixin:
         try:
             destDir.mkdir(parents=True, exist_ok=True)
             self._moveFileWithProgress(sourceFile, destFile)
-            self._replicateMovieMetadata(sourceFile, destDir, movieInfo)
+            self._replicateMovieMetadata(sourceFile, destDir, resolvedMovieInfo)
             logger.done("movie moved successfully")
             return True
         except Exception as e:
