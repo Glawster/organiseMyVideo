@@ -4,6 +4,7 @@ import errno
 import io
 import json
 import logging
+import os
 import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -1762,13 +1763,15 @@ def testEnrichTvMetadataCallsScraperInDryRun(organizer: VideoOrganizer):
         with patch.object(
             organizer, "_fetchTvMetadataFromScraper", return_value=scraped
         ) as mockScraper:
-            with patch.object(organizer, "_saveMetadataLibrary"):
+            with patch.object(organizer, "_saveMetadataLibrary") as mockSave:
                 result = organizer._enrichTvMetadata(tvInfo)
 
     mockScraper.assert_called_once()
+    mockSave.assert_called_once()
     assert result is not None
     assert result["episodeTitle"] == "Pilot"
     assert result["seriesId"] == "81189"
+    assert emptyLibrary["tv"]["episodes"]
 
 
 def testGetTvdbTokenPromptsForApiKeyWhenMissing(organizer: VideoOrganizer):
@@ -1788,6 +1791,46 @@ def testGetTvdbTokenPromptsForApiKeyWhenMissing(organizer: VideoOrganizer):
         payload={"apikey": "prompted-key"},
         headers={},
     )
+
+
+def testPromptForTvdbApiKeyIfNeededReturnsNoneForBlankPrompt(
+    organizer: VideoOrganizer,
+):
+    organizer.tvdbApiKeyPrompt = MagicMock(return_value="   ")
+
+    with patch.dict("os.environ", {}, clear=True):
+        result = organizer._promptForTvdbApiKeyIfNeeded()
+
+    assert result is None
+    organizer.tvdbApiKeyPrompt.assert_called_once_with()
+
+
+def testPromptForTvdbApiKeyIfNeededReturnsNoneForNonStringPrompt(
+    organizer: VideoOrganizer,
+):
+    organizer.tvdbApiKeyPrompt = MagicMock(return_value=123)
+
+    with patch.dict("os.environ", {}, clear=True):
+        result = organizer._promptForTvdbApiKeyIfNeeded()
+
+    assert result is None
+    organizer.tvdbApiKeyPrompt.assert_called_once_with()
+
+
+def testPromptForTvdbApiKeyIfNeededUsesEnvValueSavedByPrompt(
+    organizer: VideoOrganizer,
+):
+    def persistKey():
+        os.environ["ORGANISEMYVIDEO_TVDB_API_KEY"] = "saved-by-prompt"
+        return None
+
+    organizer.tvdbApiKeyPrompt = MagicMock(side_effect=persistKey)
+
+    with patch.dict("os.environ", {}, clear=True):
+        result = organizer._promptForTvdbApiKeyIfNeeded()
+
+    assert result == "saved-by-prompt"
+    organizer.tvdbApiKeyPrompt.assert_called_once_with()
 
 
 def testProcessFilesCachesImdbFallbackEpisodeTitleForLaterRuns(tmp_path: Path):
@@ -2307,13 +2350,15 @@ def testEnrichMovieMetadataCallsScraperInDryRun(organizer: VideoOrganizer):
         with patch.object(
             organizer, "_fetchMovieMetadataFromScraper", return_value=scraped
         ) as mockScraper:
-            with patch.object(organizer, "_saveMetadataLibrary"):
+            with patch.object(organizer, "_saveMetadataLibrary") as mockSave:
                 result = organizer._enrichMovieMetadata(movieInfo)
 
     mockScraper.assert_called_once()
+    mockSave.assert_called_once()
     assert result is not None
     assert result["imdbId"] == "tt1375666"
     assert result["tmdbId"] == "27205"
+    assert emptyLibrary["movies"]
 
 
 def testEnrichMovieMetadataCallsScraperWhenIdsMissing(organizer: VideoOrganizer):

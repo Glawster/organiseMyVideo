@@ -58,6 +58,7 @@ class MetadataMixin:
                 os.environ["ORGANISEMYVIDEO_TVDB_API_KEY"] = apiKey
                 return apiKey
 
+        # Some prompt callbacks persist the key as a side effect and return None.
         apiKey = os.environ.get("ORGANISEMYVIDEO_TVDB_API_KEY")
         return apiKey.strip() if apiKey else None
 
