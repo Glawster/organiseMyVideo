@@ -2290,6 +2290,8 @@ def testEnrichMovieMetadataCallsScraperInDryRun(organizer: VideoOrganizer):
     movieInfo = {
         "title": "Inception",
         "year": "2010",
+        "imdbId": None,
+        "tmdbId": None,
         "type": "movie",
     }
     scraped = {

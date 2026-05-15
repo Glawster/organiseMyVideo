@@ -52,10 +52,11 @@ class MetadataMixin:
             logger.warning("TVDB API key prompt failed: %s", error)
             return None
 
-        if isinstance(prompted, str) and prompted.strip():
+        if isinstance(prompted, str):
             apiKey = prompted.strip()
-            os.environ["ORGANISEMYVIDEO_TVDB_API_KEY"] = apiKey
-            return apiKey
+            if apiKey:
+                os.environ["ORGANISEMYVIDEO_TVDB_API_KEY"] = apiKey
+                return apiKey
 
         apiKey = os.environ.get("ORGANISEMYVIDEO_TVDB_API_KEY")
         return apiKey.strip() if apiKey else None
