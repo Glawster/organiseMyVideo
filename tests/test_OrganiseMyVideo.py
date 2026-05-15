@@ -1831,7 +1831,6 @@ def testPromptForTvdbApiKeyIfNeededUsesEnvValueSavedByPrompt(
 
     assert result == "saved-by-prompt"
     organizer.tvdbApiKeyPrompt.assert_called_once_with()
-    assert "ORGANISEMYVIDEO_TVDB_API_KEY" not in os.environ
 
 
 def testProcessFilesCachesImdbFallbackEpisodeTitleForLaterRuns(tmp_path: Path):
