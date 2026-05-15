@@ -58,7 +58,7 @@ class VideoMixin:
         Returns:
             Tuple of (movie_directories, tv_directories)
         """
-        logger.info("scanning for storage locations...")
+        logger.info("scanning for storage locations")
 
         movieDirs = []
         videoDirs = []
@@ -1938,7 +1938,7 @@ class VideoMixin:
             return
 
         # Scan for storage locations
-        logger.doing("scanning for storage locations...")
+        logger.doing("scanning for storage locations")
         movieDirs, videoDirs = self.scanStorageLocations()
 
         logger.info(
