@@ -38,7 +38,7 @@ class MetadataMixin:
         if apiKey:
             return apiKey
 
-        if getattr(self, "_tvdbApiKeyPromptAttempted", False):
+        if self._tvdbApiKeyPromptAttempted:
             return None
 
         prompt = getattr(self, "tvdbApiKeyPrompt", None)
@@ -58,7 +58,8 @@ class MetadataMixin:
                 os.environ["ORGANISEMYVIDEO_TVDB_API_KEY"] = apiKey
                 return apiKey
 
-        # Some prompt callbacks persist the key as a side effect and return None.
+        # The CLI prompt in ``organiseMyVideo.__main__`` persists the key to
+        # ``os.environ`` as a side effect and may return ``None`` here.
         apiKey = os.environ.get("ORGANISEMYVIDEO_TVDB_API_KEY")
         return apiKey.strip() if apiKey else None
 
