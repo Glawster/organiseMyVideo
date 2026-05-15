@@ -1744,6 +1744,52 @@ def testFetchTvMetadataFromProvidersReturnsNoneWhenAllProvidersMiss(
     imdb.assert_called_once_with(tvInfo)
 
 
+def testEnrichTvMetadataCallsScraperInDryRun(organizer: VideoOrganizer):
+    """Dry-run TV enrichment still fetches episode metadata for previews."""
+    tvInfo = {"showName": "Breaking Bad", "season": 1, "episode": 1, "type": "tv"}
+    scraped = {
+        "type": "tv",
+        "showName": "Breaking Bad",
+        "season": 1,
+        "episode": 1,
+        "episodeTitle": "Pilot",
+        "seriesId": "81189",
+        "episodeId": "349232",
+        "metadataSource": "tvdb",
+    }
+    emptyLibrary = organizer._newMetadataLibrary()
+    with patch.object(organizer, "_loadMetadataLibrary", return_value=emptyLibrary):
+        with patch.object(
+            organizer, "_fetchTvMetadataFromScraper", return_value=scraped
+        ) as mockScraper:
+            with patch.object(organizer, "_saveMetadataLibrary"):
+                result = organizer._enrichTvMetadata(tvInfo)
+
+    mockScraper.assert_called_once()
+    assert result is not None
+    assert result["episodeTitle"] == "Pilot"
+    assert result["seriesId"] == "81189"
+
+
+def testGetTvdbTokenPromptsForApiKeyWhenMissing(organizer: VideoOrganizer):
+    organizer.tvdbApiKeyPrompt = MagicMock(return_value="prompted-key")
+
+    with patch.dict("os.environ", {}, clear=True):
+        with patch.object(
+            organizer, "_requestJson", return_value={"data": {"token": "token-123"}}
+        ) as mockRequest:
+            token = organizer._getTvdbToken()
+
+    assert token == "token-123"
+    organizer.tvdbApiKeyPrompt.assert_called_once_with()
+    mockRequest.assert_called_once_with(
+        "https://api4.thetvdb.com/v4/login",
+        method="POST",
+        payload={"apikey": "prompted-key"},
+        headers={},
+    )
+
+
 def testProcessFilesCachesImdbFallbackEpisodeTitleForLaterRuns(tmp_path: Path):
     libraryPath = tmp_path / "metadataLibrary.json"
     movieStorage = tmp_path / "movie1"
@@ -2230,9 +2276,7 @@ def testEnrichMovieMetadataSkipsScraperWhenBothIdsPresent(organizer: VideoOrgani
         "tmdbId": "27205",
         "type": "movie",
     }
-    with patch.object(
-        organizer, "_fetchMovieMetadataFromScraper"
-    ) as mockScraper:
+    with patch.object(organizer, "_fetchMovieMetadataFromScraper") as mockScraper:
         result = organizer._enrichMovieMetadata(movieInfo)
 
     mockScraper.assert_not_called()
@@ -2241,21 +2285,33 @@ def testEnrichMovieMetadataSkipsScraperWhenBothIdsPresent(organizer: VideoOrgani
     assert result["tmdbId"] == "27205"
 
 
-def testEnrichMovieMetadataSkipsScraperInDryRun(organizer: VideoOrganizer):
-    """In dry-run mode enrichment logs but does not call the scraper."""
+def testEnrichMovieMetadataCallsScraperInDryRun(organizer: VideoOrganizer):
+    """Dry-run enrichment still fetches metadata so previews use enriched values."""
     movieInfo = {
         "title": "Inception",
         "year": "2010",
-        "imdbId": None,
         "type": "movie",
     }
-    with patch.object(
-        organizer, "_fetchMovieMetadataFromScraper"
-    ) as mockScraper:
-        result = organizer._enrichMovieMetadata(movieInfo)
+    scraped = {
+        "type": "movie",
+        "title": "Inception",
+        "year": "2010",
+        "imdbId": "tt1375666",
+        "tmdbId": "27205",
+        "metadataSource": "tmdb",
+    }
+    emptyLibrary = organizer._newMetadataLibrary()
+    with patch.object(organizer, "_loadMetadataLibrary", return_value=emptyLibrary):
+        with patch.object(
+            organizer, "_fetchMovieMetadataFromScraper", return_value=scraped
+        ) as mockScraper:
+            with patch.object(organizer, "_saveMetadataLibrary"):
+                result = organizer._enrichMovieMetadata(movieInfo)
 
-    mockScraper.assert_not_called()
+    mockScraper.assert_called_once()
     assert result is not None
+    assert result["imdbId"] == "tt1375666"
+    assert result["tmdbId"] == "27205"
 
 
 def testEnrichMovieMetadataCallsScraperWhenIdsMissing(organizer: VideoOrganizer):
@@ -2432,9 +2488,7 @@ def testDownloadArtworkFilePreservesExistingFile(
     assert dest.read_bytes() == b"existing"
 
 
-def testDownloadArtworkFileRejectsNonHttps(
-    tmp_path: Path, organizer: VideoOrganizer
-):
+def testDownloadArtworkFileRejectsNonHttps(tmp_path: Path, organizer: VideoOrganizer):
     dest = tmp_path / "folder.jpg"
     result = organizer._downloadArtworkFile("http://example.com/img.jpg", dest)
     assert result is False
@@ -2501,7 +2555,9 @@ def testFetchMovieArtworkFallsBackToOmdbPosterUrl(
     ) as mockDownload:
         confirmedOrganizer._fetchMovieArtwork(movieInfo, tmp_path)
 
-    posterCall = [c for c in mockDownload.call_args_list if "folder.jpg" in str(c.args[1])]
+    posterCall = [
+        c for c in mockDownload.call_args_list if "folder.jpg" in str(c.args[1])
+    ]
     assert posterCall
     assert posterCall[0].args[0] == "https://example.com/omdb-poster.jpg"
 
@@ -2536,9 +2592,7 @@ def testMoveMovieFetchesArtworkViaEnrichedMetadata(
         "type": "movie",
     }
 
-    with patch.object(
-        confirmedOrganizer, "_fetchMovieArtwork"
-    ) as mockArtwork:
+    with patch.object(confirmedOrganizer, "_fetchMovieArtwork") as mockArtwork:
         result = confirmedOrganizer.moveMovie(
             srcFile, movieInfo, [movieStorage], interactive=False
         )
@@ -2571,12 +2625,16 @@ def testMoveTvShowDryRunReturnsTrueWithoutMoving(
 
     with patch.object(organizer, "_moveFileWithProgress") as mockMove:
         with caplog.at_level("INFO"):
-            result = organizer.moveTvShow(srcFile, tvInfo, [tvStorage], interactive=False)
+            result = organizer.moveTvShow(
+                srcFile, tvInfo, [tvStorage], interactive=False
+            )
 
     assert result is True
     mockMove.assert_not_called()
     assert srcFile.exists()
-    expectedDest = tvStorage / "Breaking Bad" / "Season 01" / "Breaking.Bad.S01E01.Pilot.mkv"
+    expectedDest = (
+        tvStorage / "Breaking Bad" / "Season 01" / "Breaking.Bad.S01E01.Pilot.mkv"
+    )
     assert (
         f"...moving TV show:\n"
         f"     Breaking.Bad.S01E01.Pilot.mkv\n"

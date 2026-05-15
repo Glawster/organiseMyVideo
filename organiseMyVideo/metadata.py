@@ -11,7 +11,12 @@ from typing import Callable, Optional
 
 from organiseMyProjects.logUtils import getLogger  # type: ignore
 
-from .constants import METADATA_LIBRARY_FILE, TMDB_API_BASE_URL, TMDB_IMAGE_BASE_URL, TVDB_API_BASE_URL
+from .constants import (
+    METADATA_LIBRARY_FILE,
+    TMDB_API_BASE_URL,
+    TMDB_IMAGE_BASE_URL,
+    TVDB_API_BASE_URL,
+)
 
 logger = getLogger()
 _METADATA_SCAN_PLACEHOLDER_FILENAME = "__metadata_scan__.mkv"
@@ -26,6 +31,34 @@ _MAX_ARTWORK_SIZE_BYTES = 20_000_000
 
 class MetadataMixin:
     """Methods for caching local metadata and enriching TV episode details."""
+
+    def _promptForTvdbApiKeyIfNeeded(self) -> Optional[str]:
+        """Prompt once for a TVDB API key when no credentials are configured."""
+        apiKey = os.environ.get("ORGANISEMYVIDEO_TVDB_API_KEY")
+        if apiKey:
+            return apiKey
+
+        if getattr(self, "_tvdbApiKeyPromptAttempted", False):
+            return None
+
+        prompt = getattr(self, "tvdbApiKeyPrompt", None)
+        if not callable(prompt):
+            return None
+
+        self._tvdbApiKeyPromptAttempted = True
+        try:
+            prompted = prompt()
+        except Exception as error:
+            logger.warning("TVDB API key prompt failed: %s", error)
+            return None
+
+        if isinstance(prompted, str) and prompted.strip():
+            apiKey = prompted.strip()
+            os.environ["ORGANISEMYVIDEO_TVDB_API_KEY"] = apiKey
+            return apiKey
+
+        apiKey = os.environ.get("ORGANISEMYVIDEO_TVDB_API_KEY")
+        return apiKey.strip() if apiKey else None
 
     def _logMetadataLibraryAddition(self, mediaType: str, name: str) -> None:
         """Log a grouped metadata-library addition header followed by ``name``."""
@@ -337,21 +370,24 @@ class MetadataMixin:
         seriesId = self._readFirstXmlText(seriesRoot, ("SeriesID", "id"))
         try:
             seasonMetadataDirs = [
-                item
-                for item in showDir.glob("Season*/metadata")
-                if item.is_dir()
+                item for item in showDir.glob("Season*/metadata") if item.is_dir()
             ]
         except OSError as error:
-            logger.warning("could not inspect show metadata folders %s: %s", showDir, error)
+            logger.warning(
+                "could not inspect show metadata folders %s: %s", showDir, error
+            )
             seasonMetadataDirs = []
 
         mcmPresence = {
             "showXmlExists": seriesFile.exists(),
             "dvdIdXmlExists": self._hasMatchingFiles(showDir, ("mcm_id__*.dvdid.xml",)),
             "seasonMetadataFolderExists": bool(seasonMetadataDirs),
-            "episodeXmlExists": self._hasMatchingFiles(showDir, ("Season*/metadata/*.xml",)),
+            "episodeXmlExists": self._hasMatchingFiles(
+                showDir, ("Season*/metadata/*.xml",)
+            ),
             "artworkExists": self._hasMatchingFiles(
-                showDir, ("folder.jpg", "banner.jpg", "backdrop*.jpg", "Season*/folder.jpg")
+                showDir,
+                ("folder.jpg", "banner.jpg", "backdrop*.jpg", "Season*/folder.jpg"),
             ),
         }
 
@@ -491,9 +527,6 @@ class MetadataMixin:
             resolved["season"],
             resolved["episode"],
         )
-        if self.dryRun:
-            return resolved
-
         scraped = self._fetchTvMetadataFromScraper(resolved)
         if not scraped:
             return resolved
@@ -544,7 +577,9 @@ class MetadataMixin:
 
         apiKey = os.environ.get("ORGANISEMYVIDEO_TVDB_API_KEY")
         if not apiKey:
-            return None
+            apiKey = self._promptForTvdbApiKeyIfNeeded()
+            if not apiKey:
+                return None
 
         payload = {"apikey": apiKey}
         pin = os.environ.get("ORGANISEMYVIDEO_TVDB_PIN")
@@ -836,9 +871,6 @@ class MetadataMixin:
             resolved.get("title") or "unknown title",
             resolved.get("year") or "unknown year",
         )
-        if self.dryRun:
-            return resolved
-
         scraped = self._fetchMovieMetadataFromScraper(resolved)
         if not scraped:
             return resolved
@@ -887,9 +919,7 @@ class MetadataMixin:
                 )
             else:
                 params = urllib.parse.urlencode({"api_key": apiKey})
-                data = self._requestJson(
-                    f"{TMDB_API_BASE_URL}/movie/{tmdbId}?{params}"
-                )
+                data = self._requestJson(f"{TMDB_API_BASE_URL}/movie/{tmdbId}?{params}")
             if data and isinstance(data, dict) and not data.get("status_code"):
                 return self._tmdbMovieRecord(data)
 

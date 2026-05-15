@@ -74,3 +74,9 @@ class VideoOrganizer(MetadataMixin, VideoMixin, TorrentMixin):
         self._metadataShowLogStarted = False
         self._tvMetadataFetcher = None
         self._movieMetadataFetcher = None
+        self.tvdbApiKeyPrompt = None
+        self._tvdbApiKeyPromptAttempted = False
+        self.tvdbApiKeyPrompt = None
+        self._tvdbApiKeyPromptAttempted = False
+        self.tvdbApiKeyPrompt = None
+        self._tvdbApiKeyPromptAttempted = False
