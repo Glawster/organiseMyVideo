@@ -2,15 +2,75 @@
 """Entry point: ``python -m organiseMyVideo``."""
 
 import argparse
+import json
 import logging
+import os
 from pathlib import Path
+from typing import Optional
 
 from organiseMyProjects.logUtils import getLogger, drawBox, setApplication  # type: ignore
+
+from .constants import APP_CONFIG_FILE
 
 thisApplication = Path(__file__).parent.name
 setApplication(thisApplication)
 
 logger = getLogger(includeConsole=False)
+
+
+def _getAppConfigPath() -> Path:
+    """Return the persistent application config file path."""
+    return APP_CONFIG_FILE
+
+
+def _loadAppConfig(configPath: Path) -> dict:
+    """Return config data from *configPath*, or an empty dict when unavailable."""
+    if not configPath.exists():
+        return {}
+    try:
+        loaded = json.loads(configPath.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:
+        logger.warning("could not read app config %s: %s", configPath, error)
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _saveAppConfig(configPath: Path, config: dict) -> None:
+    """Write *config* JSON data to *configPath*."""
+    configPath.parent.mkdir(parents=True, exist_ok=True)
+    configPath.write_text(json.dumps(config, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _persistTvdbApiKey(key: str, configPath: Path) -> Optional[str]:
+    """Persist a cleaned TVDB API key and return it, or ``None`` when blank."""
+    cleaned = key.strip()
+    if not cleaned:
+        return None
+    config = _loadAppConfig(configPath)
+    config["tvdb_api_key"] = cleaned
+    _saveAppConfig(configPath, config)
+    os.environ["ORGANISEMYVIDEO_TVDB_API_KEY"] = cleaned
+    logger.value("saved TVDB API key config", configPath)
+    return cleaned
+
+
+def _loadTvdbApiKeyFromConfig(configPath: Path) -> None:
+    """Load a saved TVDB API key into the environment when one is not set."""
+    if os.environ.get("ORGANISEMYVIDEO_TVDB_API_KEY"):
+        return
+    config = _loadAppConfig(configPath)
+    configured = config.get("tvdb_api_key")
+    if isinstance(configured, str) and configured.strip():
+        os.environ["ORGANISEMYVIDEO_TVDB_API_KEY"] = configured.strip()
+
+
+def _promptForTvdbApiKey(configPath: Path) -> Optional[str]:
+    """Prompt the user for a TVDB API key and persist it when provided."""
+    try:
+        entered = input("TVDB API key required for TVDB lookup. Enter key (blank to skip): ")
+    except EOFError:
+        return None
+    return _persistTvdbApiKey(entered, configPath)
 
 
 def main():
@@ -60,6 +120,10 @@ def main():
         action="store_true",
         help="scan the torrent download directory for .torrent files and delete those already in the library (dry-run by default; use --confirm to delete)",
     )
+    parser.add_argument(
+        "--key",
+        help="TVDB API key to save to ~/.config/organiseMyVideo/config.json",
+    )
     args = parser.parse_args()
 
     dryRun = not args.confirm
@@ -95,6 +159,13 @@ def main():
     else:
         logger.info("confirm mode, changes will be made")
 
+    configPath = _getAppConfigPath()
+    if args.key is not None:
+        if not _persistTvdbApiKey(args.key, configPath):
+            logger.warning("blank TVDB API key provided; not saving")
+    else:
+        _loadTvdbApiKeyFromConfig(configPath)
+
     if args.torrent:
         selectedMode = "torrent"
     elif args.clean:
@@ -114,6 +185,11 @@ def main():
         dryRun=dryRun,
         refreshMetadataLibrary=args.refresh_metadata_library,
         useCurses=args.curses,
+    )
+    organizer.tvdbApiKeyPrompt = (
+        (lambda: _promptForTvdbApiKey(configPath))
+        if selectedMode == "process" and not args.non_interactive
+        else None
     )
     logger.done("video organizer initialized")
 
