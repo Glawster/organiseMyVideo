@@ -26,6 +26,7 @@ _MOVE_PROGRESS_MIN_COLUMNS = 20
 _MOVE_PROGRESS_REDUCED_BAR_RATIO = 5
 _MOVE_PROGRESS_MIN_REDUCED_BAR_WIDTH = 8
 _MOVE_PROGRESS_CHUNK_SIZE = 1024 * 1024
+_FILE_PROCESS_SEPARATOR = "-" * 72
 
 
 class VideoMixin:
@@ -46,6 +47,9 @@ class VideoMixin:
         "mcm_id__*.dvdid.xml",
     )
     _TV_SEASON_MCM_PATTERNS = ("folder.jpg",)
+    _MOVIE_ARTWORK_PATTERNS = ("folder.jpg", "banner.jpg", "backdrop*.jpg")
+    _TV_SHOW_ARTWORK_PATTERNS = ("folder.jpg", "banner.jpg", "backdrop*.jpg")
+    _TV_SEASON_ARTWORK_PATTERNS = ("folder.jpg",)
 
     def scanStorageLocations(self) -> Tuple[List[Path], List[Path]]:
         """
@@ -54,7 +58,7 @@ class VideoMixin:
         Returns:
             Tuple of (movie_directories, tv_directories)
         """
-        logger.info("scanning for storage locations...")
+        logger.info("scanning for storage locations")
 
         movieDirs = []
         videoDirs = []
@@ -295,8 +299,8 @@ class VideoMixin:
             or result.get("type") != fileType
         ):
             return
-        self._promptDecisionCache[self._makePromptCacheKey(defaultName, fileType)] = dict(
-            result
+        self._promptDecisionCache[self._makePromptCacheKey(defaultName, fileType)] = (
+            dict(result)
         )
 
     def _shouldUseCursesPrompts(self) -> bool:
@@ -306,9 +310,7 @@ class VideoMixin:
         Both stdin and stdout must be attached to a terminal so curses can read
         keystrokes and redraw the prompt screen reliably.
         """
-        return bool(
-            self.useCurses and sys.stdin.isatty() and sys.stdout.isatty()
-        )
+        return bool(self.useCurses and sys.stdin.isatty() and sys.stdout.isatty())
 
     def _readTextResponse(self, prompt: str) -> str:
         """Read a line of text using the standard input prompt."""
@@ -344,6 +346,8 @@ class VideoMixin:
         """
         inputStream = sys.stdin
         outputStream = sys.stdout
+        if sys.stderr.isatty():
+            outputStream = sys.stderr
         fileDescriptor = inputStream.fileno()
         try:
             originalTerminalState = termios.tcgetattr(fileDescriptor)
@@ -367,15 +371,16 @@ class VideoMixin:
                 if key == "\x04":
                     raise EOFError("single-key prompt cancelled by user (Ctrl+D)")
                 if key in ("\n", "\r") and defaultChoice is not None:
-                    print(defaultChoice, file=outputStream, flush=True)
+                    print(defaultChoice, end="\r\n", file=outputStream, flush=True)
                     return defaultChoice
                 if key:
                     lowered = key.lower()
                     if lowered in validChoices:
-                        print(lowered, file=outputStream, flush=True)
+                        print(lowered, end="\r\n", file=outputStream, flush=True)
                         return lowered
                 print(
-                    f"\nUse one of: {validChoiceText}",
+                    f"\r\nUse one of: {validChoiceText}",
+                    end="\r\n",
                     file=outputStream,
                     flush=True,
                 )
@@ -471,6 +476,15 @@ class VideoMixin:
                 matches.append(match)
         return matches
 
+    def _hasMatchingFiles(self, sourceDir: Path, patterns: Iterable[str]) -> bool:
+        """
+        Return True when *sourceDir* contains at least one glob-pattern match.
+
+        Uses the same matching rules as :meth:`_collectMatchingFiles`.
+        Returns False when *sourceDir* is missing or not a directory.
+        """
+        return bool(self._collectMatchingFiles(sourceDir, patterns))
+
     def _copyFilesIntoDir(self, sourceFiles: Iterable[Path], destDir: Path) -> None:
         """
         Copy pre-filtered companion files into *destDir*.
@@ -480,12 +494,24 @@ class VideoMixin:
             destDir: Destination directory that should receive the copied files.
         """
         for sourcePath in sourceFiles:
-            destPath = destDir / sourcePath.name
-            logger.action(f"copy metadata: {sourcePath} -> {destPath}")
-            if self.dryRun:
-                continue
-            destDir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(sourcePath, destPath)
+            self._copyFileIfMissing(sourcePath, destDir / sourcePath.name)
+
+    def _copyFileIfMissing(self, sourcePath: Path, destPath: Path) -> None:
+        """
+        Copy *sourcePath* to *destPath* only when destination does not already exist.
+
+        Existing destinations are preserved unchanged. Parent directories are
+        created automatically when writing.
+        """
+        if destPath.exists():
+            logger.value("preserving existing metadata", destPath)
+            return
+
+        logger.action(f"copy metadata: {sourcePath} -> {destPath}")
+        if self.dryRun:
+            return
+        destPath.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(sourcePath, destPath)
 
     def _getMoveProgressStream(self) -> Optional[TextIO]:
         """Return the live console stream for move progress, if interactive."""
@@ -592,7 +618,9 @@ class VideoMixin:
         totalBytes = sourceFile.stat().st_size
         copiedBytes = 0
         try:
-            with sourceFile.open("rb") as sourceHandle, destFile.open("wb") as destHandle:
+            with sourceFile.open("rb") as sourceHandle, destFile.open(
+                "wb"
+            ) as destHandle:
                 self._renderMoveProgress(
                     progressStream, sourceFile.name, copiedBytes, totalBytes
                 )
@@ -608,9 +636,7 @@ class VideoMixin:
             try:
                 shutil.copystat(sourceFile, destFile)
             except PermissionError as e:
-                logger.warning(
-                    "could not preserve timestamps for %s: %s", destFile, e
-                )
+                logger.warning("could not preserve timestamps for %s: %s", destFile, e)
             sourceFile.unlink()
         except Exception as e:
             logger.error("failed to copy file %s to %s: %s", sourceFile, destFile, e)
@@ -740,8 +766,20 @@ class VideoMixin:
             ``imdbId`` (Optional[str]), ``tmdbId`` (Optional[str]), and
             ``metadataSource`` (str).
         """
-        movieRoot = self._readXmlRoot(sourceFile.parent / "movie.xml")
-        if movieRoot is None:
+        sourceDir = sourceFile.parent
+        movieXmlFile = sourceDir / "movie.xml"
+        movieRoot = self._readXmlRoot(movieXmlFile)
+        mcmPresence = {
+            "movieXmlExists": movieXmlFile.exists(),
+            "dvdIdXmlExists": self._hasMatchingFiles(
+                sourceDir, ("mcm_id__*.dvdid.xml",)
+            ),
+            "artworkExists": self._hasMatchingFiles(
+                sourceDir, self._MOVIE_ARTWORK_PATTERNS
+            ),
+        }
+
+        if movieRoot is None and not any(mcmPresence.values()):
             return None
 
         title = self._readFirstXmlText(movieRoot, ("LocalTitle", "OriginalTitle"))
@@ -751,7 +789,7 @@ class VideoMixin:
 
         if not self._hasAnyMetadata(
             title=title, year=year, imdbId=imdbId, tmdbId=tmdbId
-        ):
+        ) and not any(mcmPresence.values()):
             return None
 
         return {
@@ -761,6 +799,7 @@ class VideoMixin:
             "imdbId": imdbId,
             "tmdbId": tmdbId,
             "metadataSource": "mcm",
+            "mcm": mcmPresence,
         }
 
     def _readTvMcmHints(self, sourceFile: Path) -> Optional[dict]:
@@ -806,6 +845,53 @@ class VideoMixin:
         imdbId = self._readFirstXmlText(episodeRoot, ("IMDB_ID", "IMDbId"))
         seriesId = self._readFirstXmlText(seriesRoot, ("SeriesID", "id"))
         episodeId = self._readFirstXmlText(episodeRoot, ("EpisodeID",))
+        sourceHasTvLayout = bool(
+            sourceShowDir
+            or re.match(r"^season\b", sourceSeasonDir.name, re.IGNORECASE)
+            or (sourceSeasonDir / "metadata").is_dir()
+        )
+        tvMcm = {
+            "showXmlExists": bool(
+                sourceHasTvLayout
+                and sourceShowDir
+                and (sourceShowDir / "series.xml").exists()
+            ),
+            "dvdIdXmlExists": bool(
+                sourceHasTvLayout
+                and sourceShowDir
+                and self._hasMatchingFiles(sourceShowDir, ("mcm_id__*.dvdid.xml",))
+            ),
+            "seasonMetadataFolderExists": bool(
+                sourceHasTvLayout
+                and sourceSeasonDir != self.sourceDir
+                and (sourceSeasonDir / "metadata").is_dir()
+            ),
+            "episodeXmlExists": bool(
+                sourceHasTvLayout
+                and sourceSeasonDir != self.sourceDir
+                and self._hasMatchingFiles(
+                    sourceSeasonDir / "metadata",
+                    ("*.xml",),
+                )
+            ),
+            "artworkExists": bool(
+                sourceHasTvLayout
+                and (
+                    (
+                        sourceShowDir
+                        and self._hasMatchingFiles(
+                            sourceShowDir, self._TV_SHOW_ARTWORK_PATTERNS
+                        )
+                    )
+                    or (
+                        sourceSeasonDir != self.sourceDir
+                        and self._hasMatchingFiles(
+                            sourceSeasonDir, self._TV_SEASON_ARTWORK_PATTERNS
+                        )
+                    )
+                )
+            ),
+        }
 
         if not self._hasAnyMetadata(
             showName=showName,
@@ -815,7 +901,7 @@ class VideoMixin:
             imdbId=imdbId,
             seriesId=seriesId,
             episodeId=episodeId,
-        ):
+        ) and not any(tvMcm.values()):
             return None
 
         return {
@@ -828,6 +914,7 @@ class VideoMixin:
             "seriesId": seriesId,
             "episodeId": episodeId,
             "metadataSource": "mcm",
+            "mcm": tvMcm,
         }
 
     def _readMcmHints(self, sourceFile: Path) -> Optional[dict]:
@@ -976,15 +1063,111 @@ class VideoMixin:
             value is not None and value != "" for value in metadataValues.values()
         )
 
-    def _replicateMovieMetadata(self, sourceFile: Path, destDir: Path) -> None:
-        """Copy supported MCM movie companion files into the destination folder."""
-        if sourceFile.parent == self.sourceDir:
+    def _buildMovieDvdIdFilename(self, movieInfo: dict) -> Optional[str]:
+        """
+        Return a deterministic movie MCM dvdid filename using resolved IDs.
+
+        Naming order is: imdb+tmdb, imdb-only, then tmdb-only.
+        """
+        imdbId = self._safeMcmIdFilenamePart(movieInfo.get("imdbId"))
+        tmdbId = self._safeMcmIdFilenamePart(movieInfo.get("tmdbId"))
+        if imdbId and tmdbId:
+            return f"mcm_id__{imdbId}-{tmdbId}.dvdid.xml"
+        if imdbId:
+            return f"mcm_id__{imdbId}.dvdid.xml"
+        if tmdbId:
+            return f"mcm_id__{tmdbId}.dvdid.xml"
+        return None
+
+    def _ensureMovieDvdIdMetadata(self, destDir: Path, movieInfo: dict) -> None:
+        """
+        Create a movie-level ``mcm_id__*.dvdid.xml`` only when missing.
+
+        Args:
+            destDir: Destination movie directory for the dvdid XML file.
+            movieInfo: Resolved movie metadata.
+        """
+        existing = self._collectMatchingFiles(destDir, ("mcm_id__*.dvdid.xml",))
+        if existing:
+            logger.value("preserving existing metadata files", len(existing))
             return
 
-        movieMetadataFiles = self._collectMatchingFiles(
-            sourceFile.parent, self._MOVIE_MCM_PATTERNS
-        )
-        self._copyFilesIntoDir(movieMetadataFiles, destDir)
+        dvdIdFilename = self._buildMovieDvdIdFilename(movieInfo)
+        if not dvdIdFilename:
+            return
+
+        imdbId = movieInfo.get("imdbId")
+        tmdbId = movieInfo.get("tmdbId")
+        dvdIdFile = destDir / dvdIdFilename
+        root = ET.Element("Item")
+        if imdbId:
+            ET.SubElement(root, "IMDbId").text = imdbId
+        if tmdbId:
+            ET.SubElement(root, "TMDbId").text = tmdbId
+        ET.SubElement(root, "Type").text = "movie"
+
+        logger.action("create metadata: %s", dvdIdFile)
+        if self.dryRun:
+            return
+        destDir.mkdir(parents=True, exist_ok=True)
+        ET.ElementTree(root).write(dvdIdFile, encoding="utf-8", xml_declaration=True)
+
+    def _writeMovieMcmTemplate(self, destDir: Path, movieInfo: dict) -> None:
+        """Create a starter ``movie.xml`` when enough movie metadata is known."""
+        title = movieInfo.get("title")
+        if not title:
+            return
+
+        root = ET.Element("Title")
+        ET.SubElement(root, "LocalTitle").text = title
+        ET.SubElement(root, "OriginalTitle").text = title
+        ET.SubElement(root, "ProductionYear").text = movieInfo.get("year") or ""
+        ET.SubElement(root, "IMDbId").text = movieInfo.get("imdbId") or ""
+        ET.SubElement(root, "TMDbId").text = movieInfo.get("tmdbId") or ""
+
+        self._writeMovieMetadataFile(destDir / "movie.xml", root)
+
+    def _writeMovieMetadataFile(self, movieFile: Path, root: ET.Element) -> None:
+        """Write ``movie.xml`` to *movieFile*."""
+        if movieFile.exists():
+            logger.value("preserving existing metadata", movieFile)
+            return
+        logger.action("create metadata: %s", movieFile)
+        if self.dryRun:
+            return
+        movieFile.parent.mkdir(parents=True, exist_ok=True)
+        ET.ElementTree(root).write(movieFile, encoding="utf-8", xml_declaration=True)
+
+    def _ensureMovieMetadata(self, destDir: Path, movieInfo: dict) -> None:
+        """Create destination ``movie.xml`` only when missing; preserve existing files."""
+        title = movieInfo.get("title")
+        if not title:
+            return
+        movieFile = destDir / "movie.xml"
+        if movieFile.exists():
+            logger.value("preserving existing metadata", movieFile)
+            return
+        self._writeMovieMcmTemplate(destDir, movieInfo)
+
+    def _replicateMovieMetadata(
+        self, sourceFile: Path, destDir: Path, movieInfo: Optional[dict] = None
+    ) -> None:
+        """Copy supported MCM movie companion files into the destination folder."""
+        if sourceFile.parent != self.sourceDir:
+            movieMetadataFiles = self._collectMatchingFiles(
+                sourceFile.parent, self._MOVIE_MCM_PATTERNS
+            )
+            self._copyFilesIntoDir(movieMetadataFiles, destDir)
+
+        if not movieInfo:
+            return
+
+        enriched = self._enrichMovieMetadata(movieInfo)
+        resolved = enriched or movieInfo
+
+        self._ensureMovieMetadata(destDir, resolved)
+        self._ensureMovieDvdIdMetadata(destDir, resolved)
+        self._fetchMovieArtwork(resolved, destDir)
 
     def _sanitiseFilenamePart(self, value: str) -> str:
         """Return a dot-separated, filesystem-safe filename fragment."""
@@ -1017,6 +1200,18 @@ class VideoMixin:
             parts.append(titlePart)
         return f"{'.'.join(parts)}{extension}"
 
+    def _buildMovieDestinationFilename(self, sourceFile: Path, movieInfo: dict) -> str:
+        """Return the destination movie filename, preferring canonical metadata names."""
+        title = movieInfo.get("title")
+        year = movieInfo.get("year")
+        extension = movieInfo.get("extension") or sourceFile.suffix
+        if extension and not extension.startswith("."):
+            extension = f".{extension}"
+
+        if not title or not year:
+            return sourceFile.name
+        return f"{title} ({year}){extension}"
+
     def _writeEpisodeMcmTemplate(
         self,
         sourceFile: Path,
@@ -1033,6 +1228,11 @@ class VideoMixin:
             tvInfo: Parsed or inferred TV metadata.  When season or episode is
                     missing, the method returns without writing a template.
         """
+        destFile = destMetadataDir / f"{destStem or sourceFile.stem}.xml"
+        if destFile.exists():
+            logger.value("preserving existing metadata", destFile)
+            return
+
         mcmHints = self._readTvMcmHints(sourceFile) or {}
         season = tvInfo.get("season") or mcmHints.get("season")
         episode = tvInfo.get("episode")
@@ -1060,12 +1260,149 @@ class VideoMixin:
             child.text = value
 
         destFile = destMetadataDir / f"{destStem or sourceFile.stem}.xml"
-        logger.action("create metadata: %s", destFile)
+        logger.action("create episode metadata template:")
+        logger.info(f"  {destFile.name}")
         if self.dryRun:
             return
 
         destMetadataDir.mkdir(parents=True, exist_ok=True)
         ET.ElementTree(item).write(destFile, encoding="utf-8", xml_declaration=True)
+        logger.info("  episode metadata written")
+
+    def _safeMcmIdFilenamePart(self, value: Optional[str]) -> str:
+        """Return a value containing only ``[A-Za-z0-9_-]`` characters."""
+        if not value:
+            return ""
+        return re.sub(r"[^A-Za-z0-9_-]+", "", value)
+
+    def _buildTvDvdIdFilename(self, tvInfo: dict, mcmHints: dict) -> Optional[str]:
+        """
+        Return a deterministic TV MCM dvdid filename using resolved IDs.
+
+        ``tvInfo`` values take precedence over ``mcmHints`` fallbacks.
+        Naming order is: imdb+series, imdb-only, then series-only.
+        """
+        imdbId = self._safeMcmIdFilenamePart(
+            tvInfo.get("imdbId") or mcmHints.get("imdbId")
+        )
+        seriesId = self._safeMcmIdFilenamePart(
+            tvInfo.get("seriesId") or mcmHints.get("seriesId")
+        )
+        if imdbId and seriesId:
+            return f"mcm_id__{imdbId}-{seriesId}.dvdid.xml"
+        if imdbId:
+            return f"mcm_id__{imdbId}.dvdid.xml"
+        if seriesId:
+            return f"mcm_id__{seriesId}.dvdid.xml"
+        return None
+
+    def _ensureTvDvdIdMetadata(
+        self, sourceFile: Path, showDir: Path, tvInfo: dict
+    ) -> None:
+        """
+        Create a show-level TV ``mcm_id__*.dvdid.xml`` only when missing.
+
+        Args:
+            sourceFile: Episode file used to read fallback MCM hints.
+            showDir: Destination show directory for show-level metadata files.
+            tvInfo: Resolved TV metadata from parsing/enrichment.
+        """
+        existing = self._collectMatchingFiles(showDir, ("mcm_id__*.dvdid.xml",))
+        if existing:
+            logger.value("preserving existing metadata files", len(existing))
+            return
+
+        mcmHints = self._readTvMcmHints(sourceFile) or {}
+        dvdIdFilename = self._buildTvDvdIdFilename(tvInfo, mcmHints)
+        if not dvdIdFilename:
+            return
+
+        seriesId = tvInfo.get("seriesId") or mcmHints.get("seriesId")
+        imdbId = tvInfo.get("imdbId") or mcmHints.get("imdbId")
+        dvdIdFile = showDir / dvdIdFilename
+        root = ET.Element("Item")
+        if seriesId:
+            ET.SubElement(root, "SeriesID").text = seriesId
+        if imdbId:
+            ET.SubElement(root, "IMDB_ID").text = imdbId
+        ET.SubElement(root, "Type").text = "tv"
+
+        logger.action("create metadata: %s", dvdIdFile)
+        if self.dryRun:
+            return
+        showDir.mkdir(parents=True, exist_ok=True)
+        ET.ElementTree(root).write(dvdIdFile, encoding="utf-8", xml_declaration=True)
+
+    def _setXmlFieldIfMissing(
+        self, root: ET.Element, tag: str, value: Optional[str]
+    ) -> bool:
+        """Set XML ``tag`` only when missing/blank and return True if changed."""
+        if value in (None, ""):
+            return False
+        valueText = str(value)
+        child = root.find(tag)
+        if child is None:
+            child = ET.SubElement(root, tag)
+            child.text = valueText
+            return True
+        if child.text is None or not child.text.strip():
+            child.text = valueText
+            return True
+        return False
+
+    def _writeSeriesMcmTemplate(self, showDir: Path, tvInfo: dict) -> None:
+        """Create a starter ``series.xml`` when enough canonical show metadata is known."""
+        showName = tvInfo.get("showName")
+        seriesId = tvInfo.get("seriesId")
+        imdbId = tvInfo.get("imdbId")
+        if not showName or not (seriesId or imdbId):
+            return
+
+        root = ET.Element("Series")
+        ET.SubElement(root, "SeriesName").text = showName
+        ET.SubElement(root, "LocalTitle").text = showName
+        ET.SubElement(root, "SeriesID").text = seriesId or ""
+        ET.SubElement(root, "IMDB_ID").text = imdbId or ""
+        self._writeSeriesMetadataFile(showDir / "series.xml", root)
+
+    def _updateSeriesMetadataRoot(
+        self, root: ET.Element, tvInfo: dict
+    ) -> tuple[ET.Element, bool]:
+        """Update ``series.xml`` with resolved values while preserving existing non-empty fields."""
+        changed = False
+        showName = tvInfo.get("showName")
+        changed = self._setXmlFieldIfMissing(root, "SeriesName", showName) or changed
+        changed = self._setXmlFieldIfMissing(root, "LocalTitle", showName) or changed
+        changed = (
+            self._setXmlFieldIfMissing(root, "SeriesID", tvInfo.get("seriesId"))
+            or changed
+        )
+        changed = (
+            self._setXmlFieldIfMissing(root, "IMDB_ID", tvInfo.get("imdbId")) or changed
+        )
+        return root, changed
+
+    def _writeSeriesMetadataFile(self, seriesFile: Path, root: ET.Element) -> None:
+        """Write ``series.xml`` to *seriesFile*."""
+        if seriesFile.exists():
+            logger.value("preserving existing metadata", seriesFile)
+            return
+        logger.action("create metadata: %s", seriesFile)
+        if self.dryRun:
+            return
+        seriesFile.parent.mkdir(parents=True, exist_ok=True)
+        ET.ElementTree(root).write(seriesFile, encoding="utf-8", xml_declaration=True)
+
+    def _ensureSeriesMetadata(self, showDir: Path, tvInfo: dict) -> None:
+        """Create destination ``series.xml`` only when missing; preserve existing files."""
+        showName = tvInfo.get("showName")
+        if not showName:
+            return
+        seriesFile = showDir / "series.xml"
+        if seriesFile.exists():
+            logger.value("preserving existing metadata", seriesFile)
+            return
+        self._writeSeriesMcmTemplate(showDir, tvInfo)
 
     def _updateEpisodeMetadataRoot(self, root: ET.Element, tvInfo: dict) -> ET.Element:
         """Update an episode XML root with resolved metadata values."""
@@ -1081,23 +1418,21 @@ class VideoMixin:
             "IMDB_ID": tvInfo.get("imdbId"),
             "EpisodeName": tvInfo.get("episodeTitle"),
         }
+        changed = False
         for tag, value in updates.items():
-            if value in (None, ""):
-                continue
-            child = root.find(tag)
-            if child is None:
-                child = ET.SubElement(root, tag)
-            child.text = value
-        return root
+            changed = self._setXmlFieldIfMissing(root, tag, value) or changed
+        return root, changed
 
     def _writeEpisodeMetadataFile(self, destFile: Path, root: ET.Element) -> None:
         """Write an episode metadata XML file to *destFile*."""
-        logger.action("create metadata: %s", destFile)
+        logger.action("update episode metadata:")
+        logger.info(f"  {destFile.name}")
         if self.dryRun:
             return
 
         destFile.parent.mkdir(parents=True, exist_ok=True)
         ET.ElementTree(root).write(destFile, encoding="utf-8", xml_declaration=True)
+        logger.info("  episode metadata written")
 
     def _replicateTvMetadata(
         self,
@@ -1118,8 +1453,11 @@ class VideoMixin:
                     when no episode XML exists yet.
         """
         sourceSeasonDir = sourceFile.parent
-        if sourceSeasonDir == self.sourceDir or not sourceSeasonDir.is_dir():
-            return
+        sourceHasSeasonContext = (
+            sourceSeasonDir != self.sourceDir and sourceSeasonDir.is_dir()
+        )
+
+        logger.info("replicating MCM metadata")
 
         if re.match(r"^season\b", sourceSeasonDir.name, re.IGNORECASE):
             sourceShowDir = sourceSeasonDir.parent
@@ -1129,31 +1467,33 @@ class VideoMixin:
                 )
                 self._copyFilesIntoDir(showMetadataFiles, showDir)
 
-        seasonMetadataFiles = self._collectMatchingFiles(
-            sourceSeasonDir, self._TV_SEASON_MCM_PATTERNS
-        )
-        self._copyFilesIntoDir(seasonMetadataFiles, seasonDir)
+        if sourceHasSeasonContext:
+            seasonMetadataFiles = self._collectMatchingFiles(
+                sourceSeasonDir, self._TV_SEASON_MCM_PATTERNS
+            )
+            self._copyFilesIntoDir(seasonMetadataFiles, seasonDir)
 
-        metadataDir = sourceSeasonDir / "metadata"
-        episodeMetadataFile = metadataDir / f"{sourceFile.stem}.xml"
+        self._ensureSeriesMetadata(showDir, tvInfo)
+        self._ensureTvDvdIdMetadata(sourceFile, showDir, tvInfo)
+
+        metadataDir = sourceSeasonDir / "metadata" if sourceHasSeasonContext else None
+        episodeMetadataFile = (
+            metadataDir / f"{sourceFile.stem}.xml" if metadataDir else None
+        )
         destMetadataDir = seasonDir / "metadata"
         destStem = destFile.stem if destFile else sourceFile.stem
-        if not episodeMetadataFile.exists():
+        if not episodeMetadataFile or not episodeMetadataFile.exists():
             # New episodes generate a starter XML instead of copying an existing file.
             self._writeEpisodeMcmTemplate(
                 sourceFile, destMetadataDir, tvInfo, destStem=destStem
             )
             return
 
-        if destStem == sourceFile.stem and not tvInfo.get("episodeTitle"):
-            # When the destination stem already matches and no new title exists,
-            # keep the original XML unchanged instead of rewriting it.
+        if destStem == sourceFile.stem:
             self._copyFilesIntoDir([episodeMetadataFile], destMetadataDir)
         else:
-            episodeRoot = self._readXmlRoot(episodeMetadataFile) or ET.Element("Item")
-            self._writeEpisodeMetadataFile(
-                destMetadataDir / f"{destStem}.xml",
-                self._updateEpisodeMetadataRoot(episodeRoot, tvInfo),
+            self._copyFileIfMissing(
+                episodeMetadataFile, destMetadataDir / f"{destStem}.xml"
             )
 
         imageName = self._extractEpisodeMetadataImage(episodeMetadataFile)
@@ -1192,12 +1532,12 @@ class VideoMixin:
 
         if fileType == "tv":
             prompt = (
-                f"\nTV Show detected: '{defaultName}'\n"
+                f"TV Show detected: '{defaultName}'\n"
                 "Is this correct?  (y/n/q/t/m or enter new name): "
             )
         else:
             prompt = (
-                f"\nMovie detected: '{defaultName}'\n"
+                f"Movie detected: '{defaultName}'\n"
                 "Is this correct?  (y/n/q/t/m or enter new name): "
             )
 
@@ -1278,8 +1618,12 @@ class VideoMixin:
         Returns:
             True if successful, False otherwise
         """
-        title = movieInfo["title"]
-        year = movieInfo["year"]
+        resolvedMovieInfo = dict(movieInfo)
+        enrichedMovieInfo = self._enrichMovieMetadata(resolvedMovieInfo)
+        if enrichedMovieInfo:
+            resolvedMovieInfo = enrichedMovieInfo
+        title = resolvedMovieInfo["title"]
+        year = resolvedMovieInfo["year"]
 
         logger.value("processing movie", sourceFile.name)
 
@@ -1321,6 +1665,11 @@ class VideoMixin:
                     year = match.group(2)
                 else:
                     title = confirmedTitle
+            resolvedMovieInfo["title"] = title
+            resolvedMovieInfo["year"] = year
+
+        title = resolvedMovieInfo["title"]
+        year = resolvedMovieInfo["year"]
 
         # Find existing directory or choose storage location
         existingDir = self.findExistingMovieDir(title, year, movieDirs)
@@ -1336,20 +1685,24 @@ class VideoMixin:
 
             destDir = storage / f"{title} ({year})"
 
-        destFile = destDir / sourceFile.name
+        destFile = destDir / self._buildMovieDestinationFilename(
+            sourceFile, resolvedMovieInfo
+        )
 
-        logger.value("movie", sourceFile.name)
-        logger.value("  ->", destFile)
+        logger.action(
+            f"moving movie:\n"
+            f"     {sourceFile.name}\n"
+            f"     -> {destFile}"
+        )
 
         if self.dryRun:
-            logger.action(f"move to: {destFile}")
             return True
 
         try:
             destDir.mkdir(parents=True, exist_ok=True)
             self._moveFileWithProgress(sourceFile, destFile)
-            self._replicateMovieMetadata(sourceFile, destDir)
-            logger.action(f"movie moved successfully: {destFile}")
+            self._replicateMovieMetadata(sourceFile, destDir, resolvedMovieInfo)
+            logger.done("movie moved successfully")
             return True
         except Exception as e:
             logger.error(f"Failed to move movie: {e}")
@@ -1410,6 +1763,7 @@ class VideoMixin:
                 logger.error("no movie storage locations available for type switch")
                 return False
             showName = result["name"]
+            tvInfo["showName"] = showName
 
         # Find existing show directory or choose storage location
         existingShowDir = self.findExistingTvShowDir(showName, videoDirs)
@@ -1429,11 +1783,13 @@ class VideoMixin:
         seasonDir = showDir / f"Season {season:02d}"
         destFile = seasonDir / self._buildTvDestinationFilename(sourceFile, tvInfo)
 
-        logger.value("TV Show", sourceFile.name)
-        logger.value("  ->", destFile)
+        logger.action(
+            f"moving TV show:\n"
+            f"     {sourceFile.name}\n"
+            f"     -> {destFile}"
+        )
 
         if self.dryRun:
-            logger.action(f"move to: {destFile}")
             return True
 
         try:
@@ -1442,7 +1798,7 @@ class VideoMixin:
             self._replicateTvMetadata(
                 sourceFile, showDir, seasonDir, tvInfo, destFile=destFile
             )
-            logger.action(f"TV show moved successfully: {destFile}")
+            logger.done("TV show moved successfully")
             return True
         except Exception as e:
             logger.error(f"Failed to move TV show: {e}")
@@ -1582,7 +1938,7 @@ class VideoMixin:
             return
 
         # Scan for storage locations
-        logger.doing("scanning for storage locations...")
+        logger.doing("scanning for storage locations")
         movieDirs, videoDirs = self.scanStorageLocations()
 
         logger.info(
@@ -1620,6 +1976,7 @@ class VideoMixin:
         stats = {"movies": 0, "tv": 0, "skipped": 0, "errors": 0}
 
         for videoFile in videoFiles:
+            logger.info("-" * 40)
             mcmHints = self._readMcmHints(videoFile)
             tvInfo, movieInfo = self._classifyVideoFile(videoFile, mcmHints)
             if tvInfo and videoDirs:
