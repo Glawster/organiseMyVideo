@@ -2003,6 +2003,59 @@ def testFetchTvdbMetadataUsesEpisodeListEndpointForSearchResults(
     assert mockRequest.call_count == 2
 
 
+def testFetchTvdbMetadataFindsThePittTitleViaPagedSearchFallback(
+    organizer: VideoOrganizer,
+):
+    tvInfo = {"showName": "The Pitt", "season": 2, "episode": 5, "type": "tv"}
+
+    def requestJson(url, headers=None, **kwargs):
+        if url == "https://api4.thetvdb.com/v4/search?query=The+Pitt&type=series":
+            return {"data": [{"tvdb_id": "54321"}]}
+        if url == "https://api4.thetvdb.com/v4/series/54321/episodes/default?page=0":
+            return {
+                "data": {
+                    "episodes": [
+                        {
+                            "id": "111",
+                            "seriesId": "54321",
+                            "seriesName": "The Pitt",
+                            "seasonNumber": 2,
+                            "number": 4,
+                            "name": "1:00 P.M.",
+                        }
+                    ]
+                },
+                "links": {"next": "?page=1"},
+            }
+        if url == "https://api4.thetvdb.com/v4/series/54321/episodes/default?page=1":
+            return {
+                "data": {
+                    "episodes": [
+                        {
+                            "id": "222",
+                            "seriesId": "54321",
+                            "seriesName": "The Pitt",
+                            "seasonNumber": 2,
+                            "number": 5,
+                            "name": "2:00 P.M.",
+                        }
+                    ]
+                }
+            }
+        raise AssertionError(f"unexpected URL: {url}")
+
+    with patch.object(organizer, "_getTvdbToken", return_value="token-123"):
+        with patch.object(
+            organizer, "_requestJson", side_effect=requestJson
+        ) as mockRequest:
+            result = organizer._fetchTvdbMetadata(tvInfo)
+
+    assert result is not None
+    assert result["episodeTitle"] == "2:00 P.M."
+    assert result["seriesId"] == "54321"
+    assert mockRequest.call_count == 3
+
+
 def testPromptForTvdbApiKeyIfNeededReturnsNoneForBlankPrompt(
     organizer: VideoOrganizer,
 ):
