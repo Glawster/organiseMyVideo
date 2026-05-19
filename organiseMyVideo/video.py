@@ -114,11 +114,7 @@ class VideoMixin:
             showName = re.sub(r"[\.\s_]+", " ", match.group(1)).strip()
             season = int(match.group(2))
             episode = int(match.group(3))
-            episodeTitle = (
-                re.sub(r"[\.\s_]+", " ", match.group(4)).strip()
-                if match.group(4)
-                else None
-            )
+            episodeTitle = self._cleanParsedTvEpisodeTitle(match.group(4))
 
             return {
                 "showName": showName,
@@ -130,6 +126,36 @@ class VideoMixin:
             }
 
         return None
+
+    def _cleanParsedTvEpisodeTitle(self, value: Optional[str]) -> Optional[str]:
+        """Return a cleaned filename-derived episode title, dropping release noise."""
+        if not value:
+            return None
+
+        cleaned = value.strip()
+        noisyBracketPattern = (
+            r"[\[\(][^\]\)]*"
+            r"(?:720p|1080p|2160p|web(?:-dl|rip)?|hdtv|bluray|brrip|x264|x265|"
+            r"h\.?264|hevc|ddp?|aac|proper|repack|multi|eztv(?:x)?(?:\.to)?|"
+            r"ettv|rarbg|successfulcrab|amb3r|ethel)"
+            r"[^\]\)]*[\]\)]"
+        )
+        cleaned = re.sub(noisyBracketPattern, " ", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"[._]+", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+        noiseStartPattern = (
+            r"(?:^|[\s-])"
+            r"(?:720p|1080p|2160p|web(?:-dl|rip)?|hdtv|bluray|brrip|x264|x265|"
+            r"h\.?264|hevc|ddp?|aac|proper|repack|multi|eztv(?:x)?(?:\.to)?|"
+            r"ettv|rarbg|successfulcrab|amb3r|ethel)\b"
+        )
+        noiseStart = re.search(noiseStartPattern, cleaned, re.IGNORECASE)
+        if noiseStart:
+            cleaned = cleaned[: noiseStart.start()].strip(" -._")
+
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return cleaned or None
 
     def parseMovieFilename(self, filename: str) -> Optional[dict]:
         """

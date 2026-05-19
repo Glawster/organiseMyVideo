@@ -157,6 +157,24 @@ def testParseTvFilenameWithSpaces(organizer: VideoOrganizer):
     assert result["type"] == "tv"
 
 
+def testParseTvFilenameStripsTrailingReleaseNoise(organizer: VideoOrganizer):
+    result = organizer.parseTvFilename(
+        "The.Pitt.S02E05.Pilot.1080p.WEB.h264.successfulcrab.EZTVx.to.mkv"
+    )
+    assert result is not None
+    assert result["showName"] == "The Pitt"
+    assert result["episodeTitle"] == "Pilot"
+
+
+def testParseTvFilenameDropsNoiseOnlyEpisodeTitle(organizer: VideoOrganizer):
+    result = organizer.parseTvFilename(
+        "The.Pitt.S02E05.1080p.WEB.h264.successfulcrab.EZTVx.to.mkv"
+    )
+    assert result is not None
+    assert result["showName"] == "The Pitt"
+    assert result["episodeTitle"] is None
+
+
 def testParseTvFilenameReturnsNoneForMovie(organizer: VideoOrganizer):
     assert organizer.parseTvFilename("Inception (2010).mp4") is None
 
@@ -1810,7 +1828,7 @@ def testEnrichTvMetadataReplacesParsedEpisodeTitleWithScrapedMetadata(
     assert result["metadataSource"] == "tvdb"
 
 
-def testEnrichTvMetadataSkipsScraperForCleanParsedEpisodeTitle(
+def testEnrichTvMetadataPrefersScrapedEpisodeTitleOverCleanParsedTitle(
     organizer: VideoOrganizer,
 ):
     tvInfo = {
@@ -1820,11 +1838,46 @@ def testEnrichTvMetadataSkipsScraperForCleanParsedEpisodeTitle(
         "episodeTitle": "Pilot",
         "type": "tv",
     }
+    scraped = {
+        "type": "tv",
+        "showName": "Breaking Bad",
+        "season": 1,
+        "episode": 1,
+        "episodeTitle": "Cat's in the Bag...",
+        "metadataSource": "tvdb",
+    }
+    emptyLibrary = organizer._newMetadataLibrary()
 
-    with patch.object(organizer, "_fetchTvMetadataFromScraper") as mockScraper:
-        result = organizer._enrichTvMetadata(tvInfo)
+    with patch.object(organizer, "_loadMetadataLibrary", return_value=emptyLibrary):
+        with patch.object(
+            organizer, "_fetchTvMetadataFromScraper", return_value=scraped
+        ) as mockScraper:
+            result = organizer._enrichTvMetadata(tvInfo)
 
-    mockScraper.assert_not_called()
+    mockScraper.assert_called_once()
+    assert result is not None
+    assert result["episodeTitle"] == "Cat's in the Bag..."
+
+
+def testEnrichTvMetadataKeepsFilenameEpisodeTitleWhenScraperHasNoTitle(
+    organizer: VideoOrganizer,
+):
+    tvInfo = {
+        "showName": "Breaking Bad",
+        "season": 1,
+        "episode": 1,
+        "episodeTitle": "Pilot",
+        "type": "tv",
+    }
+    emptyLibrary = organizer._newMetadataLibrary()
+
+    with patch.object(organizer, "_loadMetadataLibrary", return_value=emptyLibrary):
+        with patch.object(
+            organizer, "_fetchTvMetadataFromScraper", return_value=None
+        ) as mockScraper:
+            result = organizer._enrichTvMetadata(tvInfo)
+
+    mockScraper.assert_called_once()
     assert result is not None
     assert result["episodeTitle"] == "Pilot"
 

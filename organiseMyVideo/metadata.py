@@ -566,12 +566,7 @@ class MetadataMixin:
         if resolved.get("season") is None or resolved.get("episode") is None:
             return resolved
 
-        if resolved.get("episodeTitle") and (
-            resolved.get("metadataSource")
-            or not self._tvEpisodeTitleNeedsCanonicalLookup(
-                resolved.get("episodeTitle")
-            )
-        ):
+        if resolved.get("episodeTitle") and resolved.get("metadataSource"):
             return resolved
 
         logger.action(
