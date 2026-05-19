@@ -1563,12 +1563,9 @@ class VideoMixin:
             return cachedResult
 
         if fileType == "tv":
-            episodeTitlePrompt = ""
-            if episodeTitle:
-                episodeTitlePrompt = f"Episode Title: {episodeTitle}\n"
             prompt = (
-                f"TV Show detected: '{defaultName}'\n"
-                f"{episodeTitlePrompt}"
+                f"TV Show detected: {defaultName}\n"
+                f"Episode Title:    {episodeTitle}\n"
                 "Is this correct?  (y/n/q/t/m or enter new name): "
             )
         else:
