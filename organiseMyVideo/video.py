@@ -1746,6 +1746,8 @@ class VideoMixin:
         videoDirs: List[Path],
         movieDirs: Optional[List[Path]] = None,
         interactive: bool = True,
+        *,
+        skipMetadataEnrichment: bool = False,
     ) -> bool:
         """
         Move TV show file to appropriate location.
@@ -1756,12 +1758,15 @@ class VideoMixin:
             videoDirs: List of TV storage directories
             movieDirs: Optional list of movie storage directories (used when switching type)
             interactive:  Whether to prompt user for confirmation
+            skipMetadataEnrichment: When True, reuse already-classified metadata
+                without re-running scraper lookups during the move step.
 
         Returns:
             True if successful, False otherwise
         """
         tvInfo = self._mergeMetadata(tvInfo, self.parseTvFilename(sourceFile.name))
-        tvInfo = self._enrichTvMetadata(tvInfo) or tvInfo
+        if not skipMetadataEnrichment:
+            tvInfo = self._enrichTvMetadata(tvInfo) or tvInfo
         showName = tvInfo["showName"]
         season = tvInfo["season"]
 
@@ -2018,6 +2023,7 @@ class VideoMixin:
                     videoDirs,
                     movieDirs=movieDirs,
                     interactive=interactive,
+                    skipMetadataEnrichment=True,
                 ):
                     stats["tv"] += 1
                 else:

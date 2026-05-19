@@ -1711,6 +1711,32 @@ def testProcessFilesKeepsSourceNameWhenScraperCannotFillEpisodeTitle(
     assert not srcFile.exists()
 
 
+def testProcessFilesDoesNotRefetchTvMetadataAfterClassification(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "The.Pitt.S02E05.1080p.WEB.h264-ETHEL.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    with patch.object(
+        confirmedOrganizer,
+        "scanStorageLocations",
+        return_value=([movieStorage], [tvStorage]),
+    ):
+        with patch.object(
+            confirmedOrganizer, "_fetchTvMetadataFromScraper", return_value=None
+        ) as mockFetch:
+            confirmedOrganizer.processFiles(interactive=False)
+
+    assert mockFetch.call_count == 1
+    destFile = tvStorage / "The Pitt" / "Season 02" / "The.Pitt.S02E05.mkv"
+    assert destFile.exists()
+    assert not srcFile.exists()
+
+
 def testFetchTvMetadataFromProvidersUsesTvdbBeforeImdb(organizer: VideoOrganizer):
     tvInfo = {"showName": "Breaking Bad", "season": 1, "episode": 1, "type": "tv"}
     tvdbRecord = {"type": "tv", "episodeTitle": "Pilot", "metadataSource": "tvdb"}
