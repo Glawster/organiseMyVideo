@@ -1848,6 +1848,82 @@ def testGetTvdbTokenPromptsForApiKeyWhenMissing(organizer: VideoOrganizer):
     )
 
 
+def testFetchTvdbMetadataUsesEpisodeListEndpointForSeriesLookup(
+    organizer: VideoOrganizer,
+):
+    tvInfo = {
+        "showName": "Virgin River",
+        "seriesId": "117581",
+        "season": 6,
+        "episode": 1,
+        "type": "tv",
+    }
+    payload = {
+        "data": {
+            "episodes": [
+                {
+                    "id": "9999",
+                    "seriesId": "117581",
+                    "seriesName": "Virgin River",
+                    "seasonNumber": 6,
+                    "number": 1,
+                    "name": "The Beginning",
+                }
+            ]
+        }
+    }
+    with patch.object(organizer, "_getTvdbToken", return_value="token-123"):
+        with patch.object(
+            organizer, "_requestJson", return_value=payload
+        ) as mockRequest:
+            result = organizer._fetchTvdbMetadata(tvInfo)
+
+    assert result is not None
+    assert result["episodeTitle"] == "The Beginning"
+    assert result["seriesId"] == "117581"
+    mockRequest.assert_called_once_with(
+        "https://api4.thetvdb.com/v4/series/117581/episodes/default?page=0",
+        headers={"Authorization": "Bearer token-123"},
+    )
+
+
+def testFetchTvdbMetadataUsesEpisodeListEndpointForSearchResults(
+    organizer: VideoOrganizer,
+):
+    tvInfo = {"showName": "The Office", "season": 1, "episode": 6, "type": "tv"}
+
+    def requestJson(url, headers=None, **kwargs):
+        if url == "https://api4.thetvdb.com/v4/search?query=The+Office&type=series":
+            return {"data": [{"tvdb_id": "78565"}]}
+        if url == "https://api4.thetvdb.com/v4/series/78565/episodes/default?page=0":
+            return {
+                "data": {
+                    "episodes": [
+                        {
+                            "id": "456",
+                            "seriesId": "78565",
+                            "seriesName": "The Office",
+                            "seasonNumber": 1,
+                            "number": 6,
+                            "name": "Hot Girl",
+                        }
+                    ]
+                }
+            }
+        raise AssertionError(f"unexpected URL: {url}")
+
+    with patch.object(organizer, "_getTvdbToken", return_value="token-123"):
+        with patch.object(
+            organizer, "_requestJson", side_effect=requestJson
+        ) as mockRequest:
+            result = organizer._fetchTvdbMetadata(tvInfo)
+
+    assert result is not None
+    assert result["episodeTitle"] == "Hot Girl"
+    assert result["seriesId"] == "78565"
+    assert mockRequest.call_count == 2
+
+
 def testPromptForTvdbApiKeyIfNeededReturnsNoneForBlankPrompt(
     organizer: VideoOrganizer,
 ):

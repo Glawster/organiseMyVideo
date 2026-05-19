@@ -763,6 +763,45 @@ class MetadataMixin:
             }
         )
 
+    def _fetchTvdbEpisodeBySeriesOrder(
+        self, seriesId: str, season: int, episode: int, headers: dict
+    ) -> Optional[dict]:
+        """Return a TVDB episode by iterating the aired-order episode list."""
+        page = 0
+        while True:
+            payload = self._requestJson(
+                f"{TVDB_API_BASE_URL}/series/{seriesId}/episodes/default?page={page}",
+                headers=headers,
+            )
+            if not isinstance(payload, dict):
+                return None
+
+            data = payload.get("data", payload)
+            if not isinstance(data, dict):
+                return None
+
+            episodes = data.get("episodes")
+            if not isinstance(episodes, list) or not episodes:
+                return None
+
+            for item in episodes:
+                record = self._tvdbEpisodeRecord(item)
+                if not record:
+                    continue
+                if record.get("season") == season and record.get("episode") == episode:
+                    record["seriesId"] = record.get("seriesId") or str(seriesId)
+                    return self._normaliseTvMetadata(record)
+
+            links = payload.get("links")
+            if isinstance(links, dict) and links.get("next"):
+                page += 1
+                continue
+
+            if len(episodes) < 500:
+                return None
+
+            page += 1
+
     def _fetchTvdbMetadata(self, tvInfo: dict) -> Optional[dict]:
         """Fetch TV metadata from TVDB when configuration is available."""
         token = self._getTvdbToken()
@@ -789,11 +828,11 @@ class MetadataMixin:
         season = tvInfo.get("season")
         episode = tvInfo.get("episode")
         if seriesId and season is not None and episode is not None:
-            record = self._tvdbEpisodeRecord(
-                self._requestJson(
-                    f"{TVDB_API_BASE_URL}/series/{seriesId}/episodes/default/{season}/{episode}",
-                    headers=headers,
-                )
+            record = self._fetchTvdbEpisodeBySeriesOrder(
+                str(seriesId),
+                season,
+                episode,
+                headers,
             )
             if record and record.get("episodeTitle"):
                 return record
@@ -814,11 +853,11 @@ class MetadataMixin:
             resultId = result.get("tvdb_id") or result.get("id")
             if not resultId or season is None or episode is None:
                 continue
-            record = self._tvdbEpisodeRecord(
-                self._requestJson(
-                    f"{TVDB_API_BASE_URL}/series/{resultId}/episodes/default/{season}/{episode}",
-                    headers=headers,
-                )
+            record = self._fetchTvdbEpisodeBySeriesOrder(
+                str(resultId),
+                season,
+                episode,
+                headers,
             )
             if record and record.get("episodeTitle"):
                 return record
