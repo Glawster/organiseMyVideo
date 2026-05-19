@@ -1071,7 +1071,12 @@ class VideoMixin:
         """Return scraped/library-enriched TV info, or the original parsed info if enrichment fails."""
         if not tvInfo:
             return None
-        return self._enrichTvMetadata(tvInfo) or tvInfo
+        resolved = self._enrichTvMetadata(tvInfo) or tvInfo
+        if resolved.get("season") is not None and resolved.get("episode") is not None:
+            marked = dict(resolved)
+            marked["_tvMetadataLookupAttempted"] = True
+            return marked
+        return resolved
 
     def _parseAndResolveTvInfo(
         self, sourceFile: Path, mcmHints: Optional[dict]
@@ -1746,8 +1751,6 @@ class VideoMixin:
         videoDirs: List[Path],
         movieDirs: Optional[List[Path]] = None,
         interactive: bool = True,
-        *,
-        skipMetadataEnrichment: bool = False,
     ) -> bool:
         """
         Move TV show file to appropriate location.
@@ -1758,14 +1761,14 @@ class VideoMixin:
             videoDirs: List of TV storage directories
             movieDirs: Optional list of movie storage directories (used when switching type)
             interactive:  Whether to prompt user for confirmation
-            skipMetadataEnrichment: When True, reuse already-classified metadata
-                without re-running scraper lookups during the move step.
 
         Returns:
             True if successful, False otherwise
         """
+        tvInfo = dict(tvInfo)
+        metadataLookupAttempted = bool(tvInfo.pop("_tvMetadataLookupAttempted", False))
         tvInfo = self._mergeMetadata(tvInfo, self.parseTvFilename(sourceFile.name))
-        if not skipMetadataEnrichment:
+        if not metadataLookupAttempted:
             tvInfo = self._enrichTvMetadata(tvInfo) or tvInfo
         showName = tvInfo["showName"]
         season = tvInfo["season"]
@@ -2023,7 +2026,6 @@ class VideoMixin:
                     videoDirs,
                     movieDirs=movieDirs,
                     interactive=interactive,
-                    skipMetadataEnrichment=True,
                 ):
                     stats["tv"] += 1
                 else:
