@@ -1774,6 +1774,61 @@ def testEnrichTvMetadataCallsScraperInDryRun(organizer: VideoOrganizer):
     assert emptyLibrary["tv"]["episodes"]
 
 
+def testEnrichTvMetadataReplacesParsedEpisodeTitleWithScrapedMetadata(
+    organizer: VideoOrganizer,
+):
+    """Scraped TV metadata should replace noisy filename-derived episode titles."""
+    tvInfo = {
+        "showName": "The Pitt",
+        "season": 2,
+        "episode": 5,
+        "episodeTitle": "1080p WEB h264-ETHEL[EZTVx.to]",
+        "type": "tv",
+    }
+    scraped = {
+        "type": "tv",
+        "showName": "The Pitt",
+        "season": 2,
+        "episode": 5,
+        "episodeTitle": "A Better Episode Title",
+        "seriesId": "12345",
+        "episodeId": "67890",
+        "metadataSource": "tvdb",
+    }
+    emptyLibrary = organizer._newMetadataLibrary()
+    with patch.object(organizer, "_loadMetadataLibrary", return_value=emptyLibrary):
+        with patch.object(
+            organizer, "_fetchTvMetadataFromScraper", return_value=scraped
+        ) as mockScraper:
+            with patch.object(organizer, "_saveMetadataLibrary"):
+                result = organizer._enrichTvMetadata(tvInfo)
+
+    mockScraper.assert_called_once()
+    assert result is not None
+    assert result["episodeTitle"] == "A Better Episode Title"
+    assert result["seriesId"] == "12345"
+    assert result["metadataSource"] == "tvdb"
+
+
+def testEnrichTvMetadataSkipsScraperForCleanParsedEpisodeTitle(
+    organizer: VideoOrganizer,
+):
+    tvInfo = {
+        "showName": "Breaking Bad",
+        "season": 1,
+        "episode": 1,
+        "episodeTitle": "Pilot",
+        "type": "tv",
+    }
+
+    with patch.object(organizer, "_fetchTvMetadataFromScraper") as mockScraper:
+        result = organizer._enrichTvMetadata(tvInfo)
+
+    mockScraper.assert_not_called()
+    assert result is not None
+    assert result["episodeTitle"] == "Pilot"
+
+
 def testGetTvdbTokenPromptsForApiKeyWhenMissing(organizer: VideoOrganizer):
     organizer.tvdbApiKeyPrompt = MagicMock(return_value="prompted-key")
 
@@ -3132,6 +3187,55 @@ def testMoveTvShowUsesCanonicalEpisodeTitleFilename(
         / "Law & Order: SVU"
         / "Season 03"
         / "Law.Order.SVU.S03E02.Whats.Next.Finale.mkv"
+    )
+    assert destFile.exists()
+    assert not srcFile.exists()
+
+
+def testMoveTvShowUsesScrapedEpisodeTitleToRenameNoisyFilename(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = (
+        confirmedOrganizer.sourceDir
+        / "The.Pitt.S02E05.1080p.WEB.h264-ETHEL[EZTVx.to].mkv"
+    )
+    srcFile.write_bytes(b"x" * 100)
+
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    scraped = {
+        "showName": "The Pitt",
+        "season": 2,
+        "episode": 5,
+        "episodeTitle": "A Better Episode Title",
+        "seriesId": "12345",
+        "episodeId": "67890",
+        "extension": ".mkv",
+        "type": "tv",
+        "metadataSource": "tvdb",
+    }
+    emptyLibrary = confirmedOrganizer._newMetadataLibrary()
+    with patch.object(
+        confirmedOrganizer, "_loadMetadataLibrary", return_value=emptyLibrary
+    ):
+        with patch.object(confirmedOrganizer, "_saveMetadataLibrary"):
+            with patch.object(
+                confirmedOrganizer, "_fetchTvMetadataFromScraper", return_value=scraped
+            ):
+                result = confirmedOrganizer.moveTvShow(
+                    srcFile,
+                    {"showName": "The Pitt", "season": 2, "episode": 5, "type": "tv"},
+                    [tvStorage],
+                    interactive=False,
+                )
+
+    assert result is True
+    destFile = (
+        tvStorage
+        / "The Pitt"
+        / "Season 02"
+        / "The.Pitt.S02E05.A.Better.Episode.Title.mkv"
     )
     assert destFile.exists()
     assert not srcFile.exists()

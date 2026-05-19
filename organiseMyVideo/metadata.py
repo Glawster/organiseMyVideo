@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -503,6 +504,51 @@ class MetadataMixin:
             resolved["showName"] = canonicalShowName
         return resolved
 
+    def _tvEpisodeTitleNeedsCanonicalLookup(self, episodeTitle: Optional[str]) -> bool:
+        """Return ``True`` when a parsed episode title looks like release noise."""
+        if not episodeTitle:
+            return True
+
+        lowered = episodeTitle.lower()
+        if any(token in lowered for token in ("[", "]", "eztv", "ethel")):
+            return True
+
+        noisePattern = (
+            r"\b(?:720p|1080p|2160p|web(?:-dl|rip)?|hdtv|bluray|brrip|x264|x265|"
+            r"h\.?264|hevc|ddp?|aac|amzn|nf|hulu|proper|repack)\b"
+        )
+        return re.search(noisePattern, lowered, re.IGNORECASE) is not None
+
+    def _applyAuthoritativeTvMetadata(
+        self,
+        resolved: dict,
+        authoritative: Optional[dict],
+        *,
+        keepExistingShowName: bool = False,
+    ) -> dict:
+        """Overlay authoritative TV metadata onto filename-derived values."""
+        normalised = self._normaliseTvMetadata(authoritative)
+        if normalised is None:
+            return resolved
+
+        merged = dict(resolved)
+        for key in (
+            "season",
+            "episode",
+            "episodeTitle",
+            "imdbId",
+            "seriesId",
+            "episodeId",
+            "metadataSource",
+            "metadataUpdatedAt",
+        ):
+            if normalised.get(key) not in (None, ""):
+                merged[key] = normalised[key]
+
+        if not keepExistingShowName and normalised.get("showName"):
+            merged["showName"] = normalised["showName"]
+        return merged
+
     def _enrichTvMetadata(self, tvInfo: Optional[dict]) -> Optional[dict]:
         """Resolve TV metadata from local hints, library cache, and optional scraper data."""
         resolved = self._normaliseTvMetadata(tvInfo)
@@ -517,10 +563,14 @@ class MetadataMixin:
             libraryMatch,
             keepExistingShowName=sourceIsMcm,
         )
-        if (
-            resolved.get("episodeTitle")
-            or resolved.get("season") is None
-            or resolved.get("episode") is None
+        if resolved.get("season") is None or resolved.get("episode") is None:
+            return resolved
+
+        if resolved.get("episodeTitle") and (
+            resolved.get("metadataSource")
+            or not self._tvEpisodeTitleNeedsCanonicalLookup(
+                resolved.get("episodeTitle")
+            )
         ):
             return resolved
 
@@ -534,7 +584,11 @@ class MetadataMixin:
         if not scraped:
             return resolved
 
-        resolved = self._mergeMetadata(resolved, self._normaliseTvMetadata(scraped))
+        resolved = self._applyAuthoritativeTvMetadata(
+            resolved,
+            scraped,
+            keepExistingShowName=sourceIsMcm,
+        )
         resolved = self._resolveCanonicalTvShowName(
             resolved,
             self._lookupTvMetadataInLibrary(resolved),
