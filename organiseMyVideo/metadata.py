@@ -784,6 +784,31 @@ class MetadataMixin:
                 if not record:
                     continue
                 if record.get("season") == season and record.get("episode") == episode:
+                    if not record.get("episodeTitle") and record.get("episodeId"):
+                        extended = self._tvdbEpisodeRecord(
+                            self._requestJson(
+                                f"{TVDB_API_BASE_URL}/episodes/{record['episodeId']}/extended",
+                                headers=headers,
+                            )
+                        )
+                        if extended:
+                            record = self._normaliseTvMetadata(
+                                {
+                                    **record,
+                                    **extended,
+                                    "showName": extended.get("showName")
+                                    or record.get("showName"),
+                                    "season": extended.get("season")
+                                    or record.get("season"),
+                                    "episode": extended.get("episode")
+                                    or record.get("episode"),
+                                    "seriesId": extended.get("seriesId")
+                                    or record.get("seriesId")
+                                    or str(seriesId),
+                                    "episodeId": extended.get("episodeId")
+                                    or record.get("episodeId"),
+                                }
+                            )
                     record["seriesId"] = record.get("seriesId") or str(seriesId)
                     return self._normaliseTvMetadata(record)
 
