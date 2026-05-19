@@ -1536,6 +1536,7 @@ class VideoMixin:
         defaultName: str,
         fileType: str,
         videoDirs: Optional[List[Path]] = None,
+        episodeTitle: Optional[str] = None,
     ) -> Optional[dict]:
         """
         Prompt user to confirm or correct the detected name.
@@ -1557,8 +1558,12 @@ class VideoMixin:
             return cachedResult
 
         if fileType == "tv":
+            episodeTitlePrompt = ""
+            if episodeTitle:
+                episodeTitlePrompt = f"Episode Title: {episodeTitle}\n"
             prompt = (
                 f"TV Show detected: '{defaultName}'\n"
+                f"{episodeTitlePrompt}"
                 "Is this correct?  (y/n/q/t/m or enter new name): "
             )
         else:
@@ -1769,6 +1774,7 @@ class VideoMixin:
                 showName,
                 "tv",
                 videoDirs=videoDirs,
+                episodeTitle=tvInfo.get("episodeTitle"),
             )
             if result is None:
                 logger.info(f"skipping: {sourceFile.name}")

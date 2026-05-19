@@ -75,6 +75,7 @@ When processing each file the tool shows the detected name and asks for confirma
 
 ```
 TV Show detected: 'Breaking Bad'
+Episode Title: Pilot
 Is this correct?  (y/n/q/t/m or enter new name):
 ```
 

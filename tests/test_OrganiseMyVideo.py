@@ -3564,6 +3564,32 @@ def testPromptUserConfirmationWritesTextPromptToStderrWhenInteractive(
     assert fakeStdout.getvalue() == ""
 
 
+def testPromptUserConfirmationShowsEpisodeTitleWhenAvailable(
+    organizer: VideoOrganizer,
+):
+    organizer._promptHelpDisplayed = True
+    fakeStderr = _FakeTtyStream(interactive=True)
+    fakeStdout = io.StringIO()
+
+    with (
+        patch("sys.stderr", fakeStderr),
+        patch("sys.stdout", fakeStdout),
+        patch("builtins.input", return_value="y"),
+    ):
+        result = organizer.promptUserConfirmation(
+            "file.mkv",
+            "The Pitt",
+            "tv",
+            episodeTitle="Pilot",
+        )
+
+    assert result == {"name": "The Pitt", "type": "tv"}
+    assert "TV Show detected: 'The Pitt'\n" in fakeStderr.getvalue()
+    assert "Episode Title: Pilot\n" in fakeStderr.getvalue()
+    assert "Is this correct?  (y/n/q/t/m or enter new name): " in fakeStderr.getvalue()
+    assert fakeStdout.getvalue() == ""
+
+
 def testPromptUserConfirmationReusesConfirmedTvShow(organizer: VideoOrganizer):
     with patch("builtins.input", side_effect=["y"]) as mockInput:
         first = organizer.promptUserConfirmation("file1.mkv", "The Pitt", "tv")
