@@ -737,11 +737,21 @@ class MetadataMixin:
         if seriesId is None and isinstance(data.get("series"), dict):
             seriesId = data["series"].get("id")
 
-        episodeTitle = data.get("episodeName") or data.get("name")
+        rawEpisodeTitle = data.get("episodeName") or data.get("name")
+        episodeTitle = rawEpisodeTitle
         if self._normaliseLookupText(episodeTitle) == self._normaliseLookupText(
             showName
         ):
             episodeTitle = None
+        logger.debug(
+            "TVDB title payload: show=%r season=%s episode=%s episodeId=%r rawTitle=%r resolvedTitle=%r",
+            showName,
+            season,
+            episode,
+            data.get("id"),
+            rawEpisodeTitle,
+            episodeTitle,
+        )
 
         return self._normaliseTvMetadata(
             {

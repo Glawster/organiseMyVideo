@@ -2103,6 +2103,59 @@ def testFetchTvdbMetadataFetchesMatchedEpisodeByIdWhenListHasNoTitle(
     assert mockRequest.call_count == 3
 
 
+def testFetchTvdbMetadataLogsTvdbTitlePayloads(
+    organizer: VideoOrganizer,
+):
+    tvInfo = {"showName": "The Pitt", "season": 1, "episode": 9, "type": "tv"}
+
+    def requestJson(url, headers=None, **kwargs):
+        if url == "https://api4.thetvdb.com/v4/search?query=The+Pitt&type=series":
+            return {"data": [{"tvdb_id": "54321"}]}
+        if url == "https://api4.thetvdb.com/v4/series/54321/episodes/default?page=0":
+            return {
+                "data": {
+                    "episodes": [
+                        {
+                            "id": "999",
+                            "seriesId": "54321",
+                            "seriesName": "The Pitt",
+                            "seasonNumber": 1,
+                            "number": 9,
+                        }
+                    ]
+                }
+            }
+        if url == "https://api4.thetvdb.com/v4/episodes/999/extended":
+            return {
+                "data": {
+                    "id": "999",
+                    "seriesId": "54321",
+                    "seriesName": "The Pitt",
+                    "seasonNumber": 1,
+                    "number": 9,
+                    "name": None,
+                }
+            }
+        raise AssertionError(f"unexpected URL: {url}")
+
+    with patch.object(organizer, "_getTvdbToken", return_value="token-123"):
+        with patch.object(organizer, "_requestJson", side_effect=requestJson):
+            with patch("organiseMyVideo.metadata.logger.debug") as mockDebug:
+                result = organizer._fetchTvdbMetadata(tvInfo)
+
+    assert result is None
+    debugCalls = [call.args for call in mockDebug.call_args_list]
+    assert (
+        "TVDB title payload: show=%r season=%s episode=%s episodeId=%r rawTitle=%r resolvedTitle=%r",
+        "The Pitt",
+        1,
+        9,
+        "999",
+        None,
+        None,
+    ) in debugCalls
+
+
 def testPromptForTvdbApiKeyIfNeededReturnsNoneForBlankPrompt(
     organizer: VideoOrganizer,
 ):
