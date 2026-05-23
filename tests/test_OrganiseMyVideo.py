@@ -4551,3 +4551,20 @@ def testMainConfiguresConsoleTimestampWithoutMilliseconds():
         and handler.formatter.datefmt == "%Y-%m-%d %H:%M:%S"
         for handler in consoleHandlers
     )
+
+
+def testMainEnablesDebugLogging():
+    organizerInstance = MagicMock()
+    previousLevel = omv_main.logger.logger.level
+
+    try:
+        with patch("organiseMyVideo.VideoOrganizer", return_value=organizerInstance):
+            with patch(
+                "sys.argv",
+                ["organiseMyVideo", "--source", "/tmp/source", "--debug"],
+            ):
+                omv_main.main()
+
+        assert omv_main.logger.logger.level == logging.DEBUG
+    finally:
+        omv_main.logger.logger.setLevel(previousLevel)

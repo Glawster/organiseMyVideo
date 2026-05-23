@@ -38,7 +38,9 @@ def _loadAppConfig(configPath: Path) -> dict:
 def _saveAppConfig(configPath: Path, config: dict) -> None:
     """Write *config* JSON data to *configPath*."""
     configPath.parent.mkdir(parents=True, exist_ok=True)
-    configPath.write_text(json.dumps(config, indent=2, sort_keys=True), encoding="utf-8")
+    configPath.write_text(
+        json.dumps(config, indent=2, sort_keys=True), encoding="utf-8"
+    )
 
 
 def _persistTvdbApiKey(key: str, configPath: Path) -> Optional[str]:
@@ -67,7 +69,9 @@ def _loadTvdbApiKeyFromConfig(configPath: Path) -> None:
 def _promptForTvdbApiKey(configPath: Path) -> Optional[str]:
     """Prompt the user for a TVDB API key and persist it when provided."""
     try:
-        entered = input("TVDB API key required for TVDB lookup. Enter key (blank to skip): ")
+        entered = input(
+            "TVDB API key required for TVDB lookup. Enter key (blank to skip): "
+        )
     except EOFError:
         return None
     return _persistTvdbApiKey(entered, configPath)
@@ -124,6 +128,11 @@ def main():
         "--key",
         help="TVDB API key to save to ~/.config/organiseMyVideo/config.json",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="enable debug logging",
+    )
     args = parser.parse_args()
 
     dryRun = not args.confirm
@@ -133,6 +142,8 @@ def main():
     # which also matches FileHandler (subclass); add console handler explicitly if absent.
     global logger
     logger = getLogger(includeConsole=True, dryRun=dryRun)
+    if args.debug:
+        logger.logger.setLevel(logging.DEBUG)
     if not any(type(h) is logging.StreamHandler for h in logger.logger.handlers):
         _ch = logging.StreamHandler()
         _ch.setFormatter(

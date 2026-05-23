@@ -17,6 +17,7 @@ Moves video files from a staging directory to organised storage locations and ca
 python organiseMyVideo.py
 python organiseMyVideo.py --source /path/to/staging
 python organiseMyVideo.py --source /path/to/staging --confirm
+python organiseMyVideo.py --debug
 ```
 
 By default the script runs in **dry-run** mode. Add `--confirm` to actually make changes.
@@ -62,6 +63,7 @@ python organiseMyVideo.py --torrent --clean --confirm
 | `--refresh` | Rebuild the saved metadata library from storage before processing files |
 | `--no-curses` | Use line-based prompts instead of the default curses single-key menus |
 | `--torrent` | Run torrent cleanup against the `Downloads` folder that sits next to the source directory |
+| `--debug` | Enable debug logging, including TVDB title payload debug lines |
 
 The metadata library is saved in `~/.config/organiseMyVideo/metadataLibrary.json` and reused on later runs. Use `--refresh` when you want to rescan the existing movie and TV storage roots and rebuild that cache.
 
