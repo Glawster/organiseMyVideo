@@ -167,6 +167,55 @@ class MetadataMixin:
         collapsed = "".join(ch.lower() for ch in value if ch.isalnum())
         return collapsed or None
 
+    def _tvdbSearchResultNames(self, result: Optional[dict]) -> list[str]:
+        """Return comparable series-name candidates from a TVDB search result."""
+        if not isinstance(result, dict):
+            return []
+
+        names: list[str] = []
+        for key in ("name", "seriesName", "slug"):
+            value = result.get(key)
+            if isinstance(value, str) and value.strip():
+                names.append(value)
+
+        aliases = result.get("aliases")
+        if isinstance(aliases, list):
+            for alias in aliases:
+                if isinstance(alias, str) and alias.strip():
+                    names.append(alias)
+                elif isinstance(alias, dict):
+                    value = alias.get("name")
+                    if isinstance(value, str) and value.strip():
+                        names.append(value)
+
+        seen = set()
+        deduped = []
+        for name in names:
+            if name not in seen:
+                deduped.append(name)
+                seen.add(name)
+        return deduped
+
+    def _filterTvdbSearchResults(
+        self, showName: Optional[str], searchResults: list[dict]
+    ) -> list[dict]:
+        """Prefer exact TVDB search matches before broader fallback results."""
+        showKey = self._normaliseLookupText(showName)
+        if not showKey:
+            return searchResults
+
+        exactMatches = []
+        for result in searchResults:
+            resultKeys = {
+                self._normaliseLookupText(name)
+                for name in self._tvdbSearchResultNames(result)
+            }
+            resultKeys.discard(None)
+            if showKey in resultKeys:
+                exactMatches.append(result)
+
+        return exactMatches or searchResults
+
     def _normaliseEpisodeValue(self, value) -> Optional[int]:
         """Return *value* as an integer episode/season number when possible."""
         if value in (None, ""):
@@ -880,7 +929,8 @@ class MetadataMixin:
             f"{TVDB_API_BASE_URL}/search?{query}",
             headers=headers,
         )
-        searchResults = (
+        searchResults = self._filterTvdbSearchResults(
+            showName,
             searchPayload.get("data", []) if isinstance(searchPayload, dict) else []
         )
         for result in searchResults:

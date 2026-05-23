@@ -2003,6 +2003,48 @@ def testFetchTvdbMetadataUsesEpisodeListEndpointForSearchResults(
     assert mockRequest.call_count == 2
 
 
+def testFetchTvdbMetadataPrefersExactTvdbSearchMatchBeforeBroaderResults(
+    organizer: VideoOrganizer,
+):
+    tvInfo = {"showName": "The Pitt", "season": 1, "episode": 9, "type": "tv"}
+
+    def requestJson(url, headers=None, **kwargs):
+        if url == "https://api4.thetvdb.com/v4/search?query=The+Pitt&type=series":
+            return {
+                "data": [
+                    {"tvdb_id": "111", "name": "The Pittsburgh Steelers Select"},
+                    {"tvdb_id": "54321", "name": "The Pitt"},
+                ]
+            }
+        if url == "https://api4.thetvdb.com/v4/series/54321/episodes/default?page=0":
+            return {
+                "data": {
+                    "episodes": [
+                        {
+                            "id": "999",
+                            "seriesId": "54321",
+                            "seriesName": "The Pitt",
+                            "seasonNumber": 1,
+                            "number": 9,
+                            "name": "3:00 P.M.",
+                        }
+                    ]
+                }
+            }
+        raise AssertionError(f"unexpected URL: {url}")
+
+    with patch.object(organizer, "_getTvdbToken", return_value="token-123"):
+        with patch.object(
+            organizer, "_requestJson", side_effect=requestJson
+        ) as mockRequest:
+            result = organizer._fetchTvdbMetadata(tvInfo)
+
+    assert result is not None
+    assert result["episodeTitle"] == "3:00 P.M."
+    assert result["seriesId"] == "54321"
+    assert mockRequest.call_count == 2
+
+
 def testFetchTvdbMetadataUsesEpisodeTitleWhenSeriesNameMissingFromEpisodeList(
     organizer: VideoOrganizer,
 ):
