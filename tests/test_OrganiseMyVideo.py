@@ -4533,6 +4533,79 @@ def testCleanTorrentNamesScansSubdirectories(tmp_path: Path):
     assert stats["renamed"] == 1
 
 
+def testResetTvEpisodeTitlesRenamesNoisyStoredEpisodes(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    metadataDir = tvStorage / "After Life" / "Season 01" / "metadata"
+    metadataDir.mkdir(parents=True)
+    episodeFile = metadataDir.parent / "After.Life.S01E04.1080p.WEB.h264.mkv"
+    episodeFile.write_bytes(b"x" * 20)
+    episodeMetadataFile = metadataDir / "After.Life.S01E04.1080p.WEB.h264.xml"
+    episodeMetadataFile.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Item>
+    <EpisodeName>1080p WEB h264</EpisodeName>
+    <EpisodeNumber>4</EpisodeNumber>
+    <SeasonNumber>1</SeasonNumber>
+</Item>
+""",
+        encoding="utf-8",
+    )
+
+    libraryPath = tmp_path / "metadataLibrary.json"
+    libraryPath.write_text(
+        json.dumps(_savedAfterLifeMetadataLibrary()), encoding="utf-8"
+    )
+
+    with patch.object(
+        confirmedOrganizer,
+        "scanStorageLocations",
+        return_value=([], [tvStorage]),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "_getMetadataLibraryPath",
+            return_value=libraryPath,
+        ):
+            stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    renamedEpisode = metadataDir.parent / "After.Life.S01E04.Sic.Semper.Systema.mkv"
+    renamedMetadata = metadataDir / "After.Life.S01E04.Sic.Semper.Systema.xml"
+    assert stats == {"renamed": 1, "skipped": 0, "errors": 0}
+    assert renamedEpisode.exists()
+    assert not episodeFile.exists()
+    assert renamedMetadata.exists()
+    assert not episodeMetadataFile.exists()
+    assert "<EpisodeName>Sic Semper Systema</EpisodeName>" in renamedMetadata.read_text(
+        encoding="utf-8"
+    )
+
+
+def testResetTvEpisodeTitlesSkipsCleanStoredEpisodesWithoutScraperLookup(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    seasonDir = tvStorage / "After Life" / "Season 01"
+    seasonDir.mkdir(parents=True)
+    episodeFile = seasonDir / "After.Life.S01E04.Sic.Semper.Systema.mkv"
+    episodeFile.write_bytes(b"x" * 20)
+
+    confirmedOrganizer._tvMetadataFetcher = MagicMock(
+        side_effect=AssertionError("scraper lookup should not run")
+    )
+
+    with patch.object(
+        confirmedOrganizer,
+        "scanStorageLocations",
+        return_value=([], [tvStorage]),
+    ):
+        stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
+    assert episodeFile.exists()
+
+
 def testVideoOrganizerDoesNotExposeGrokMethods(organizer: VideoOrganizer):
     """Grok helpers are retained separately and no longer exposed on VideoOrganizer."""
     assert not hasattr(organizer, "importFirefoxSession")
@@ -4547,7 +4620,7 @@ def testGrokModuleRemainsImportableForFutureReuse():
     assert hasattr(grok_module, "GrokMixin")
 
 
-@pytest.mark.parametrize("flag", ["--grok", "--reset", "--import-firefox-session"])
+@pytest.mark.parametrize("flag", ["--grok", "--import-firefox-session"])
 def testMainRejectsRemovedGrokOptions(flag: str, capsys):
     """The CLI no longer accepts the removed Grok integration flags."""
     with patch("sys.argv", ["organiseMyVideo", flag]):
@@ -4610,6 +4683,55 @@ def testMainPassesRefreshAndNoCursesFlagsToOrganizer():
         refreshMetadataLibrary=True,
         useCurses=False,
     )
+
+
+def testMainAutoModeDisablesPromptsAndSetsSummaryPath():
+    organizerInstance = MagicMock()
+
+    with patch(
+        "organiseMyVideo.VideoOrganizer", return_value=organizerInstance
+    ) as mockOrganizer:
+        with patch(
+            "sys.argv",
+            ["organiseMyVideo", "--source", "/tmp/source", "--auto"],
+        ):
+            omv_main.main()
+
+    mockOrganizer.assert_called_once_with(
+        sourceDir="/tmp/source",
+        dryRun=True,
+        refreshMetadataLibrary=False,
+        useCurses=True,
+    )
+    assert organizerInstance.summaryReportPath == Path(
+        "/tmp/source/organiseMyVideo-auto-summary.txt"
+    )
+    organizerInstance.processFiles.assert_called_once_with(interactive=False)
+
+
+def testMainResetModeCallsResetTvEpisodeTitlesAndSetsSummaryPath():
+    organizerInstance = MagicMock()
+
+    with patch(
+        "organiseMyVideo.VideoOrganizer", return_value=organizerInstance
+    ) as mockOrganizer:
+        with patch(
+            "sys.argv",
+            ["organiseMyVideo", "--source", "/tmp/source", "--reset"],
+        ):
+            omv_main.main()
+
+    mockOrganizer.assert_called_once_with(
+        sourceDir="/tmp/source",
+        dryRun=True,
+        refreshMetadataLibrary=False,
+        useCurses=True,
+    )
+    assert organizerInstance.summaryReportPath == Path(
+        "/tmp/source/organiseMyVideo-reset-summary.txt"
+    )
+    organizerInstance.resetTvEpisodeTitles.assert_called_once_with()
+    organizerInstance.processFiles.assert_not_called()
 
 
 def testMainConfiguresConsoleTimestampWithoutMilliseconds():

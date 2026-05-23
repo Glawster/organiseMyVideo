@@ -77,6 +77,12 @@ def _promptForTvdbApiKey(configPath: Path) -> Optional[str]:
     return _persistTvdbApiKey(entered, configPath)
 
 
+def _getSummaryReportPath(sourcePath: str, mode: str) -> Path:
+    """Return the summary-report path for auto/reset runs."""
+    suffix = "reset" if mode == "reset" else "auto"
+    return Path(sourcePath) / f"organiseMyVideo-{suffix}-summary.txt"
+
+
 def main():
     """Main entry point for the video organizer."""
     parser = argparse.ArgumentParser(
@@ -94,6 +100,11 @@ def main():
         default=False,
         action="store_true",
         help="confirm execution — actually make changes (default is dry-run)",
+    )
+    parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="run without prompts and write a text summary of transfers/renames into the source directory",
     )
     parser.add_argument(
         "--clean",
@@ -118,6 +129,11 @@ def main():
         action="store_false",
         default=True,
         help="use line-based prompts instead of the default curses single-key menus",
+    )
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="scan existing TV library files and retitle episodes whose filenames still contain noisy or missing episode titles",
     )
     parser.add_argument(
         "--torrent",
@@ -179,6 +195,8 @@ def main():
 
     if args.torrent:
         selectedMode = "torrent"
+    elif args.reset:
+        selectedMode = "reset"
     elif args.clean:
         selectedMode = "clean"
     else:
@@ -199,9 +217,11 @@ def main():
     )
     organizer.tvdbApiKeyPrompt = (
         (lambda: _promptForTvdbApiKey(configPath))
-        if selectedMode == "process" and not args.non_interactive
+        if selectedMode == "process" and not (args.non_interactive or args.auto)
         else None
     )
+    if args.auto or selectedMode == "reset":
+        organizer.summaryReportPath = _getSummaryReportPath(args.source, selectedMode)
     logger.done("video organizer initialized")
 
     if args.torrent:
@@ -237,9 +257,12 @@ Folders kept:    {cleanStats['skipped']}
 Folder errors:   {cleanStats['errors']}
 """
         drawBox(summary)
+    elif args.reset:
+        logger.doing("running reset mode")
+        organizer.resetTvEpisodeTitles()
     else:
         logger.doing("running file organisation mode")
-        organizer.processFiles(interactive=not args.non_interactive)
+        organizer.processFiles(interactive=not (args.non_interactive or args.auto))
 
     logger.done("organiseMyVideo complete")
 

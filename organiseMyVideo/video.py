@@ -684,6 +684,47 @@ class VideoMixin:
                 raise
             self._copyFileWithProgress(sourceFile, destFile)
 
+    def _recordSummaryTransfer(self, sourcePath: Path, destPath: Path) -> None:
+        """Record a file transfer for the optional text summary."""
+        self._summaryTransfers.append((str(sourcePath), str(destPath)))
+
+    def _recordSummaryRename(self, sourcePath: Path, destPath: Path) -> None:
+        """Record an in-place rename for the optional text summary."""
+        self._summaryRenames.append((str(sourcePath), str(destPath)))
+
+    def _writeSummaryReport(self) -> None:
+        """Write the optional transfer/rename summary file when configured."""
+        summaryReportPath = getattr(self, "summaryReportPath", None)
+        if not summaryReportPath:
+            return
+
+        reportPath = Path(summaryReportPath)
+        reportPath.parent.mkdir(parents=True, exist_ok=True)
+        lines = [
+            f"organiseMyVideo {'DRY-RUN ' if self.dryRun else ''}summary".strip(),
+            "",
+            "Transfers:",
+        ]
+        if self._summaryTransfers:
+            lines.extend(
+                f"- {sourcePath} -> {destPath}"
+                for sourcePath, destPath in self._summaryTransfers
+            )
+        else:
+            lines.append("- none")
+
+        lines.extend(["", "Renames:"])
+        if self._summaryRenames:
+            lines.extend(
+                f"- {sourcePath} -> {destPath}"
+                for sourcePath, destPath in self._summaryRenames
+            )
+        else:
+            lines.append("- none")
+        lines.append("")
+        reportPath.write_text("\n".join(lines), encoding="utf-8")
+        logger.value("summary report", reportPath)
+
     def _extractEpisodeMetadataImage(self, metadataFile: Path) -> Optional[str]:
         """Return the local metadata image filename referenced by an MCM episode XML file."""
         xmlText = self._readXmlText(metadataFile)
@@ -1723,18 +1764,18 @@ class VideoMixin:
         )
 
         logger.action(
-            f"moving movie:\n"
-            f"     {sourceFile.name}\n"
-            f"     -> {destFile}"
+            f"moving movie:\n" f"     {sourceFile.name}\n" f"     -> {destFile}"
         )
 
         if self.dryRun:
+            self._recordSummaryTransfer(sourceFile, destFile)
             return True
 
         try:
             destDir.mkdir(parents=True, exist_ok=True)
             self._moveFileWithProgress(sourceFile, destFile)
             self._replicateMovieMetadata(sourceFile, destDir, resolvedMovieInfo)
+            self._recordSummaryTransfer(sourceFile, destFile)
             logger.done("movie moved successfully")
             return True
         except Exception as e:
@@ -1821,12 +1862,11 @@ class VideoMixin:
         destFile = seasonDir / self._buildTvDestinationFilename(sourceFile, tvInfo)
 
         logger.action(
-            f"moving TV show:\n"
-            f"     {sourceFile.name}\n"
-            f"     -> {destFile}"
+            f"moving TV show:\n" f"     {sourceFile.name}\n" f"     -> {destFile}"
         )
 
         if self.dryRun:
+            self._recordSummaryTransfer(sourceFile, destFile)
             return True
 
         try:
@@ -1835,6 +1875,7 @@ class VideoMixin:
             self._replicateTvMetadata(
                 sourceFile, showDir, seasonDir, tvInfo, destFile=destFile
             )
+            self._recordSummaryTransfer(sourceFile, destFile)
             logger.done("TV show moved successfully")
             return True
         except Exception as e:
@@ -1961,6 +2002,116 @@ class VideoMixin:
         logger.done(f"clean complete")
         return stats
 
+    def _updateEpisodeMetadataFile(
+        self, metadataFile: Path, *, episodeTitle: Optional[str]
+    ) -> None:
+        """Update the episode title stored in an existing metadata XML file."""
+        root = self._readXmlRoot(metadataFile)
+        if root is None:
+            return
+
+        episodeTitleNode = root.find("EpisodeName")
+        if episodeTitleNode is None:
+            episodeTitleNode = ET.SubElement(root, "EpisodeName")
+        if (episodeTitleNode.text or "") == (episodeTitle or ""):
+            return
+
+        episodeTitleNode.text = episodeTitle or ""
+        if self.dryRun:
+            return
+        ET.ElementTree(root).write(metadataFile, encoding="utf-8", xml_declaration=True)
+
+    def _resetTvEpisodeTitleForFile(self, videoFile: Path) -> str:
+        """Rename one stored TV episode file when better title metadata is available."""
+        parsedTvInfo = self.parseTvFilename(videoFile.name)
+        if not parsedTvInfo:
+            return "skipped"
+
+        mcmHints = self._readTvMcmHints(videoFile)
+        sourceTvInfo = (
+            self._applyTvMcmHints(parsedTvInfo, mcmHints, videoFile) or parsedTvInfo
+        )
+        sourceTvInfo = self._normaliseTvMetadata(sourceTvInfo)
+        if not sourceTvInfo:
+            return "skipped"
+
+        libraryMatch = self._lookupTvMetadataInLibrary(sourceTvInfo)
+        keepExistingShowName = sourceTvInfo.get("metadataSource") == "mcm"
+        resolvedTvInfo = self._applyAuthoritativeTvMetadata(
+            sourceTvInfo,
+            libraryMatch,
+            keepExistingShowName=keepExistingShowName,
+        )
+        resolvedTvInfo = self._resolveCanonicalTvShowName(
+            resolvedTvInfo,
+            libraryMatch,
+            keepExistingShowName=keepExistingShowName,
+        )
+
+        if self._tvEpisodeTitleNeedsCanonicalLookup(parsedTvInfo.get("episodeTitle")):
+            resolvedTvInfo = self._enrichTvMetadata(resolvedTvInfo) or resolvedTvInfo
+
+        destinationName = self._buildTvDestinationFilename(videoFile, resolvedTvInfo)
+        if destinationName == videoFile.name:
+            return "skipped"
+
+        destinationPath = videoFile.with_name(destinationName)
+        if destinationPath.exists():
+            logger.error("reset target already exists: %s", destinationPath)
+            return "errors"
+
+        metadataFile = videoFile.parent / "metadata" / f"{videoFile.stem}.xml"
+        destinationMetadataFile = metadataFile.with_name(f"{destinationPath.stem}.xml")
+
+        logger.action("reset TV title: %s -> %s", videoFile.name, destinationPath.name)
+        if self.dryRun:
+            self._recordSummaryRename(videoFile, destinationPath)
+            if metadataFile.exists() and destinationMetadataFile != metadataFile:
+                self._recordSummaryRename(metadataFile, destinationMetadataFile)
+            return "renamed"
+
+        videoFile.rename(destinationPath)
+        self._recordSummaryRename(videoFile, destinationPath)
+        if metadataFile.exists():
+            if destinationMetadataFile != metadataFile:
+                destinationMetadataFile.parent.mkdir(parents=True, exist_ok=True)
+                metadataFile.rename(destinationMetadataFile)
+                self._recordSummaryRename(metadataFile, destinationMetadataFile)
+            self._updateEpisodeMetadataFile(
+                destinationMetadataFile,
+                episodeTitle=resolvedTvInfo.get("episodeTitle"),
+            )
+        return "renamed"
+
+    def resetTvEpisodeTitles(self) -> dict:
+        """Retitle stored TV episodes whose filename suffix still looks noisy."""
+        logger.doing("starting TV episode title reset")
+        stats = {"renamed": 0, "skipped": 0, "errors": 0}
+
+        movieDirs, videoDirs = self.scanStorageLocations()
+        logger.info(
+            f"found {len(movieDirs)} movie storage location(s) and {len(videoDirs)} TV storage location(s)"
+        )
+        self._prepareMetadataLibrary(movieDirs, videoDirs)
+        if not videoDirs:
+            logger.error("No TV storage locations found!")
+            self._writeSummaryReport()
+            return stats
+
+        for tvDir in videoDirs:
+            for videoFile in sorted(tvDir.rglob("*")):
+                if (
+                    not videoFile.is_file()
+                    or videoFile.suffix.lower() not in VIDEO_EXTENSIONS
+                ):
+                    continue
+                outcome = self._resetTvEpisodeTitleForFile(videoFile)
+                stats[outcome] += 1
+
+        self._writeSummaryReport()
+        logger.done("TV episode title reset complete")
+        return stats
+
     def processFiles(self, interactive: bool = True):
         """
         Process all video files in the source directory.
@@ -2013,7 +2164,7 @@ class VideoMixin:
         stats = {"movies": 0, "tv": 0, "skipped": 0, "errors": 0}
 
         for videoFile in videoFiles:
-            logger.info("-" * 40)
+            logger.info(_FILE_PROCESS_SEPARATOR)
             mcmHints = self._readMcmHints(videoFile)
             tvInfo, movieInfo = self._classifyVideoFile(videoFile, mcmHints)
             if tvInfo and videoDirs:
@@ -2109,3 +2260,4 @@ Errors:         {stats['errors']}
 """
         drawBox(summary)
         logger.value("processing complete", stats)
+        self._writeSummaryReport()

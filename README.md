@@ -17,6 +17,8 @@ Moves video files from a staging directory to organised storage locations and ca
 python organiseMyVideo.py
 python organiseMyVideo.py --source /path/to/staging
 python organiseMyVideo.py --source /path/to/staging --confirm
+python organiseMyVideo.py --source /path/to/staging --auto --confirm
+python organiseMyVideo.py --reset --confirm
 python organiseMyVideo.py --debug
 ```
 
@@ -58,14 +60,20 @@ python organiseMyVideo.py --torrent --clean --confirm
 |--------|-------------|
 | `--source PATH` | Source directory containing files to organize. Default: `/mnt/video2/toFile` |
 | `--confirm` | Execute changes. Without this flag the script runs as a dry-run |
+| `--auto` | Run organisation without prompts and write `organiseMyVideo-auto-summary.txt` in the source directory |
 | `--clean` | Clean the source directory, or when combined with `--torrent`, also clean prefixed `.torrent` names |
 | `--non-interactive` | Skip prompts for files that cannot be auto-detected |
 | `--refresh` | Rebuild the saved metadata library from storage before processing files |
+| `--reset` | Scan existing TV library files and rename episodes whose filename title still looks like release noise |
 | `--no-curses` | Use line-based prompts instead of the default curses single-key menus |
 | `--torrent` | Run torrent cleanup against the `Downloads` folder that sits next to the source directory |
 | `--debug` | Enable debug logging, including TVDB title payload debug lines |
 
 The metadata library is saved in `~/.config/organiseMyVideo/metadataLibrary.json` and reused on later runs. Use `--refresh` when you want to rescan the existing movie and TV storage roots and rebuild that cache.
+
+`--auto` reuses the normal organiser logic without prompts and writes a plain-text transfer/rename summary into the source directory so you can review any manual tidy-up afterwards.
+
+`--reset` scans the existing TV library roots, keeps already-clean episode titles as-is, and only falls back to scraper lookups when the current filename suffix still looks like release noise or is missing.
 
 ---
 
