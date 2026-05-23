@@ -931,7 +931,7 @@ class MetadataMixin:
         )
         searchResults = self._filterTvdbSearchResults(
             showName,
-            searchPayload.get("data", []) if isinstance(searchPayload, dict) else []
+            searchPayload.get("data", []) if isinstance(searchPayload, dict) else [],
         )
         for result in searchResults:
             resultId = result.get("tvdb_id") or result.get("id")
