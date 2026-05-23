@@ -2066,6 +2066,10 @@ class VideoMixin:
         parsedTvInfo = self.parseTvFilename(videoFile.name)
         if not parsedTvInfo:
             return "skipped"
+        if not self._tvEpisodeTitleNeedsCanonicalLookup(
+            parsedTvInfo.get("episodeTitle")
+        ):
+            return "skipped"
 
         with self._suppressResetNoiseLogs():
             mcmHints = self._readTvMcmHints(videoFile)
@@ -2089,12 +2093,7 @@ class VideoMixin:
                 keepExistingShowName=keepExistingShowName,
             )
 
-            if self._tvEpisodeTitleNeedsCanonicalLookup(
-                parsedTvInfo.get("episodeTitle")
-            ):
-                resolvedTvInfo = (
-                    self._enrichTvMetadata(resolvedTvInfo) or resolvedTvInfo
-                )
+            resolvedTvInfo = self._enrichTvMetadata(resolvedTvInfo) or resolvedTvInfo
 
         destinationName = self._buildTvDestinationFilename(videoFile, resolvedTvInfo)
         if destinationName == videoFile.name:

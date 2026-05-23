@@ -4606,6 +4606,31 @@ def testResetTvEpisodeTitlesSkipsCleanStoredEpisodesWithoutScraperLookup(
     assert episodeFile.exists()
 
 
+def testResetTvEpisodeTitlesSkipsCleanStoredEpisodesWithSpacesAndApostrophes(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    seasonDir = tvStorage / "Code Black" / "Season 03"
+    seasonDir.mkdir(parents=True)
+    episodeFile = seasonDir / "Code Black.S03E12.As Night Comes and I’m Breathing.mkv"
+    episodeFile.write_bytes(b"x" * 20)
+
+    with patch.object(
+        confirmedOrganizer,
+        "_fetchTvMetadataFromScraper",
+        side_effect=AssertionError("scraper lookup should not run"),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ):
+            stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
+    assert episodeFile.exists()
+
+
 def testResetTvEpisodeTitlesLogsShowNamesAndOnlyRenameChanges(
     tmp_path: Path,
     confirmedOrganizer: VideoOrganizer,
