@@ -80,7 +80,18 @@ def _promptForTvdbApiKey(configPath: Path) -> Optional[str]:
 def _getSummaryReportPath(sourcePath: str, mode: str) -> Path:
     """Return the summary-report path for auto/reset runs."""
     suffix = "reset" if mode == "reset" else "auto"
-    return Path(sourcePath) / f"organiseMyVideo-{suffix}-summary.txt"
+    reportPath = Path(sourcePath) / f"organiseMyVideo-{suffix}-summary.txt"
+    if not reportPath.exists():
+        return reportPath
+
+    for index in range(1, 100):
+        incrementedPath = reportPath.with_name(
+            f"{reportPath.stem}.{index:02d}{reportPath.suffix}"
+        )
+        if not incrementedPath.exists():
+            return incrementedPath
+
+    raise FileExistsError(f"no available summary report name for {reportPath}")
 
 
 def main():

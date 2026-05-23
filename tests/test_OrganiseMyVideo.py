@@ -4709,6 +4709,33 @@ def testMainAutoModeDisablesPromptsAndSetsSummaryPath():
     organizerInstance.processFiles.assert_called_once_with(interactive=False)
 
 
+def testGetSummaryReportPathAddsIncrementWhenAutoSummaryExists(tmp_path: Path):
+    sourceDir = tmp_path / "source"
+    sourceDir.mkdir()
+    (sourceDir / "organiseMyVideo-auto-summary.txt").write_text(
+        "existing", encoding="utf-8"
+    )
+
+    assert omv_main._getSummaryReportPath(str(sourceDir), "process") == (
+        sourceDir / "organiseMyVideo-auto-summary.01.txt"
+    )
+
+
+def testGetSummaryReportPathSkipsUsedAutoSummaryIncrements(tmp_path: Path):
+    sourceDir = tmp_path / "source"
+    sourceDir.mkdir()
+    (sourceDir / "organiseMyVideo-auto-summary.txt").write_text(
+        "existing", encoding="utf-8"
+    )
+    (sourceDir / "organiseMyVideo-auto-summary.01.txt").write_text(
+        "existing", encoding="utf-8"
+    )
+
+    assert omv_main._getSummaryReportPath(str(sourceDir), "process") == (
+        sourceDir / "organiseMyVideo-auto-summary.02.txt"
+    )
+
+
 def testMainResetModeCallsResetTvEpisodeTitlesAndSetsSummaryPath():
     organizerInstance = MagicMock()
 
@@ -4732,6 +4759,18 @@ def testMainResetModeCallsResetTvEpisodeTitlesAndSetsSummaryPath():
     )
     organizerInstance.resetTvEpisodeTitles.assert_called_once_with()
     organizerInstance.processFiles.assert_not_called()
+
+
+def testGetSummaryReportPathAddsIncrementWhenResetSummaryExists(tmp_path: Path):
+    sourceDir = tmp_path / "source"
+    sourceDir.mkdir()
+    (sourceDir / "organiseMyVideo-reset-summary.txt").write_text(
+        "existing", encoding="utf-8"
+    )
+
+    assert omv_main._getSummaryReportPath(str(sourceDir), "reset") == (
+        sourceDir / "organiseMyVideo-reset-summary.01.txt"
+    )
 
 
 def testMainConfiguresConsoleTimestampWithoutMilliseconds():

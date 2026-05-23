@@ -60,7 +60,7 @@ python organiseMyVideo.py --torrent --clean --confirm
 |--------|-------------|
 | `--source PATH` | Source directory containing files to organize. Default: `/mnt/video2/toFile` |
 | `--confirm` | Execute changes. Without this flag the script runs as a dry-run |
-| `--auto` | Run organisation without prompts and write `organiseMyVideo-auto-summary.txt` in the source directory |
+| `--auto` | Run organisation without prompts and write `organiseMyVideo-auto-summary.txt` in the source directory (or `organiseMyVideo-auto-summary.nn.txt` if needed to avoid overwriting an existing summary) |
 | `--clean` | Clean the source directory, or when combined with `--torrent`, also clean prefixed `.torrent` names |
 | `--non-interactive` | Skip prompts for files that cannot be auto-detected |
 | `--refresh` | Rebuild the saved metadata library from storage before processing files |
