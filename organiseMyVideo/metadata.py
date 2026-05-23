@@ -729,9 +729,13 @@ class MetadataMixin:
             or data.get("airedEpisodeNumber")
             or data.get("episode")
         )
-        showName = data.get("seriesName") or data.get("series") or data.get("name")
-        if isinstance(showName, dict):
-            showName = showName.get("name")
+        showName = data.get("seriesName") or data.get("showName")
+        if showName in (None, ""):
+            series = data.get("series")
+            if isinstance(series, dict):
+                showName = series.get("name") or series.get("seriesName")
+            elif isinstance(series, str):
+                showName = series
 
         seriesId = data.get("seriesId")
         if seriesId is None and isinstance(data.get("series"), dict):
