@@ -78,10 +78,15 @@ class VideoMixin:
         """Yield grouped reset candidates by top-level TV show folder."""
         showFiles = {}
         for videoFile in sorted(tvDir.rglob("*")):
-            if not videoFile.is_file() or videoFile.suffix.lower() not in VIDEO_EXTENSIONS:
+            if (
+                not videoFile.is_file()
+                or videoFile.suffix.lower() not in VIDEO_EXTENSIONS
+            ):
                 continue
             relativePath = videoFile.relative_to(tvDir)
-            showName = relativePath.parts[0] if len(relativePath.parts) > 1 else tvDir.name
+            showName = (
+                relativePath.parts[0] if len(relativePath.parts) > 1 else tvDir.name
+            )
             showFiles.setdefault(showName, []).append(videoFile)
 
         yield from showFiles.items()
@@ -2084,8 +2089,12 @@ class VideoMixin:
                 keepExistingShowName=keepExistingShowName,
             )
 
-            if self._tvEpisodeTitleNeedsCanonicalLookup(parsedTvInfo.get("episodeTitle")):
-                resolvedTvInfo = self._enrichTvMetadata(resolvedTvInfo) or resolvedTvInfo
+            if self._tvEpisodeTitleNeedsCanonicalLookup(
+                parsedTvInfo.get("episodeTitle")
+            ):
+                resolvedTvInfo = (
+                    self._enrichTvMetadata(resolvedTvInfo) or resolvedTvInfo
+                )
 
         destinationName = self._buildTvDestinationFilename(videoFile, resolvedTvInfo)
         if destinationName == videoFile.name:
