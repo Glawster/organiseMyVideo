@@ -1,5 +1,6 @@
 """Core video-file organisation: scan storage, parse filenames, move files, clean names."""
 
+from contextlib import contextmanager
 import errno
 import difflib
 import os
@@ -50,6 +51,40 @@ class VideoMixin:
     _MOVIE_ARTWORK_PATTERNS = ("folder.jpg", "banner.jpg", "backdrop*.jpg")
     _TV_SHOW_ARTWORK_PATTERNS = ("folder.jpg", "banner.jpg", "backdrop*.jpg")
     _TV_SEASON_ARTWORK_PATTERNS = ("folder.jpg",)
+
+    @contextmanager
+    def _suppressResetNoiseLogs(self):
+        """Temporarily silence noisy info/action logging during reset scans."""
+        from . import metadata as metadata_module
+
+        targets = (logger, metadata_module.logger)
+        methodNames = ("doing", "done", "info", "value", "action")
+        originals = {
+            target: {name: getattr(target, name) for name in methodNames}
+            for target in targets
+        }
+
+        try:
+            for target in targets:
+                for name in methodNames:
+                    setattr(target, name, lambda *args, **kwargs: None)
+            yield
+        finally:
+            for target, methods in originals.items():
+                for name, method in methods.items():
+                    setattr(target, name, method)
+
+    def _iterResetTvShowFiles(self, tvDir: Path):
+        """Yield grouped reset candidates by top-level TV show folder."""
+        showFiles = {}
+        for videoFile in sorted(tvDir.rglob("*")):
+            if not videoFile.is_file() or videoFile.suffix.lower() not in VIDEO_EXTENSIONS:
+                continue
+            relativePath = videoFile.relative_to(tvDir)
+            showName = relativePath.parts[0] if len(relativePath.parts) > 1 else tvDir.name
+            showFiles.setdefault(showName, []).append(videoFile)
+
+        yield from showFiles.items()
 
     def scanStorageLocations(self) -> Tuple[List[Path], List[Path]]:
         """
@@ -2027,29 +2062,30 @@ class VideoMixin:
         if not parsedTvInfo:
             return "skipped"
 
-        mcmHints = self._readTvMcmHints(videoFile)
-        sourceTvInfo = (
-            self._applyTvMcmHints(parsedTvInfo, mcmHints, videoFile) or parsedTvInfo
-        )
-        sourceTvInfo = self._normaliseTvMetadata(sourceTvInfo)
-        if not sourceTvInfo:
-            return "skipped"
+        with self._suppressResetNoiseLogs():
+            mcmHints = self._readTvMcmHints(videoFile)
+            sourceTvInfo = (
+                self._applyTvMcmHints(parsedTvInfo, mcmHints, videoFile) or parsedTvInfo
+            )
+            sourceTvInfo = self._normaliseTvMetadata(sourceTvInfo)
+            if not sourceTvInfo:
+                return "skipped"
 
-        libraryMatch = self._lookupTvMetadataInLibrary(sourceTvInfo)
-        keepExistingShowName = sourceTvInfo.get("metadataSource") == "mcm"
-        resolvedTvInfo = self._applyAuthoritativeTvMetadata(
-            sourceTvInfo,
-            libraryMatch,
-            keepExistingShowName=keepExistingShowName,
-        )
-        resolvedTvInfo = self._resolveCanonicalTvShowName(
-            resolvedTvInfo,
-            libraryMatch,
-            keepExistingShowName=keepExistingShowName,
-        )
+            libraryMatch = self._lookupTvMetadataInLibrary(sourceTvInfo)
+            keepExistingShowName = sourceTvInfo.get("metadataSource") == "mcm"
+            resolvedTvInfo = self._applyAuthoritativeTvMetadata(
+                sourceTvInfo,
+                libraryMatch,
+                keepExistingShowName=keepExistingShowName,
+            )
+            resolvedTvInfo = self._resolveCanonicalTvShowName(
+                resolvedTvInfo,
+                libraryMatch,
+                keepExistingShowName=keepExistingShowName,
+            )
 
-        if self._tvEpisodeTitleNeedsCanonicalLookup(parsedTvInfo.get("episodeTitle")):
-            resolvedTvInfo = self._enrichTvMetadata(resolvedTvInfo) or resolvedTvInfo
+            if self._tvEpisodeTitleNeedsCanonicalLookup(parsedTvInfo.get("episodeTitle")):
+                resolvedTvInfo = self._enrichTvMetadata(resolvedTvInfo) or resolvedTvInfo
 
         destinationName = self._buildTvDestinationFilename(videoFile, resolvedTvInfo)
         if destinationName == videoFile.name:
@@ -2085,31 +2121,24 @@ class VideoMixin:
 
     def resetTvEpisodeTitles(self) -> dict:
         """Retitle stored TV episodes whose filename suffix still looks noisy."""
-        logger.doing("starting TV episode title reset")
         stats = {"renamed": 0, "skipped": 0, "errors": 0}
 
-        movieDirs, videoDirs = self.scanStorageLocations()
-        logger.info(
-            f"found {len(movieDirs)} movie storage location(s) and {len(videoDirs)} TV storage location(s)"
-        )
-        self._prepareMetadataLibrary(movieDirs, videoDirs)
+        with self._suppressResetNoiseLogs():
+            movieDirs, videoDirs = self.scanStorageLocations()
+            self._prepareMetadataLibrary(movieDirs, videoDirs)
         if not videoDirs:
             logger.error("No TV storage locations found!")
             self._writeSummaryReport()
             return stats
 
         for tvDir in videoDirs:
-            for videoFile in sorted(tvDir.rglob("*")):
-                if (
-                    not videoFile.is_file()
-                    or videoFile.suffix.lower() not in VIDEO_EXTENSIONS
-                ):
-                    continue
-                outcome = self._resetTvEpisodeTitleForFile(videoFile)
-                stats[outcome] += 1
+            for showName, videoFiles in self._iterResetTvShowFiles(tvDir):
+                logger.info(f"reset scanning TV show: {showName}")
+                for videoFile in videoFiles:
+                    outcome = self._resetTvEpisodeTitleForFile(videoFile)
+                    stats[outcome] += 1
 
         self._writeSummaryReport()
-        logger.done("TV episode title reset complete")
         return stats
 
     def processFiles(self, interactive: bool = True):

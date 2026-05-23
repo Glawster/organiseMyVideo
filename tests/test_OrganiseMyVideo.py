@@ -4606,6 +4606,55 @@ def testResetTvEpisodeTitlesSkipsCleanStoredEpisodesWithoutScraperLookup(
     assert episodeFile.exists()
 
 
+def testResetTvEpisodeTitlesLogsShowNamesAndOnlyRenameChanges(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+
+    afterLifeSeasonDir = tvStorage / "After Life" / "Season 01"
+    afterLifeSeasonDir.mkdir(parents=True)
+    noisyEpisode = afterLifeSeasonDir / "After.Life.S01E04.1080p.WEB.h264.mkv"
+    noisyEpisode.write_bytes(b"x" * 20)
+
+    anotherShowSeasonDir = tvStorage / "Another Show" / "Season 01"
+    anotherShowSeasonDir.mkdir(parents=True)
+    cleanEpisode = anotherShowSeasonDir / "Another.Show.S01E01.Pilot.mkv"
+    cleanEpisode.write_bytes(b"x" * 20)
+
+    libraryPath = tmp_path / "metadataLibrary.json"
+    libraryPath.write_text(
+        json.dumps(_savedAfterLifeMetadataLibrary()), encoding="utf-8"
+    )
+
+    with patch.object(
+        confirmedOrganizer,
+        "scanStorageLocations",
+        return_value=([], [tvStorage]),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "_getMetadataLibraryPath",
+            return_value=libraryPath,
+        ):
+            with caplog.at_level("INFO"):
+                stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 1, "skipped": 1, "errors": 0}
+    assert "reset scanning TV show: After Life" in caplog.text
+    assert "reset scanning TV show: Another Show" in caplog.text
+    assert (
+        "reset TV title: After.Life.S01E04.1080p.WEB.h264.mkv"
+        " -> After.Life.S01E04.Sic.Semper.Systema.mkv"
+    ) in caplog.text
+    assert "starting TV episode title reset" not in caplog.text
+    assert "scanning for storage locations" not in caplog.text
+    assert "using saved metadata library" not in caplog.text
+    assert "fetch TV metadata" not in caplog.text
+    assert "TV episode title reset complete" not in caplog.text
+
+
 def testVideoOrganizerDoesNotExposeGrokMethods(organizer: VideoOrganizer):
     """Grok helpers are retained separately and no longer exposed on VideoOrganizer."""
     assert not hasattr(organizer, "importFirefoxSession")

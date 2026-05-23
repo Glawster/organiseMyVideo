@@ -73,7 +73,7 @@ The metadata library is saved in `~/.config/organiseMyVideo/metadataLibrary.json
 
 `--auto` reuses the normal organiser logic without prompts and writes a plain-text transfer/rename summary into the source directory so you can review any manual tidy-up afterwards.
 
-`--reset` scans the existing TV library roots, keeps already-clean episode titles as-is, and only falls back to scraper lookups when the current filename suffix still looks like release noise or is missing.
+`--reset` scans the existing TV library roots, keeps already-clean episode titles as-is, and only falls back to scraper lookups when the current filename suffix still looks like release noise or is missing. Console output is limited to each TV show being scanned plus any actual reset rename lines.
 
 ---
 
