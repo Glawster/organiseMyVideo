@@ -2350,7 +2350,7 @@ class VideoMixin:
         for tvDir in videoDirs:
             self._logResetDuplicateTvShowFolders(tvDir)
             for showName, videoFiles in self._iterResetTvShowFiles(tvDir):
-                logger.action(f"rescanning: {showName}")
+                logger.action(f"scanning: {showName}")
                 for videoFile in videoFiles:
                     outcome = self._resetTvEpisodeTitleForFile(videoFile)
                     stats[outcome] += 1
