@@ -621,6 +621,17 @@ def testFindExistingTvShowDirMatchesTrailingTheFolderName(
     assert result.name == "Office, The"
 
 
+def testFindExistingTvShowDirPrefersTrailingTheFolderNameWhenBothExist(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    tvRoot = tmp_path / "TV"
+    (tvRoot / "The Office").mkdir(parents=True)
+    (tvRoot / "Office, The").mkdir(parents=True)
+    result = organizer.findExistingTvShowDir("The Office", [tvRoot])
+    assert result is not None
+    assert result.name == "Office, The"
+
+
 def testFindExistingTvShowDirNotFound(tmp_path: Path, organizer: VideoOrganizer):
     tvRoot = tmp_path / "TV"
     tvRoot.mkdir()
@@ -5059,8 +5070,49 @@ def testResetTvEpisodeTitlesWarnsWhenSeriesIdMatchesAcrossShowFolders(
     ) in caplog.text
 
 
+def testResetTvEpisodeTitlesWarnsWhenTrailingTheFoldersDuplicate(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+
+    canonicalDir = tvStorage / "Crown, The" / "Season 01"
+    canonicalDir.mkdir(parents=True)
+    (canonicalDir / "The.Crown.S01E01.Wolferton.Splash.mkv").write_bytes(b"x" * 20)
+
+    leadingArticleDir = tvStorage / "The Crown" / "Season 01"
+    leadingArticleDir.mkdir(parents=True)
+    (leadingArticleDir / "The.Crown.S01E02.Hyde.Park.Corner.mkv").write_bytes(
+        b"x" * 20
+    )
+
+    with patch.object(
+        confirmedOrganizer,
+        "_fetchTvMetadataFromScraper",
+        side_effect=AssertionError("scraper lookup should not run"),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ):
+            with caplog.at_level("INFO"):
+                stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
+    assert (
+        "rescan found possible duplicate TV show folders for canonical name "
+        "Crown, The: Crown, The, The Crown"
+    ) in caplog.text
+    assert "scanning: The Crown" not in caplog.text
+    assert caplog.text.count("scanning: Crown, The") == 2
+
+
 def testResetTvEpisodeTitlesRepairsIncompleteShowMetadata(
-    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
 ):
     tvStorage = tmp_path / "video1" / "TV"
     seasonDir = tvStorage / "After Life" / "Season 01"
@@ -5102,7 +5154,8 @@ def testResetTvEpisodeTitlesRepairsIncompleteShowMetadata(
                 "_getMetadataLibraryPath",
                 return_value=tmp_path / "metadataLibrary.json",
             ):
-                stats = confirmedOrganizer.resetTvEpisodeTitles()
+                with caplog.at_level("INFO"):
+                    stats = confirmedOrganizer.resetTvEpisodeTitles()
 
     assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
     assert "<SeriesID>361563</SeriesID>" in (seasonDir.parent / "series.xml").read_text(
@@ -5111,6 +5164,12 @@ def testResetTvEpisodeTitlesRepairsIncompleteShowMetadata(
     assert "<SeriesID>361563</SeriesID>" in (
         seasonDir.parent / "mcm_id__broken.dvdid.xml"
     ).read_text(encoding="utf-8")
+    assert f"update metadata: {seasonDir.parent / 'series.xml'}" in caplog.text
+    assert (
+        f"update metadata: {seasonDir.parent / 'mcm_id__broken.dvdid.xml'}"
+        in caplog.text
+    )
+    assert "preserving existing metadata" not in caplog.text
 
 
 def testVideoOrganizerDoesNotExposeGrokMethods(organizer: VideoOrganizer):

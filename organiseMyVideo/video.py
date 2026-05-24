@@ -75,6 +75,33 @@ class VideoMixin:
                 for name, method in methods.items():
                     setattr(target, name, method)
 
+    @contextmanager
+    def _suppressResetMetadataPreserveLogs(self):
+        """Hide no-op metadata preservation logs while keeping real update logs."""
+        from . import metadata as metadata_module
+
+        targets = (logger, metadata_module.logger)
+        originals = {target: target.value for target in targets}
+
+        def _wrapValue(original):
+            def _value(label, *args, **kwargs):
+                if label in {
+                    "preserving existing metadata",
+                    "preserving existing metadata files",
+                }:
+                    return None
+                return original(label, *args, **kwargs)
+
+            return _value
+
+        try:
+            for target in targets:
+                target.value = _wrapValue(target.value)
+            yield
+        finally:
+            for target, original in originals.items():
+                target.value = original
+
     def _iterResetTvShowFiles(self, tvDir: Path):
         """Yield grouped reset candidates by top-level TV show folder."""
         showFiles = {}
@@ -115,11 +142,16 @@ class VideoMixin:
     def _logResetDuplicateTvShowFolders(self, tvDir: Path) -> None:
         """Warn when multiple stored TV show folders share the same series ID."""
         showDirsBySeriesId = {}
+        showDirsByCanonicalName = {}
         for showDir in self._iterResetTvShowDirs(tvDir):
             seriesId = self._readResetTvShowSeriesId(showDir)
             if not seriesId:
+                canonicalName = self._buildTvShowFolderName(showDir.name)
+                showDirsByCanonicalName.setdefault(canonicalName, []).append(showDir.name)
                 continue
             showDirsBySeriesId.setdefault(seriesId, []).append(showDir.name)
+            canonicalName = self._buildTvShowFolderName(showDir.name)
+            showDirsByCanonicalName.setdefault(canonicalName, []).append(showDir.name)
 
         for seriesId, showNames in sorted(showDirsBySeriesId.items()):
             uniqueShowNames = sorted(set(showNames), key=str.casefold)
@@ -128,6 +160,16 @@ class VideoMixin:
             logger.warning(
                 "rescan found possible duplicate TV show folders for SeriesID %s: %s",
                 seriesId,
+                ", ".join(uniqueShowNames),
+            )
+
+        for canonicalName, showNames in sorted(showDirsByCanonicalName.items()):
+            uniqueShowNames = sorted(set(showNames), key=str.casefold)
+            if len(uniqueShowNames) < 2:
+                continue
+            logger.warning(
+                "rescan found possible duplicate TV show folders for canonical name %s: %s",
+                canonicalName,
                 ", ".join(uniqueShowNames),
             )
 
@@ -338,15 +380,26 @@ class VideoMixin:
         Returns:
             Path to existing directory or None
         """
-        folderNames = {
-            showName.casefold(),
-            self._buildTvShowFolderName(showName).casefold(),
-        }
+        exactFolderName = showName.casefold()
+        canonicalFolderName = self._buildTvShowFolderName(showName).casefold()
         for tvRoot in videoDirs:
+            canonicalMatch = None
+            exactMatch = None
             for item in tvRoot.iterdir():
-                if item.is_dir() and item.name.casefold() in folderNames:
-                    logger.value("found existing TV show", item)
-                    return item
+                if not item.is_dir():
+                    continue
+                itemName = item.name.casefold()
+                if itemName == canonicalFolderName:
+                    canonicalMatch = item
+                    continue
+                if itemName == exactFolderName:
+                    exactMatch = item
+            if canonicalMatch is not None:
+                logger.value("found existing TV show", canonicalMatch)
+                return canonicalMatch
+            if exactMatch is not None:
+                logger.value("found existing TV show", exactMatch)
+                return exactMatch
 
         return None
 
@@ -2411,7 +2464,7 @@ class VideoMixin:
                 )
 
         if showDir is not None:
-            with self._suppressResetNoiseLogs():
+            with self._suppressResetMetadataPreserveLogs():
                 self._ensureSeriesMetadata(showDir, resolvedTvInfo)
                 self._ensureTvDvdIdMetadata(videoFile, showDir, resolvedTvInfo)
 
@@ -2474,7 +2527,12 @@ class VideoMixin:
         for tvDir in videoDirs:
             self._logResetDuplicateTvShowFolders(tvDir)
             for showName, seriesId, videoFiles in self._iterResetTvShowFiles(tvDir):
-                showLabel = f"{showName} [{seriesId}]" if seriesId else showName
+                showDisplayName = self._buildTvShowFolderName(showName)
+                showLabel = (
+                    f"{showDisplayName} [{seriesId}]"
+                    if seriesId
+                    else showDisplayName
+                )
                 logger.action(f"scanning: {showLabel}")
                 for videoFile in videoFiles:
                     outcome = self._resetTvEpisodeTitleForFile(videoFile)
