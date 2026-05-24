@@ -2582,16 +2582,17 @@ class VideoMixin:
                 self._ensureTvDvdIdMetadata(videoFile, showDir, resolvedTvInfo)
 
         sourceMetadataFile = videoFile.parent / "metadata" / f"{videoFile.stem}.xml"
+        destinationName = self._buildTvDestinationFilename(videoFile, resolvedTvInfo)
         if (
             not needsCanonicalLookup
             and not needsTimedTitleNormalisation
             and not needsShowTitleNormalisation
+            and destinationName == videoFile.name
         ):
             if sourceMetadataFile.exists():
                 self._updateEpisodeMetadataFile(sourceMetadataFile, resolvedTvInfo)
             return "skipped"
 
-        destinationName = self._buildTvDestinationFilename(videoFile, resolvedTvInfo)
         if destinationName == videoFile.name:
             return "skipped"
 
