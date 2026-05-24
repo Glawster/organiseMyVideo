@@ -3681,9 +3681,7 @@ def testMoveTvShowUsesNormalisedTimeRangeEpisodeTitleFilename(
     )
 
     assert result is True
-    destFile = (
-        tvStorage / "24" / "Season 08" / "24.S08E13.Day 8 4.00am-5.00am.avi"
-    )
+    destFile = tvStorage / "24" / "Season 08" / "24.S08E13.Day 8 4.00am-5.00am.avi"
     assert destFile.exists()
     assert not srcFile.exists()
 

@@ -2288,7 +2288,8 @@ class VideoMixin:
         videoFiles = [
             f
             for f in self.sourceDir.rglob("*")
-            if f.is_file() and f.suffix.lower() in VIDEO_EXTENSIONS
+            if f.is_file()
+            and f.suffix.lower() in VIDEO_EXTENSIONS
             and not self._shouldIgnoreLocalVideoFile(f)
         ]
 
