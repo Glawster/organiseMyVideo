@@ -78,8 +78,8 @@ def _promptForTvdbApiKey(configPath: Path) -> Optional[str]:
 
 
 def _getSummaryReportPath(sourcePath: str, mode: str) -> Path:
-    """Return the summary-report path for auto/reset runs."""
-    suffix = "reset" if mode == "reset" else "auto"
+    """Return the summary-report path for auto/rescan runs."""
+    suffix = "rescan" if mode == "rescan" else "auto"
     reportPath = Path(sourcePath) / f"organiseMyVideo-{suffix}-summary.txt"
     if not reportPath.exists():
         return reportPath
@@ -142,7 +142,7 @@ def main():
         help="use line-based prompts instead of the default curses single-key menus",
     )
     parser.add_argument(
-        "--reset",
+        "--rescan",
         action="store_true",
         help="scan existing TV library files and retitle episodes whose filenames still contain noisy or missing episode titles",
     )
@@ -206,8 +206,8 @@ def main():
 
     if args.torrent:
         selectedMode = "torrent"
-    elif args.reset:
-        selectedMode = "reset"
+    elif args.rescan:
+        selectedMode = "rescan"
     elif args.clean:
         selectedMode = "clean"
     else:
@@ -231,7 +231,7 @@ def main():
         if selectedMode == "process" and not (args.non_interactive or args.auto)
         else None
     )
-    if args.auto or selectedMode == "reset":
+    if args.auto or selectedMode == "rescan":
         organizer.summaryReportPath = _getSummaryReportPath(args.source, selectedMode)
     logger.done("video organizer initialized")
 
@@ -268,8 +268,8 @@ Folders kept:    {cleanStats['skipped']}
 Folder errors:   {cleanStats['errors']}
 """
         drawBox(summary)
-    elif args.reset:
-        logger.doing("running reset mode")
+    elif args.rescan:
+        logger.doing("running rescan mode")
         organizer.resetTvEpisodeTitles()
     else:
         logger.doing("running file organisation mode")

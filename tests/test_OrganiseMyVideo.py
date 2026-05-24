@@ -4907,10 +4907,10 @@ def testResetTvEpisodeTitlesLogsShowNamesAndOnlyRenameChanges(
                 stats = confirmedOrganizer.resetTvEpisodeTitles()
 
     assert stats == {"renamed": 1, "skipped": 1, "errors": 0}
-    assert "reset scanning TV show: After Life" in caplog.text
-    assert "reset scanning TV show: Another Show" in caplog.text
+    assert "rescanning: After Life" in caplog.text
+    assert "rescanning: Another Show" in caplog.text
     assert (
-        "reset TV title: After.Life.S01E04.1080p.WEB.h264.mkv"
+        "rescan TV title: After.Life.S01E04.1080p.WEB.h264.mkv"
         " -> After.Life.S01E04.Sic.Semper.Systema.mkv"
     ) in caplog.text
     assert "starting TV episode title reset" not in caplog.text
@@ -4956,7 +4956,7 @@ def testResetTvEpisodeTitlesWarnsWhenSeriesIdMatchesAcrossShowFolders(
 
     assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
     assert (
-        "reset found possible duplicate TV show folders for SeriesID 777: "
+        "rescan found possible duplicate TV show folders for SeriesID 777: "
         "Grimm, Grimm (2011)"
     ) in caplog.text
 
@@ -5091,7 +5091,7 @@ def testGetSummaryReportPathSkipsUsedAutoSummaryIncrements(tmp_path: Path):
     )
 
 
-def testMainResetModeCallsResetTvEpisodeTitlesAndSetsSummaryPath():
+def testMainRescanModeCallsResetTvEpisodeTitlesAndSetsSummaryPath():
     organizerInstance = MagicMock()
 
     with patch(
@@ -5099,7 +5099,7 @@ def testMainResetModeCallsResetTvEpisodeTitlesAndSetsSummaryPath():
     ) as mockOrganizer:
         with patch(
             "sys.argv",
-            ["organiseMyVideo", "--source", "/tmp/source", "--reset"],
+            ["organiseMyVideo", "--source", "/tmp/source", "--rescan"],
         ):
             omv_main.main()
 
@@ -5110,21 +5110,21 @@ def testMainResetModeCallsResetTvEpisodeTitlesAndSetsSummaryPath():
         useCurses=True,
     )
     assert organizerInstance.summaryReportPath == Path(
-        "/tmp/source/organiseMyVideo-reset-summary.txt"
+        "/tmp/source/organiseMyVideo-rescan-summary.txt"
     )
     organizerInstance.resetTvEpisodeTitles.assert_called_once_with()
     organizerInstance.processFiles.assert_not_called()
 
 
-def testGetSummaryReportPathAddsIncrementWhenResetSummaryExists(tmp_path: Path):
+def testGetSummaryReportPathAddsIncrementWhenRescanSummaryExists(tmp_path: Path):
     sourceDir = tmp_path / "source"
     sourceDir.mkdir()
-    (sourceDir / "organiseMyVideo-reset-summary.txt").write_text(
+    (sourceDir / "organiseMyVideo-rescan-summary.txt").write_text(
         "existing", encoding="utf-8"
     )
 
-    assert omv_main._getSummaryReportPath(str(sourceDir), "reset") == (
-        sourceDir / "organiseMyVideo-reset-summary.01.txt"
+    assert omv_main._getSummaryReportPath(str(sourceDir), "rescan") == (
+        sourceDir / "organiseMyVideo-rescan-summary.01.txt"
     )
 
 

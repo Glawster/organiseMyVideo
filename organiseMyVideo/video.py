@@ -140,7 +140,7 @@ class VideoMixin:
             if len(uniqueShowNames) < 2:
                 continue
             logger.warning(
-                "reset found possible duplicate TV show folders for SeriesID %s: %s",
+                "rescan found possible duplicate TV show folders for SeriesID %s: %s",
                 seriesId,
                 ", ".join(uniqueShowNames),
             )
@@ -2300,7 +2300,7 @@ class VideoMixin:
 
         destinationPath = videoFile.with_name(destinationName)
         if destinationPath.exists():
-            logger.error("reset target already exists: %s", destinationPath)
+            logger.error("rescan target already exists: %s", destinationPath)
             return "errors"
 
         companionRenames = self._iterResetEpisodeCompanionRenames(
@@ -2308,14 +2308,14 @@ class VideoMixin:
         )
         for sourcePath, companionDestination in companionRenames:
             if companionDestination.exists():
-                logger.error("reset target already exists: %s", companionDestination)
+                logger.error("rescan target already exists: %s", companionDestination)
                 return "errors"
 
         destinationMetadataFile = (
             videoFile.parent / "metadata" / f"{destinationPath.stem}.xml"
         )
 
-        logger.action("reset TV title: %s -> %s", videoFile.name, destinationPath.name)
+        logger.action("rescan TV title: %s -> %s", videoFile.name, destinationPath.name)
         if self.dryRun:
             self._recordSummaryRename(videoFile, destinationPath)
             for sourcePath, companionDestination in companionRenames:
@@ -2350,7 +2350,7 @@ class VideoMixin:
         for tvDir in videoDirs:
             self._logResetDuplicateTvShowFolders(tvDir)
             for showName, videoFiles in self._iterResetTvShowFiles(tvDir):
-                logger.info(f"reset scanning TV show: {showName}")
+                logger.info(f"rescanning: {showName}")
                 for videoFile in videoFiles:
                     outcome = self._resetTvEpisodeTitleForFile(videoFile)
                     stats[outcome] += 1
