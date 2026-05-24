@@ -2715,7 +2715,7 @@ class VideoMixin:
             videoFile.parent / "metadata" / f"{destinationPath.stem}.xml"
         )
 
-        logger.action("rescan TV title: %s -> %s", videoFile.name, destinationPath.name)
+        logger.multiline("tv show", videoFile.name, destinationPath.name)
         if self.dryRun:
             self._recordSummaryRename(videoFile, destinationPath)
             for sourcePath, companionDestination in companionRenames:

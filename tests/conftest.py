@@ -50,6 +50,11 @@ class _StubLogger:
         """Only method that carries the [] dry-run prefix."""
         self._log.info(f"...{self._prefix}{message}", *args, **kwargs)
 
+    def multiline(self, message: str, *lines: str) -> None:
+        formattedLines = [f"...{self._prefix}{message}:"]
+        formattedLines.extend(f"     {line}" for line in lines)
+        self._log.info("\n".join(formattedLines))
+
     def warning(self, msg: str, *args, **kwargs) -> None:
         self._log.warning(msg, *args, **kwargs)
 

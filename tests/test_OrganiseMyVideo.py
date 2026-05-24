@@ -5134,10 +5134,11 @@ def testResetTvEpisodeTitlesLogsShowNamesAndOnlyRenameChanges(
     assert "scanning: After Life [361563]" in caplog.text
     assert "scanning: Another Show [999999]" in caplog.text
     assert (
-        "rescan TV title: After.Life.S01E04.1080p.WEB.h264.mkv"
-        " -> After Life.S01E04.Sic Semper Systema.mkv"
+        "...tv show:\n"
+        "     After.Life.S01E04.1080p.WEB.h264.mkv\n"
+        "     After Life.S01E04.Sic Semper Systema.mkv"
     ) in caplog.text
-    assert "rescan TV title: Another.Show.S01E01.Opening.Night.mkv" not in caplog.text
+    assert "...tv show:\n     Another.Show.S01E01.Opening.Night.mkv" not in caplog.text
     assert (afterLifeSeasonDir / "After Life.S01E04.Sic Semper Systema.mkv").exists()
     assert cleanEpisode.exists()
     assert not noisyEpisode.exists()
