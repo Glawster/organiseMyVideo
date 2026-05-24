@@ -4929,7 +4929,9 @@ def testResetTvEpisodeTitlesRegeneratesCorruptEpisodeMetadataXml(
     episodeFile = seasonDir / "After.Life.S01E04.Sic.Semper.Systema.mkv"
     episodeFile.write_bytes(b"x" * 20)
     metadataFile = metadataDir / "After.Life.S01E04.Sic.Semper.Systema.xml"
-    metadataFile.write_text("<Item><EpisodeName>Sic & Semper Systema</EpisodeName></Item>")
+    metadataFile.write_text(
+        "<Item><EpisodeName>Sic & Semper Systema</EpisodeName></Item>"
+    )
 
     libraryPath = tmp_path / "metadataLibrary.json"
     libraryPath.write_text(
@@ -5202,9 +5204,7 @@ def testResetTvEpisodeTitlesWarnsWhenTrailingTheFoldersDuplicate(
 
     leadingArticleDir = tvStorage / "The Crown" / "Season 01"
     leadingArticleDir.mkdir(parents=True)
-    (leadingArticleDir / "The.Crown.S01E02.Hyde.Park.Corner.mkv").write_bytes(
-        b"x" * 20
-    )
+    (leadingArticleDir / "The.Crown.S01E02.Hyde.Park.Corner.mkv").write_bytes(b"x" * 20)
 
     with patch.object(
         confirmedOrganizer,

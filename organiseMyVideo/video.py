@@ -173,7 +173,9 @@ class VideoMixin:
                 ", ".join(uniqueShowNames),
             )
 
-        for group in sorted(canonicalNameGroups, key=lambda item: item["canonicalName"].casefold()):
+        for group in sorted(
+            canonicalNameGroups, key=lambda item: item["canonicalName"].casefold()
+        ):
             uniqueShowNames = sorted(set(group["showNames"]), key=str.casefold)
             if len(uniqueShowNames) < 2:
                 continue
@@ -482,7 +484,9 @@ class VideoMixin:
 
     def _stripResetTvShowDuplicateSuffixes(self, showName: str) -> str:
         """Return a show name with common duplicate-only suffixes removed."""
-        normalised = unicodedata.normalize("NFKC", self._buildTvShowFolderName(showName))
+        normalised = unicodedata.normalize(
+            "NFKC", self._buildTvShowFolderName(showName)
+        )
         normalised = re.sub(r"\s+", " ", normalised).strip()
         suffixPatterns = (
             r"\s*\[\d+\]\s*$",
@@ -503,7 +507,9 @@ class VideoMixin:
     def _buildResetTvShowDuplicateKey(self, showName: str) -> str:
         """Return a loose duplicate-detection key for TV show folder names."""
         return "".join(
-            ch.lower() for ch in self._stripResetTvShowDuplicateSuffixes(showName) if ch.isalnum()
+            ch.lower()
+            for ch in self._stripResetTvShowDuplicateSuffixes(showName)
+            if ch.isalnum()
         )
 
     def _findResetDuplicateCanonicalNameGroup(
@@ -2549,9 +2555,7 @@ class VideoMixin:
         logger.done(f"clean complete")
         return stats
 
-    def _updateEpisodeMetadataFile(
-        self, metadataFile: Path, tvInfo: dict
-    ) -> None:
+    def _updateEpisodeMetadataFile(self, metadataFile: Path, tvInfo: dict) -> None:
         """Update or regenerate an existing episode metadata XML file."""
         root = self._readXmlRoot(metadataFile)
         if root is None:
@@ -2707,7 +2711,9 @@ class VideoMixin:
                 logger.error("rescan target already exists: %s", companionDestination)
                 return "errors"
 
-        destinationMetadataFile = videoFile.parent / "metadata" / f"{destinationPath.stem}.xml"
+        destinationMetadataFile = (
+            videoFile.parent / "metadata" / f"{destinationPath.stem}.xml"
+        )
 
         logger.action("rescan TV title: %s -> %s", videoFile.name, destinationPath.name)
         if self.dryRun:
@@ -2746,9 +2752,7 @@ class VideoMixin:
                 )
                 showDisplayName = self._buildTvShowFolderName(showName)
                 showLabel = (
-                    f"{showDisplayName} [{seriesId}]"
-                    if seriesId
-                    else showDisplayName
+                    f"{showDisplayName} [{seriesId}]" if seriesId else showDisplayName
                 )
                 logger.action(f"scanning: {showLabel}")
                 for videoFile in videoFiles:
