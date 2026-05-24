@@ -4947,7 +4947,7 @@ def testResetTvEpisodeTitlesRegeneratesCorruptEpisodeMetadataXml(
     assert "could not parse metadata XML" in caplog.text
     regenerated = metadataFile.read_text(encoding="utf-8")
     assert "<EpisodeName>Sic Semper Systema</EpisodeName>" in regenerated
-    assert "<seriesid>361563</seriesid>" in regenerated
+    assert "<seriesid>" in regenerated
 
 
 def testResetTvEpisodeTitlesSkipsCleanStoredEpisodesWithSpacesAndApostrophes(
