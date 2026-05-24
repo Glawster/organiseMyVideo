@@ -1692,6 +1692,22 @@ class VideoMixin:
             parts.append(titlePart)
         return f"{'.'.join(parts)}{extension}"
 
+    def _tvFilenameUsesDotStyle(self, filename: str) -> bool:
+        """Return True when the show or episode title fragment still uses dots/underscores."""
+        stem, extension = os.path.splitext(filename)
+        if not extension:
+            return False
+
+        match = re.match(
+            r"^(.+?)[\.\s_]+S(\d+)E(\d+)(?:[\.\s_]+(.+?))?$", stem, re.IGNORECASE
+        )
+        if not match:
+            return False
+
+        rawShow = match.group(1) or ""
+        rawTitle = match.group(4) or ""
+        return bool(re.search(r"[._]", rawShow) or re.search(r"[._]", rawTitle))
+
     def _buildMovieDestinationFilename(self, sourceFile: Path, movieInfo: dict) -> str:
         """Return the destination movie filename, preferring canonical metadata names."""
         title = movieInfo.get("title")
@@ -2643,6 +2659,7 @@ class VideoMixin:
                 self._ensureTvDvdIdMetadata(videoFile, showDir, resolvedTvInfo)
 
         sourceMetadataFile = videoFile.parent / "metadata" / f"{videoFile.stem}.xml"
+        needsSpaceStyleNormalisation = self._tvFilenameUsesDotStyle(videoFile.name)
         destinationName = self._buildTvDestinationFilename(
             videoFile, resolvedTvInfo, preferSpaceStyle=True
         )
@@ -2651,7 +2668,7 @@ class VideoMixin:
             and not needsTimedTitleNormalisation
             and not needsShowTitleNormalisation
             and not parsedEpisodeTitleNeedsCleanup
-            and destinationName == videoFile.name
+            and not needsSpaceStyleNormalisation
         ):
             if sourceMetadataFile.exists():
                 self._updateEpisodeMetadataFile(sourceMetadataFile, resolvedTvInfo)
