@@ -2049,7 +2049,7 @@ def testFetchTvdbMetadataPrefersExactTvdbSearchMatchBeforeBroaderResults(
             result = organizer._fetchTvdbMetadata(tvInfo)
 
     assert result is not None
-    assert result["episodeTitle"] == "3:00 P.M."
+    assert result["episodeTitle"] == "3.00pm"
     assert result["seriesId"] == "54321"
     assert mockRequest.call_count == 2
 
@@ -2086,7 +2086,7 @@ def testFetchTvdbMetadataUsesEpisodeTitleWhenSeriesNameMissingFromEpisodeList(
 
     assert result is not None
     assert result["showName"] is None
-    assert result["episodeTitle"] == "3:00 P.M."
+    assert result["episodeTitle"] == "3.00pm"
     assert result["seriesId"] == "54321"
     assert mockRequest.call_count == 2
 
@@ -2139,7 +2139,7 @@ def testFetchTvdbMetadataFindsThePittTitleViaPagedSearchFallback(
             result = organizer._fetchTvdbMetadata(tvInfo)
 
     assert result is not None
-    assert result["episodeTitle"] == "2:00 P.M."
+    assert result["episodeTitle"] == "2.00pm"
     assert result["seriesId"] == "54321"
     assert mockRequest.call_count == 3
 
@@ -2186,7 +2186,7 @@ def testFetchTvdbMetadataFetchesMatchedEpisodeByIdWhenListHasNoTitle(
             result = organizer._fetchTvdbMetadata(tvInfo)
 
     assert result is not None
-    assert result["episodeTitle"] == "2:00 P.M."
+    assert result["episodeTitle"] == "2.00pm"
     assert result["seriesId"] == "54321"
     assert mockRequest.call_count == 3
 

@@ -1317,8 +1317,8 @@ class VideoMixin:
             return value
 
         normalised = re.sub(
-            r"(?<=\b\d{1,2}\.\d{2}[ap]m)\s*-\s*(?=\d{1,2}\.\d{2}[ap]m\b)",
-            f" {timeRangeToken} ",
+            r"(\b\d{1,2}\.\d{2}[ap]m)\s*-\s*(\d{1,2}\.\d{2}[ap]m\b)",
+            rf"\1 {timeRangeToken} \2",
             normalised,
         )
         normalised = re.sub(r"[^\w.\s]+", " ", normalised, flags=re.UNICODE)
