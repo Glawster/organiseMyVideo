@@ -3,7 +3,7 @@
 Moves video files from a staging directory to organised storage locations and can also clean torrent downloads.
 
 - **Movies** → `/mnt/movie<n>/Title (Year)/`
-- **TV shows** → `/mnt/video<n>/TV/Show Name/Season NN/`
+- **TV shows** → `/mnt/video<n>/TV/Show Name/Season NN/` (`The Name` folders are stored as `Name, The`)
 - **Default staging/source folder** → `/mnt/video2/toFile`
 - **Torrent download folder** → sibling `Downloads` folder next to the source directory, e.g. `/mnt/video2/Downloads`
 

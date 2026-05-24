@@ -3788,7 +3788,7 @@ def testMoveTvShowUsesScrapedEpisodeTitleToRenameNoisyFilename(
     assert result is True
     destFile = (
         tvStorage
-        / "The Pitt"
+        / "Pitt, The"
         / "Season 02"
         / "The.Pitt.S02E05.A.Better.Episode.Title.mkv"
     )
