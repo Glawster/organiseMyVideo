@@ -172,7 +172,7 @@ def testParseTvFilenameStripsTrailingBracketMetadataNoise(organizer: VideoOrgani
     )
     assert result is not None
     assert result["showName"] == "24"
-    assert result["episodeTitle"] == "Day 8 4AM-5AM"
+    assert result["episodeTitle"] == "Day 8 4.00am-5.00am"
 
 
 def testParseTvFilenameDropsNoiseOnlyEpisodeTitle(organizer: VideoOrganizer):
