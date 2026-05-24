@@ -1708,6 +1708,36 @@ class VideoMixin:
         rawTitle = match.group(4) or ""
         return bool(re.search(r"[._]", rawShow) or re.search(r"[._]", rawTitle))
 
+    def _maybeRenameResetTvShowFolder(
+        self, tvDir: Path, showName: str, videoFiles: list[Path]
+    ) -> tuple[str, list[Path]]:
+        """Return the rescan show label and video paths after any lowercase-folder fix."""
+        capitalisedShowName = self._capitaliseLowercaseTvShowTitle(showName)
+        if capitalisedShowName == showName:
+            return showName, videoFiles
+
+        showDir = tvDir / showName
+        destinationDir = tvDir / capitalisedShowName
+        if destinationDir.exists():
+            logger.error("rescan TV show target already exists: %s", destinationDir)
+            return showName, videoFiles
+
+        logger.action(
+            "renaming TV Show: %s (from %s)", destinationDir.name, showDir.name
+        )
+        if self.dryRun:
+            return capitalisedShowName, videoFiles
+
+        try:
+            showDir.rename(destinationDir)
+        except OSError as error:
+            logger.error("could not rename TV show folder %s: %s", showDir, error)
+            return showName, videoFiles
+
+        return capitalisedShowName, [
+            destinationDir / videoFile.relative_to(showDir) for videoFile in videoFiles
+        ]
+
     def _buildMovieDestinationFilename(self, sourceFile: Path, movieInfo: dict) -> str:
         """Return the destination movie filename, preferring canonical metadata names."""
         title = movieInfo.get("title")
@@ -2724,6 +2754,9 @@ class VideoMixin:
         for tvDir in videoDirs:
             self._logResetDuplicateTvShowFolders(tvDir)
             for showName, seriesId, videoFiles in self._iterResetTvShowFiles(tvDir):
+                showName, videoFiles = self._maybeRenameResetTvShowFolder(
+                    tvDir, showName, videoFiles
+                )
                 showDisplayName = self._buildTvShowFolderName(showName)
                 showLabel = (
                     f"{showDisplayName} [{seriesId}]"

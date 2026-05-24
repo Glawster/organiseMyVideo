@@ -4842,11 +4842,11 @@ def testResetTvEpisodeTitlesRenamesNoisyStoredEpisodes(
         ):
             stats = confirmedOrganizer.resetTvEpisodeTitles()
 
-    renamedEpisode = metadataDir.parent / "After.Life.S01E04.Sic.Semper.Systema.mkv"
-    renamedEpisodeSidecarXml = seasonDir / "After.Life.S01E04.Sic.Semper.Systema.xml"
-    renamedEpisodeSidecarJpg = seasonDir / "After.Life.S01E04.Sic.Semper.Systema.jpg"
-    renamedMetadata = metadataDir / "After.Life.S01E04.Sic.Semper.Systema.xml"
-    renamedMetadataJpg = metadataDir / "After.Life.S01E04.Sic.Semper.Systema.jpg"
+    renamedEpisode = metadataDir.parent / "After Life.S01E04.Sic Semper Systema.mkv"
+    renamedEpisodeSidecarXml = seasonDir / "After Life.S01E04.Sic Semper Systema.xml"
+    renamedEpisodeSidecarJpg = seasonDir / "After Life.S01E04.Sic Semper Systema.jpg"
+    renamedMetadata = metadataDir / "After Life.S01E04.Sic Semper Systema.xml"
+    renamedMetadataJpg = metadataDir / "After Life.S01E04.Sic Semper Systema.jpg"
     assert stats == {"renamed": 1, "skipped": 0, "errors": 0}
     assert renamedEpisode.exists()
     assert not episodeFile.exists()
@@ -4863,7 +4863,7 @@ def testResetTvEpisodeTitlesRenamesNoisyStoredEpisodes(
     )
 
 
-def testResetTvEpisodeTitlesSkipsCleanStoredEpisodesWithoutScraperLookup(
+def testResetTvEpisodeTitlesNormalisesDotStyleCleanStoredEpisodesWithoutScraperLookup(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer
 ):
     tvStorage = tmp_path / "video1" / "TV"
@@ -4883,12 +4883,15 @@ def testResetTvEpisodeTitlesSkipsCleanStoredEpisodesWithoutScraperLookup(
     ):
         stats = confirmedOrganizer.resetTvEpisodeTitles()
 
-    assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
-    assert episodeFile.exists()
+    assert stats == {"renamed": 1, "skipped": 0, "errors": 0}
+    assert not episodeFile.exists()
+    assert (seasonDir / "After Life.S01E04.Sic Semper Systema.mkv").exists()
 
 
 def testResetTvEpisodeTitlesCapitalisesLowercaseShowNames(
-    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
 ):
     tvStorage = tmp_path / "video1" / "TV"
     seasonDir = tvStorage / "after life" / "Season 01"
@@ -4906,11 +4909,15 @@ def testResetTvEpisodeTitlesCapitalisesLowercaseShowNames(
             "scanStorageLocations",
             return_value=([], [tvStorage]),
         ):
-            stats = confirmedOrganizer.resetTvEpisodeTitles()
+            with caplog.at_level("INFO"):
+                stats = confirmedOrganizer.resetTvEpisodeTitles()
 
     assert stats == {"renamed": 1, "skipped": 0, "errors": 0}
     assert not episodeFile.exists()
-    assert (seasonDir / "After.Life.S01E04.Sic.Semper.Systema.mkv").exists()
+    renamedSeasonDir = tvStorage / "After Life" / "Season 01"
+    assert renamedSeasonDir.exists()
+    assert (renamedSeasonDir / "After Life.S01E04.Sic Semper Systema.mkv").exists()
+    assert "renaming TV Show: After Life (from after life)" in caplog.text
 
 
 def testResetTvEpisodeTitlesRegeneratesCorruptEpisodeMetadataXml(
@@ -4943,9 +4950,11 @@ def testResetTvEpisodeTitlesRegeneratesCorruptEpisodeMetadataXml(
             with caplog.at_level("WARNING"):
                 stats = confirmedOrganizer.resetTvEpisodeTitles()
 
-    assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
+    assert stats == {"renamed": 1, "skipped": 0, "errors": 0}
     assert "could not parse metadata XML" in caplog.text
-    regenerated = metadataFile.read_text(encoding="utf-8")
+    regenerated = (
+        metadataDir / "After Life.S01E04.Sic Semper Systema.xml"
+    ).read_text(encoding="utf-8")
     assert "<EpisodeName>Sic Semper Systema</EpisodeName>" in regenerated
     assert "<seriesid>" in regenerated
 
@@ -5180,7 +5189,7 @@ def testResetTvEpisodeTitlesWarnsWhenSeriesIdMatchesAcrossShowFolders(
             with caplog.at_level("INFO"):
                 stats = confirmedOrganizer.resetTvEpisodeTitles()
 
-    assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
+    assert stats == {"renamed": 1, "skipped": 1, "errors": 0}
     assert (
         "rescan found possible duplicate TV show folders for SeriesID 777: "
         "Grimm, Grimm (2011)"
@@ -5217,7 +5226,7 @@ def testResetTvEpisodeTitlesWarnsWhenTrailingTheFoldersDuplicate(
             with caplog.at_level("INFO"):
                 stats = confirmedOrganizer.resetTvEpisodeTitles()
 
-    assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
+    assert stats == {"renamed": 2, "skipped": 0, "errors": 0}
     assert (
         "rescan found possible duplicate TV show folders for canonical name "
         "Crown, The: Crown, The, The Crown"
@@ -5263,7 +5272,7 @@ def testResetTvEpisodeTitlesWarnsWhenNormalizedNamesDuplicate(
             with caplog.at_level("INFO"):
                 stats = confirmedOrganizer.resetTvEpisodeTitles()
 
-    assert stats == {"renamed": 0, "skipped": 7, "errors": 0}
+    assert stats == {"renamed": 4, "skipped": 3, "errors": 0}
     assert (
         "rescan found possible duplicate TV show folders for canonical name "
         "Grimm: Grimm, Grimm (2011)"
@@ -5326,7 +5335,7 @@ def testResetTvEpisodeTitlesRepairsIncompleteShowMetadata(
                 with caplog.at_level("INFO"):
                     stats = confirmedOrganizer.resetTvEpisodeTitles()
 
-    assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
+    assert stats == {"renamed": 1, "skipped": 0, "errors": 0}
     assert "<SeriesID>361563</SeriesID>" in (seasonDir.parent / "series.xml").read_text(
         encoding="utf-8"
     )
