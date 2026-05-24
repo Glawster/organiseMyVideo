@@ -166,6 +166,15 @@ def testParseTvFilenameStripsTrailingReleaseNoise(organizer: VideoOrganizer):
     assert result["episodeTitle"] == "Pilot"
 
 
+def testParseTvFilenameStripsTrailingBracketMetadataNoise(organizer: VideoOrganizer):
+    result = organizer.parseTvFilename(
+        "24.S08E13.Day 8 4AM-5AM[Action-Drama-Mystery][2010].avi"
+    )
+    assert result is not None
+    assert result["showName"] == "24"
+    assert result["episodeTitle"] == "Day 8 4AM-5AM"
+
+
 def testParseTvFilenameDropsNoiseOnlyEpisodeTitle(organizer: VideoOrganizer):
     result = organizer.parseTvFilename(
         "The.Pitt.S02E05.1080p.WEB.h264.successfulcrab.EZTVx.to.mkv"
@@ -3579,6 +3588,33 @@ def testMoveTvShowUsesCanonicalEpisodeTitleFilename(
     assert not srcFile.exists()
 
 
+def testMoveTvShowUsesSpacedTimeEpisodeTitleFilename(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "episode.avi"
+    srcFile.write_bytes(b"x" * 100)
+
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    tvInfo = {
+        "showName": "24",
+        "season": 8,
+        "episode": 13,
+        "episodeTitle": "Day 8: 4:00 A.M.-5:00 A.M.",
+        "extension": ".avi",
+        "type": "tv",
+    }
+    result = confirmedOrganizer.moveTvShow(
+        srcFile, tvInfo, [tvStorage], interactive=False
+    )
+
+    assert result is True
+    destFile = tvStorage / "24" / "Season 08" / "24.S08E13.Day 8 4.00am 5.00am.avi"
+    assert destFile.exists()
+    assert not srcFile.exists()
+
+
 def testMoveTvShowUsesScrapedEpisodeTitleToRenameNoisyFilename(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer
 ):
@@ -4629,6 +4665,60 @@ def testResetTvEpisodeTitlesSkipsCleanStoredEpisodesWithSpacesAndApostrophes(
 
     assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
     assert episodeFile.exists()
+
+
+def testResetTvEpisodeTitlesSkipsCleanStoredEpisodesWithBracketMetadataSuffixes(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    seasonDir = tvStorage / "24" / "Season 08"
+    seasonDir.mkdir(parents=True)
+    episodeFile = (
+        seasonDir / "24.S08E13.Day 8 4AM-5AM[Action-Drama-Mystery][2010].avi"
+    )
+    episodeFile.write_bytes(b"x" * 20)
+
+    with patch.object(
+        confirmedOrganizer,
+        "_fetchTvMetadataFromScraper",
+        side_effect=AssertionError("scraper lookup should not run"),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ):
+            stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
+    assert episodeFile.exists()
+
+
+def testResetTvEpisodeTitlesNormalisesTimedEpisodeTitles(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    seasonDir = tvStorage / "24" / "Season 08"
+    seasonDir.mkdir(parents=True)
+    episodeFile = seasonDir / "24.S08E13.Day.8.4.00.A.M.5.00.A.M.avi"
+    episodeFile.write_bytes(b"x" * 20)
+
+    with patch.object(
+        confirmedOrganizer,
+        "_fetchTvMetadataFromScraper",
+        side_effect=AssertionError("scraper lookup should not run"),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ):
+            stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    renamedEpisode = seasonDir / "24.S08E13.Day 8 4.00am 5.00am.avi"
+    assert stats == {"renamed": 1, "skipped": 0, "errors": 0}
+    assert renamedEpisode.exists()
+    assert not episodeFile.exists()
 
 
 def testResetTvEpisodeTitlesLogsShowNamesAndOnlyRenameChanges(

@@ -181,6 +181,7 @@ class VideoMixin:
             r"[^\]\)]*[\]\)]"
         )
         cleaned = re.sub(noisyBracketPattern, " ", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"(?:\s*\[[^\]]+\])+$", "", cleaned).strip()
         cleaned = re.sub(r"[._]+", " ", cleaned)
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
 
@@ -1289,6 +1290,46 @@ class VideoMixin:
         tokens = normalised.split()
         return ".".join(tokens)
 
+    def _normaliseTimedTvEpisodeTitle(self, value: Optional[str]) -> Optional[str]:
+        """Return a spacing-preserving title when the episode name contains times."""
+        if not value:
+            return value
+
+        normalised = unicodedata.normalize("NFKC", value)
+        timePattern = re.compile(
+            r"\b(\d{1,2})(?:[:.\s](\d{2}))?\s*([AP])\.?\s*M\.?\b", re.IGNORECASE
+        )
+
+        matchedTime = False
+
+        def _replaceTime(match: re.Match[str]) -> str:
+            nonlocal matchedTime
+            matchedTime = True
+            hour = match.group(1)
+            minute = match.group(2)
+            meridiem = match.group(3).lower()
+            minutePart = f".{minute}" if minute else ""
+            return f"{hour}{minutePart}{meridiem}m"
+
+        normalised = timePattern.sub(_replaceTime, normalised)
+        if not matchedTime:
+            return value
+
+        normalised = re.sub(r"[^\w.\s]+", " ", normalised, flags=re.UNICODE)
+        normalised = normalised.replace("_", " ")
+        normalised = re.sub(r"\s+", " ", normalised).strip()
+        return normalised or value
+
+    def _sanitiseTvEpisodeTitlePart(self, value: str) -> str:
+        """Return a filesystem-safe TV episode title fragment."""
+        timedTitle = self._normaliseTimedTvEpisodeTitle(value)
+        if timedTitle != value:
+            safeTitle = timedTitle.replace("'", "")
+            safeTitle = re.sub(r"[^\w.\s]+", " ", safeTitle, flags=re.UNICODE)
+            safeTitle = safeTitle.replace("_", " ")
+            return re.sub(r"\s+", " ", safeTitle).strip()
+        return self._sanitiseFilenamePart(value)
+
     def _buildTvDestinationFilename(self, sourceFile: Path, tvInfo: dict) -> str:
         """Return the destination TV filename, preferring canonical enriched names."""
         showName = tvInfo.get("showName")
@@ -1303,7 +1344,7 @@ class VideoMixin:
             return sourceFile.name
 
         showPart = self._sanitiseFilenamePart(showName)
-        titlePart = self._sanitiseFilenamePart(episodeTitle) if episodeTitle else ""
+        titlePart = self._sanitiseTvEpisodeTitlePart(episodeTitle) if episodeTitle else ""
         if not showPart:
             return sourceFile.name
 
@@ -2066,10 +2107,15 @@ class VideoMixin:
         parsedTvInfo = self.parseTvFilename(videoFile.name)
         if not parsedTvInfo:
             return "skipped"
-        if not self._tvEpisodeTitleNeedsCanonicalLookup(
-            parsedTvInfo.get("episodeTitle")
-        ):
+        parsedEpisodeTitle = parsedTvInfo.get("episodeTitle")
+        timedTitle = self._normaliseTimedTvEpisodeTitle(parsedEpisodeTitle)
+        needsCanonicalLookup = self._tvEpisodeTitleNeedsCanonicalLookup(parsedEpisodeTitle)
+        needsTimedTitleNormalisation = timedTitle not in (None, parsedEpisodeTitle)
+        if not needsCanonicalLookup and not needsTimedTitleNormalisation:
             return "skipped"
+        if needsTimedTitleNormalisation:
+            parsedTvInfo = dict(parsedTvInfo)
+            parsedTvInfo["episodeTitle"] = timedTitle
 
         with self._suppressResetNoiseLogs():
             mcmHints = self._readTvMcmHints(videoFile)
@@ -2093,7 +2139,8 @@ class VideoMixin:
                 keepExistingShowName=keepExistingShowName,
             )
 
-            resolvedTvInfo = self._enrichTvMetadata(resolvedTvInfo) or resolvedTvInfo
+            if needsCanonicalLookup:
+                resolvedTvInfo = self._enrichTvMetadata(resolvedTvInfo) or resolvedTvInfo
 
         destinationName = self._buildTvDestinationFilename(videoFile, resolvedTvInfo)
         if destinationName == videoFile.name:
