@@ -112,26 +112,7 @@ class VideoMixin:
 
     def _readResetTvShowSeriesId(self, showDir: Path) -> Optional[str]:
         """Return the best available series ID for a stored TV show folder."""
-        seriesRoot = self._readXmlRoot(showDir / "series.xml")
-        seriesId = self._readFirstXmlText(seriesRoot, ("SeriesID", "seriesid", "id"))
-        if seriesId:
-            return seriesId
-
-        for dvdIdFile in sorted(showDir.glob("mcm_id__*.dvdid.xml")):
-            dvdIdRoot = self._readXmlRoot(dvdIdFile)
-            seriesId = self._readFirstXmlText(dvdIdRoot, ("SeriesID", "seriesid", "id"))
-            if seriesId:
-                return seriesId
-
-        for episodeXml in sorted(showDir.rglob("metadata/*.xml")):
-            episodeRoot = self._readXmlRoot(episodeXml)
-            seriesId = self._readFirstXmlText(
-                episodeRoot, ("SeriesID", "seriesid", "id")
-            )
-            if seriesId:
-                return seriesId
-
-        return None
+        return self._readTvShowSeriesId(showDir)
 
     def _logResetDuplicateTvShowFolders(self, tvDir: Path) -> None:
         """Warn when multiple stored TV show folders share the same series ID."""
@@ -966,6 +947,67 @@ class VideoMixin:
             return int(match.group(1))
         return None
 
+    def _readTvShowTopLevelSeriesId(self, showDir: Optional[Path]) -> Optional[str]:
+        """Return a show SeriesID from show-level metadata only."""
+        if showDir is None:
+            return None
+
+        seriesRoot = self._readXmlRoot(showDir / "series.xml")
+        seriesId = self._readFirstXmlText(seriesRoot, ("SeriesID", "seriesid", "id"))
+        if seriesId:
+            return seriesId
+
+        for dvdIdFile in sorted(showDir.glob("mcm_id__*.dvdid.xml")):
+            dvdIdRoot = self._readXmlRoot(dvdIdFile)
+            seriesId = self._readFirstXmlText(dvdIdRoot, ("SeriesID", "seriesid", "id"))
+            if seriesId:
+                return seriesId
+
+        return None
+
+    def _readTvSeasonMetadataSeriesId(self, seasonDir: Optional[Path]) -> Optional[str]:
+        """Return a SeriesID from season-level ``metadata/*.xml`` files."""
+        if seasonDir is None:
+            return None
+
+        metadataDir = seasonDir / "metadata"
+        if not metadataDir.is_dir():
+            return None
+
+        for episodeXml in sorted(metadataDir.glob("*.xml")):
+            episodeRoot = self._readXmlRoot(episodeXml)
+            seriesId = self._readFirstXmlText(
+                episodeRoot, ("SeriesID", "seriesid", "id")
+            )
+            if seriesId:
+                return seriesId
+
+        return None
+
+    def _readTvShowSeriesId(
+        self, showDir: Optional[Path], seasonDir: Optional[Path] = None
+    ) -> Optional[str]:
+        """Return a SeriesID using show XML, show dvdid XML, then season metadata."""
+        seriesId = self._readTvShowTopLevelSeriesId(showDir)
+        if seriesId:
+            return seriesId
+
+        if seasonDir is not None:
+            return self._readTvSeasonMetadataSeriesId(seasonDir)
+
+        if showDir is None:
+            return None
+
+        for episodeXml in sorted(showDir.rglob("metadata/*.xml")):
+            episodeRoot = self._readXmlRoot(episodeXml)
+            seriesId = self._readFirstXmlText(
+                episodeRoot, ("SeriesID", "seriesid", "id")
+            )
+            if seriesId:
+                return seriesId
+
+        return None
+
     def _readMovieMcmHints(self, sourceFile: Path) -> Optional[dict]:
         """
         Return standardised movie hints from nearby MCM XML files.
@@ -1059,8 +1101,10 @@ class VideoMixin:
         ) or self._inferSeasonFromPath(sourceSeasonDir)
         episode = self._readIntXmlText(episodeRoot, ("EpisodeNumber", "ID"))
         episodeTitle = self._readFirstXmlText(episodeRoot, ("EpisodeName",))
-        imdbId = self._readFirstXmlText(episodeRoot, ("IMDB_ID", "IMDbId"))
-        seriesId = self._readFirstXmlText(seriesRoot, ("SeriesID", "id"))
+        imdbId = self._readFirstXmlText(episodeRoot, ("IMDB_ID", "IMDbId")) or (
+            self._readFirstXmlText(seriesRoot, ("IMDB_ID", "IMDbId"))
+        )
+        seriesId = self._readTvShowSeriesId(sourceShowDir, sourceSeasonDir)
         episodeId = self._readFirstXmlText(episodeRoot, ("EpisodeID",))
         sourceHasTvLayout = bool(
             sourceShowDir
@@ -1580,12 +1624,41 @@ class VideoMixin:
             showDir: Destination show directory for show-level metadata files.
             tvInfo: Resolved TV metadata from parsing/enrichment.
         """
+        mcmHints = self._readTvMcmHints(sourceFile) or {}
         existing = self._collectMatchingFiles(showDir, ("mcm_id__*.dvdid.xml",))
         if existing:
-            logger.value("preserving existing metadata files", len(existing))
+            updated = 0
+            for existingFile in existing:
+                root = self._readXmlRoot(existingFile)
+                if root is None:
+                    continue
+                changed = False
+                changed = (
+                    self._setXmlFieldIfMissing(
+                        root, "SeriesID", tvInfo.get("seriesId") or mcmHints.get("seriesId")
+                    )
+                    or changed
+                )
+                changed = (
+                    self._setXmlFieldIfMissing(
+                        root, "IMDB_ID", tvInfo.get("imdbId") or mcmHints.get("imdbId")
+                    )
+                    or changed
+                )
+                if not changed:
+                    continue
+                updated += 1
+                logger.action("update metadata: %s", existingFile)
+                if self.dryRun:
+                    continue
+                existingFile.parent.mkdir(parents=True, exist_ok=True)
+                ET.ElementTree(root).write(
+                    existingFile, encoding="utf-8", xml_declaration=True
+                )
+            if updated == 0:
+                logger.value("preserving existing metadata files", len(existing))
             return
 
-        mcmHints = self._readTvMcmHints(sourceFile) or {}
         dvdIdFilename = self._buildTvDvdIdFilename(tvInfo, mcmHints)
         if not dvdIdFilename:
             return
@@ -1641,17 +1714,11 @@ class VideoMixin:
     def _updateSeriesMetadataRoot(
         self, root: ET.Element, tvInfo: dict
     ) -> tuple[ET.Element, bool]:
-        """Update ``series.xml`` with resolved values while preserving existing non-empty fields."""
+        """Backfill missing ``SeriesID`` in ``series.xml`` without overwriting values."""
         changed = False
-        showName = tvInfo.get("showName")
-        changed = self._setXmlFieldIfMissing(root, "SeriesName", showName) or changed
-        changed = self._setXmlFieldIfMissing(root, "LocalTitle", showName) or changed
         changed = (
             self._setXmlFieldIfMissing(root, "SeriesID", tvInfo.get("seriesId"))
             or changed
-        )
-        changed = (
-            self._setXmlFieldIfMissing(root, "IMDB_ID", tvInfo.get("imdbId")) or changed
         )
         return root, changed
 
@@ -1667,13 +1734,27 @@ class VideoMixin:
         ET.ElementTree(root).write(seriesFile, encoding="utf-8", xml_declaration=True)
 
     def _ensureSeriesMetadata(self, showDir: Path, tvInfo: dict) -> None:
-        """Create destination ``series.xml`` only when missing; preserve existing files."""
+        """Create or backfill destination ``series.xml`` while preserving existing values."""
         showName = tvInfo.get("showName")
         if not showName:
             return
         seriesFile = showDir / "series.xml"
         if seriesFile.exists():
-            logger.value("preserving existing metadata", seriesFile)
+            root = self._readXmlRoot(seriesFile)
+            if root is None:
+                logger.value("preserving existing metadata", seriesFile)
+                return
+            root, changed = self._updateSeriesMetadataRoot(root, tvInfo)
+            if not changed:
+                logger.value("preserving existing metadata", seriesFile)
+                return
+            logger.action("update metadata: %s", seriesFile)
+            if self.dryRun:
+                return
+            seriesFile.parent.mkdir(parents=True, exist_ok=True)
+            ET.ElementTree(root).write(
+                seriesFile, encoding="utf-8", xml_declaration=True
+            )
             return
         self._writeSeriesMcmTemplate(showDir, tvInfo)
 
@@ -2268,11 +2349,37 @@ class VideoMixin:
             parsedEpisodeTitle
         )
         needsTimedTitleNormalisation = timedTitle not in (None, parsedEpisodeTitle)
-        if not needsCanonicalLookup and not needsTimedTitleNormalisation:
-            return "skipped"
         if needsTimedTitleNormalisation:
             parsedTvInfo = dict(parsedTvInfo)
             parsedTvInfo["episodeTitle"] = timedTitle
+
+        sourceSeasonDir = videoFile.parent
+        showDir = (
+            sourceSeasonDir.parent
+            if re.match(r"^season\b", sourceSeasonDir.name, re.IGNORECASE)
+            and sourceSeasonDir.parent != sourceSeasonDir
+            else None
+        )
+        needsMetadataRepair = bool(
+            showDir
+            and (
+                not (showDir / "series.xml").exists()
+                or self._readFirstXmlText(
+                    self._readXmlRoot(showDir / "series.xml"),
+                    ("SeriesID", "seriesid", "id"),
+                )
+                is None
+                or not self._hasMatchingFiles(showDir, ("mcm_id__*.dvdid.xml",))
+                or any(
+                    self._readFirstXmlText(
+                        self._readXmlRoot(dvdIdFile),
+                        ("SeriesID", "seriesid", "id"),
+                    )
+                    is None
+                    for dvdIdFile in showDir.glob("mcm_id__*.dvdid.xml")
+                )
+            )
+        )
 
         with self._suppressResetNoiseLogs():
             mcmHints = self._readTvMcmHints(videoFile)
@@ -2296,10 +2403,19 @@ class VideoMixin:
                 keepExistingShowName=keepExistingShowName,
             )
 
-            if needsCanonicalLookup:
+            if needsCanonicalLookup or (
+                needsMetadataRepair and not resolvedTvInfo.get("seriesId")
+            ):
                 resolvedTvInfo = (
                     self._enrichTvMetadata(resolvedTvInfo) or resolvedTvInfo
                 )
+
+        if showDir is not None:
+            self._ensureSeriesMetadata(showDir, resolvedTvInfo)
+            self._ensureTvDvdIdMetadata(videoFile, showDir, resolvedTvInfo)
+
+        if not needsCanonicalLookup and not needsTimedTitleNormalisation:
+            return "skipped"
 
         destinationName = self._buildTvDestinationFilename(videoFile, resolvedTvInfo)
         if destinationName == videoFile.name:

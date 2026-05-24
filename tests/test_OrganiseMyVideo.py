@@ -346,6 +346,35 @@ def testReadMcmHintsInfersTvSeasonFromSeriesAndPath(
     }
 
 
+def testReadMcmHintsFallsBackToEpisodeSeriesIdWhenSeriesXmlBlank(
+    sourceDir: Path, organizer: VideoOrganizer
+):
+    showDir = sourceDir / "After Life"
+    seasonDir = showDir / "Season 1"
+    metadataDir = seasonDir / "metadata"
+    metadataDir.mkdir(parents=True)
+    videoFile = seasonDir / "episode.mkv"
+    videoFile.write_bytes(b"x" * 50)
+    (showDir / "series.xml").write_text("<Series />", encoding="utf-8")
+    (metadataDir / "episode.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Item>
+    <EpisodeID>10751471</EpisodeID>
+    <EpisodeNumber>4</EpisodeNumber>
+    <SeasonNumber>1</SeasonNumber>
+    <EpisodeName>Sic Semper Systema</EpisodeName>
+    <SeriesID>347507</SeriesID>
+</Item>
+""",
+        encoding="utf-8",
+    )
+
+    hints = organizer._readMcmHints(videoFile)
+
+    assert hints is not None
+    assert hints["seriesId"] == "347507"
+
+
 def testReadMcmHintsIgnoresBinaryEpisodeXmlWithoutWarning(
     sourceDir: Path, organizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
 ):
@@ -388,6 +417,23 @@ def testReadMcmHintsIgnoresBinaryEpisodeXmlWithoutWarning(
         },
     }
     assert "could not parse metadata XML" not in caplog.text
+
+
+def testReadTvSeriesMcmHintsFallsBackToDvdIdSeriesIdWhenSeriesXmlMissing(
+    sourceDir: Path, organizer: VideoOrganizer
+):
+    showDir = sourceDir / "Virgin River"
+    showDir.mkdir()
+    (showDir / "mcm_id__117581.dvdid.xml").write_text(
+        "<Item><SeriesID>117581</SeriesID></Item>", encoding="utf-8"
+    )
+
+    hints = organizer._readTvSeriesMcmHints(showDir)
+
+    assert hints is not None
+    assert hints["seriesId"] == "117581"
+    assert hints["mcm"]["showXmlExists"] is False
+    assert hints["mcm"]["dvdIdXmlExists"] is True
 
 
 def testReadMcmHintsDetectsMovieArtworkWithoutMovieXml(
@@ -3647,6 +3693,44 @@ def testMoveTvShowPreservesExistingSeriesXmlWithoutOverwriting(
     assert "<IMDB_ID>" not in seriesText
 
 
+def testMoveTvShowBackfillsExistingIncompleteShowMetadata(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "Virgin.River.S06E01.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    tvStorage = tmp_path / "video1" / "TV"
+    showDestDir = tvStorage / "Virgin River"
+    showDestDir.mkdir(parents=True)
+    (showDestDir / "series.xml").write_text(
+        "<Series><SeriesName>Virgin River</SeriesName></Series>", encoding="utf-8"
+    )
+    (showDestDir / "mcm_id__existing.dvdid.xml").write_text(
+        "<Item><IMDB_ID>tt9077530</IMDB_ID></Item>", encoding="utf-8"
+    )
+
+    tvInfo = {
+        "showName": "Virgin River",
+        "season": 6,
+        "episode": 1,
+        "seriesId": "117581",
+        "imdbId": "tt9077530",
+        "extension": ".mkv",
+        "type": "tv",
+    }
+
+    result = confirmedOrganizer.moveTvShow(
+        srcFile, tvInfo, [tvStorage], interactive=False
+    )
+
+    assert result is True
+    assert "<SeriesID>117581</SeriesID>" in (showDestDir / "series.xml").read_text(
+        encoding="utf-8"
+    )
+    assert "<SeriesID>117581</SeriesID>" in (
+        showDestDir / "mcm_id__existing.dvdid.xml"
+    ).read_text(encoding="utf-8")
+
+
 def testMoveTvShowUsesCanonicalEpisodeTitleFilename(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer
 ):
@@ -4965,6 +5049,60 @@ def testResetTvEpisodeTitlesWarnsWhenSeriesIdMatchesAcrossShowFolders(
         "rescan found possible duplicate TV show folders for SeriesID 777: "
         "Grimm, Grimm (2011)"
     ) in caplog.text
+
+
+def testResetTvEpisodeTitlesRepairsIncompleteShowMetadata(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    seasonDir = tvStorage / "After Life" / "Season 01"
+    metadataDir = seasonDir / "metadata"
+    metadataDir.mkdir(parents=True)
+    (seasonDir.parent / "series.xml").write_text(
+        "<Series><SeriesName>After Life</SeriesName></Series>", encoding="utf-8"
+    )
+    (seasonDir.parent / "mcm_id__broken.dvdid.xml").write_text(
+        "<Item />", encoding="utf-8"
+    )
+    (metadataDir / "After.Life.S01E04.Sic.Semper.Systema.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Item>
+    <EpisodeID>10751471</EpisodeID>
+    <EpisodeNumber>4</EpisodeNumber>
+    <SeasonNumber>1</SeasonNumber>
+    <EpisodeName>Sic Semper Systema</EpisodeName>
+    <SeriesID>361563</SeriesID>
+</Item>
+""",
+        encoding="utf-8",
+    )
+    episodeFile = seasonDir / "After.Life.S01E04.Sic.Semper.Systema.mkv"
+    episodeFile.write_bytes(b"x" * 20)
+
+    with patch.object(
+        confirmedOrganizer,
+        "_fetchTvMetadataFromScraper",
+        side_effect=AssertionError("scraper lookup should not run"),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ):
+            with patch.object(
+                confirmedOrganizer,
+                "_getMetadataLibraryPath",
+                return_value=tmp_path / "metadataLibrary.json",
+            ):
+                stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
+    assert "<SeriesID>361563</SeriesID>" in (
+        seasonDir.parent / "series.xml"
+    ).read_text(encoding="utf-8")
+    assert "<SeriesID>361563</SeriesID>" in (
+        seasonDir.parent / "mcm_id__broken.dvdid.xml"
+    ).read_text(encoding="utf-8")
 
 
 def testVideoOrganizerDoesNotExposeGrokMethods(organizer: VideoOrganizer):

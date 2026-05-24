@@ -421,7 +421,7 @@ class MetadataMixin:
         seriesRoot = self._readXmlRoot(seriesFile)
         showName = self._readFirstXmlText(seriesRoot, ("LocalTitle", "SeriesName"))
         imdbId = self._readFirstXmlText(seriesRoot, ("IMDB_ID", "IMDbId"))
-        seriesId = self._readFirstXmlText(seriesRoot, ("SeriesID", "id"))
+        seriesId = self._readTvShowSeriesId(showDir)
         try:
             seasonMetadataDirs = [
                 item for item in showDir.glob("Season*/metadata") if item.is_dir()
