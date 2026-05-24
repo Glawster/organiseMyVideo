@@ -90,7 +90,14 @@ class VideoMixin:
             )
             showFiles.setdefault(showName, []).append(videoFile)
 
-        yield from showFiles.items()
+        for showName, videoFiles in showFiles.items():
+            showDir = tvDir / showName
+            seriesId = (
+                self._readResetTvShowSeriesId(showDir)
+                if showDir.is_dir()
+                else None
+            )
+            yield showName, seriesId, videoFiles
 
     def _iterResetTvShowDirs(self, tvDir: Path) -> Iterable[Path]:
         """Yield top-level TV show directories for reset scans."""
@@ -2349,8 +2356,9 @@ class VideoMixin:
 
         for tvDir in videoDirs:
             self._logResetDuplicateTvShowFolders(tvDir)
-            for showName, videoFiles in self._iterResetTvShowFiles(tvDir):
-                logger.action(f"scanning: {showName}")
+            for showName, seriesId, videoFiles in self._iterResetTvShowFiles(tvDir):
+                showLabel = f"{showName} [{seriesId}]" if seriesId else showName
+                logger.action(f"scanning: {showLabel}")
                 for videoFile in videoFiles:
                     outcome = self._resetTvEpisodeTitleForFile(videoFile)
                     stats[outcome] += 1

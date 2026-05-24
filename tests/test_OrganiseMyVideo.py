@@ -4880,11 +4880,17 @@ def testResetTvEpisodeTitlesLogsShowNamesAndOnlyRenameChanges(
 
     afterLifeSeasonDir = tvStorage / "After Life" / "Season 01"
     afterLifeSeasonDir.mkdir(parents=True)
+    (afterLifeSeasonDir.parent / "series.xml").write_text(
+        "<Series><SeriesID>361563</SeriesID></Series>", encoding="utf-8"
+    )
     noisyEpisode = afterLifeSeasonDir / "After.Life.S01E04.1080p.WEB.h264.mkv"
     noisyEpisode.write_bytes(b"x" * 20)
 
     anotherShowSeasonDir = tvStorage / "Another Show" / "Season 01"
     anotherShowSeasonDir.mkdir(parents=True)
+    (anotherShowSeasonDir.parent / "series.xml").write_text(
+        "<Series><SeriesID>999999</SeriesID></Series>", encoding="utf-8"
+    )
     cleanEpisode = anotherShowSeasonDir / "Another.Show.S01E01.Pilot.mkv"
     cleanEpisode.write_bytes(b"x" * 20)
 
@@ -4907,8 +4913,8 @@ def testResetTvEpisodeTitlesLogsShowNamesAndOnlyRenameChanges(
                 stats = confirmedOrganizer.resetTvEpisodeTitles()
 
     assert stats == {"renamed": 1, "skipped": 1, "errors": 0}
-    assert "rescanning: After Life" in caplog.text
-    assert "rescanning: Another Show" in caplog.text
+    assert "rescanning: After Life [361563]" in caplog.text
+    assert "rescanning: Another Show [999999]" in caplog.text
     assert (
         "rescan TV title: After.Life.S01E04.1080p.WEB.h264.mkv"
         " -> After.Life.S01E04.Sic.Semper.Systema.mkv"
