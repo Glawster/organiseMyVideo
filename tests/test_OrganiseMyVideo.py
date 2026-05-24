@@ -5105,9 +5105,9 @@ def testResetTvEpisodeTitlesRepairsIncompleteShowMetadata(
                 stats = confirmedOrganizer.resetTvEpisodeTitles()
 
     assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
-    assert "<SeriesID>361563</SeriesID>" in (
-        seasonDir.parent / "series.xml"
-    ).read_text(encoding="utf-8")
+    assert "<SeriesID>361563</SeriesID>" in (seasonDir.parent / "series.xml").read_text(
+        encoding="utf-8"
+    )
     assert "<SeriesID>361563</SeriesID>" in (
         seasonDir.parent / "mcm_id__broken.dvdid.xml"
     ).read_text(encoding="utf-8")

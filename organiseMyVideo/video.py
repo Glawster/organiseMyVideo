@@ -93,9 +93,7 @@ class VideoMixin:
         for showName, videoFiles in showFiles.items():
             showDir = tvDir / showName
             seriesId = (
-                self._readResetTvShowSeriesId(showDir)
-                if showDir.is_dir()
-                else None
+                self._readResetTvShowSeriesId(showDir) if showDir.is_dir() else None
             )
             yield showName, seriesId, videoFiles
 
@@ -1635,7 +1633,9 @@ class VideoMixin:
                 changed = False
                 changed = (
                     self._setXmlFieldIfMissing(
-                        root, "SeriesID", tvInfo.get("seriesId") or mcmHints.get("seriesId")
+                        root,
+                        "SeriesID",
+                        tvInfo.get("seriesId") or mcmHints.get("seriesId"),
                     )
                     or changed
                 )
