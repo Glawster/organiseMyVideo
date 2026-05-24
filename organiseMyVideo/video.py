@@ -1634,7 +1634,12 @@ class VideoMixin:
         )
 
     def _buildTvDestinationFilename(
-        self, sourceFile: Path, tvInfo: dict, *, preserveSourceSpacing: bool = False
+        self,
+        sourceFile: Path,
+        tvInfo: dict,
+        *,
+        preserveSourceSpacing: bool = False,
+        preferSpaceStyle: bool = False,
     ) -> str:
         """Return the destination TV filename, preferring canonical enriched names."""
         showName = tvInfo.get("showName")
@@ -1664,14 +1669,17 @@ class VideoMixin:
                 r"[._]", rawTitle
             )
 
+        useSpaceStyleShow = preferSpaceStyle or preserveShowSpaces
+        useSpaceStyleTitle = preferSpaceStyle or preserveTitleSpaces
+
         showPart = (
             self._sanitiseTvFilenamePart(showName)
-            if preserveShowSpaces
+            if useSpaceStyleShow
             else self._sanitiseFilenamePart(showName)
         )
         titlePart = (
             self._sanitiseTvEpisodeTitlePart(
-                episodeTitle, preserveInternalSpaces=preserveTitleSpaces
+                episodeTitle, preserveInternalSpaces=useSpaceStyleTitle
             )
             if episodeTitle
             else ""
@@ -2636,13 +2644,14 @@ class VideoMixin:
 
         sourceMetadataFile = videoFile.parent / "metadata" / f"{videoFile.stem}.xml"
         destinationName = self._buildTvDestinationFilename(
-            videoFile, resolvedTvInfo, preserveSourceSpacing=True
+            videoFile, resolvedTvInfo, preferSpaceStyle=True
         )
         if (
             not needsCanonicalLookup
             and not needsTimedTitleNormalisation
             and not needsShowTitleNormalisation
             and not parsedEpisodeTitleNeedsCleanup
+            and destinationName == videoFile.name
         ):
             if sourceMetadataFile.exists():
                 self._updateEpisodeMetadataFile(sourceMetadataFile, resolvedTvInfo)

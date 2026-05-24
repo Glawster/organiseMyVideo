@@ -73,7 +73,7 @@ The metadata library is saved in `~/.config/organiseMyVideo/metadataLibrary.json
 
 `--auto` reuses the normal organiser logic without prompts and writes a plain-text transfer/rename summary into the source directory so you can review any manual tidy-up afterwards.
 
-`--rescan` scans the existing TV library roots, keeps already-clean episode titles as-is, and only falls back to scraper lookups when the current filename suffix still looks like release noise or is missing. It also warns when multiple show folders share the same stored SeriesID so likely duplicates are easier to spot. When an episode is retitled, matching same-stem `.xml` and `.jpg` companion files are renamed with it. Console output is otherwise limited to `rescanning: ...` lines plus any actual rescan rename lines.
+`--rescan` scans the existing TV library roots, normalises retitled episodes to the newer space-style show/title fragments, and only falls back to scraper lookups when the current filename suffix still looks like release noise or is missing. It also warns when multiple show folders share the same stored SeriesID so likely duplicates are easier to spot. When an episode is retitled, matching same-stem `.xml` and `.jpg` companion files are renamed with it. Console output is otherwise limited to `rescanning: ...` lines plus any actual rescan rename lines.
 
 ---
 

@@ -5101,7 +5101,7 @@ def testResetTvEpisodeTitlesLogsShowNamesAndOnlyRenameChanges(
     (anotherShowSeasonDir.parent / "mcm_id__999999.dvdid.xml").write_text(
         "<Item><SeriesID>999999</SeriesID></Item>", encoding="utf-8"
     )
-    cleanEpisode = anotherShowSeasonDir / "Another.Show.S01E01.Pilot.mkv"
+    cleanEpisode = anotherShowSeasonDir / "Another.Show.S01E01.Opening.Night.mkv"
     cleanEpisode.write_bytes(b"x" * 20)
 
     libraryPath = tmp_path / "metadataLibrary.json"
@@ -5122,13 +5122,21 @@ def testResetTvEpisodeTitlesLogsShowNamesAndOnlyRenameChanges(
             with caplog.at_level("INFO"):
                 stats = confirmedOrganizer.resetTvEpisodeTitles()
 
-    assert stats == {"renamed": 1, "skipped": 1, "errors": 0}
+    assert stats == {"renamed": 2, "skipped": 0, "errors": 0}
     assert "scanning: After Life [361563]" in caplog.text
     assert "scanning: Another Show [999999]" in caplog.text
     assert (
         "rescan TV title: After.Life.S01E04.1080p.WEB.h264.mkv"
-        " -> After.Life.S01E04.Sic.Semper.Systema.mkv"
+        " -> After Life.S01E04.Sic Semper Systema.mkv"
     ) in caplog.text
+    assert (
+        "rescan TV title: Another.Show.S01E01.Opening.Night.mkv"
+        " -> Another Show.S01E01.Opening Night.mkv"
+    ) in caplog.text
+    assert (afterLifeSeasonDir / "After Life.S01E04.Sic Semper Systema.mkv").exists()
+    assert (anotherShowSeasonDir / "Another Show.S01E01.Opening Night.mkv").exists()
+    assert not noisyEpisode.exists()
+    assert not cleanEpisode.exists()
     assert "starting TV episode title reset" not in caplog.text
     assert "scanning for storage locations" not in caplog.text
     assert "using saved metadata library" not in caplog.text
