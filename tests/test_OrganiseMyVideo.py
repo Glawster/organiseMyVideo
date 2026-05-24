@@ -4673,9 +4673,7 @@ def testResetTvEpisodeTitlesSkipsCleanStoredEpisodesWithBracketMetadataSuffixes(
     tvStorage = tmp_path / "video1" / "TV"
     seasonDir = tvStorage / "24" / "Season 08"
     seasonDir.mkdir(parents=True)
-    episodeFile = (
-        seasonDir / "24.S08E13.Day 8 4AM-5AM[Action-Drama-Mystery][2010].avi"
-    )
+    episodeFile = seasonDir / "24.S08E13.Day 8 4AM-5AM[Action-Drama-Mystery][2010].avi"
     episodeFile.write_bytes(b"x" * 20)
 
     with patch.object(

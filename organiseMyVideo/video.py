@@ -1297,7 +1297,8 @@ class VideoMixin:
 
         normalised = unicodedata.normalize("NFKC", value)
         timePattern = re.compile(
-            r"\b(\d{1,2})(?:[:.\s](\d{2}))?\s*([AP])\.?\s*M\.?\b", re.IGNORECASE
+            r"\b(\d{1,2})(?:[:.\s](\d{2}))\s*([AP])\.?\s*M\.?(?=$|[^A-Za-z0-9])",
+            re.IGNORECASE,
         )
 
         matchedTime = False
@@ -1323,7 +1324,7 @@ class VideoMixin:
     def _sanitiseTvEpisodeTitlePart(self, value: str) -> str:
         """Return a filesystem-safe TV episode title fragment."""
         timedTitle = self._normaliseTimedTvEpisodeTitle(value)
-        if timedTitle != value:
+        if timedTitle and re.search(r"\b\d{1,2}(?:\.\d{2})?[ap]m\b", timedTitle):
             safeTitle = timedTitle.replace("'", "")
             safeTitle = re.sub(r"[^\w.\s]+", " ", safeTitle, flags=re.UNICODE)
             safeTitle = safeTitle.replace("_", " ")
@@ -1344,7 +1345,9 @@ class VideoMixin:
             return sourceFile.name
 
         showPart = self._sanitiseFilenamePart(showName)
-        titlePart = self._sanitiseTvEpisodeTitlePart(episodeTitle) if episodeTitle else ""
+        titlePart = (
+            self._sanitiseTvEpisodeTitlePart(episodeTitle) if episodeTitle else ""
+        )
         if not showPart:
             return sourceFile.name
 
@@ -2109,7 +2112,9 @@ class VideoMixin:
             return "skipped"
         parsedEpisodeTitle = parsedTvInfo.get("episodeTitle")
         timedTitle = self._normaliseTimedTvEpisodeTitle(parsedEpisodeTitle)
-        needsCanonicalLookup = self._tvEpisodeTitleNeedsCanonicalLookup(parsedEpisodeTitle)
+        needsCanonicalLookup = self._tvEpisodeTitleNeedsCanonicalLookup(
+            parsedEpisodeTitle
+        )
         needsTimedTitleNormalisation = timedTitle not in (None, parsedEpisodeTitle)
         if not needsCanonicalLookup and not needsTimedTitleNormalisation:
             return "skipped"
@@ -2140,7 +2145,9 @@ class VideoMixin:
             )
 
             if needsCanonicalLookup:
-                resolvedTvInfo = self._enrichTvMetadata(resolvedTvInfo) or resolvedTvInfo
+                resolvedTvInfo = (
+                    self._enrichTvMetadata(resolvedTvInfo) or resolvedTvInfo
+                )
 
         destinationName = self._buildTvDestinationFilename(videoFile, resolvedTvInfo)
         if destinationName == videoFile.name:
