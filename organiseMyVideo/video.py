@@ -142,16 +142,26 @@ class VideoMixin:
     def _logResetDuplicateTvShowFolders(self, tvDir: Path) -> None:
         """Warn when multiple stored TV show folders share the same series ID."""
         showDirsBySeriesId = {}
-        showDirsByCanonicalName = {}
+        canonicalNameGroups = []
         for showDir in self._iterResetTvShowDirs(tvDir):
             seriesId = self._readResetTvShowSeriesId(showDir)
-            if not seriesId:
-                canonicalName = self._buildTvShowFolderName(showDir.name)
-                showDirsByCanonicalName.setdefault(canonicalName, []).append(showDir.name)
+            if seriesId:
+                showDirsBySeriesId.setdefault(seriesId, []).append(showDir.name)
+            canonicalName = self._stripResetTvShowDuplicateSuffixes(showDir.name)
+            duplicateKey = self._buildResetTvShowDuplicateKey(showDir.name)
+            group = self._findResetDuplicateCanonicalNameGroup(
+                duplicateKey, canonicalNameGroups
+            )
+            if group is None:
+                canonicalNameGroups.append(
+                    {
+                        "key": duplicateKey,
+                        "canonicalName": canonicalName,
+                        "showNames": [showDir.name],
+                    }
+                )
                 continue
-            showDirsBySeriesId.setdefault(seriesId, []).append(showDir.name)
-            canonicalName = self._buildTvShowFolderName(showDir.name)
-            showDirsByCanonicalName.setdefault(canonicalName, []).append(showDir.name)
+            group["showNames"].append(showDir.name)
 
         for seriesId, showNames in sorted(showDirsBySeriesId.items()):
             uniqueShowNames = sorted(set(showNames), key=str.casefold)
@@ -163,13 +173,13 @@ class VideoMixin:
                 ", ".join(uniqueShowNames),
             )
 
-        for canonicalName, showNames in sorted(showDirsByCanonicalName.items()):
-            uniqueShowNames = sorted(set(showNames), key=str.casefold)
+        for group in sorted(canonicalNameGroups, key=lambda item: item["canonicalName"].casefold()):
+            uniqueShowNames = sorted(set(group["showNames"]), key=str.casefold)
             if len(uniqueShowNames) < 2:
                 continue
             logger.warning(
                 "rescan found possible duplicate TV show folders for canonical name %s: %s",
-                canonicalName,
+                group["canonicalName"],
                 ", ".join(uniqueShowNames),
             )
 
@@ -450,6 +460,45 @@ class VideoMixin:
             return normalised
         remainder = match.group(1).strip()
         return f"{remainder}, The" if remainder else normalised
+
+    def _stripResetTvShowDuplicateSuffixes(self, showName: str) -> str:
+        """Return a show name with common duplicate-only suffixes removed."""
+        normalised = unicodedata.normalize("NFKC", self._buildTvShowFolderName(showName))
+        normalised = re.sub(r"\s+", " ", normalised).strip()
+        suffixPatterns = (
+            r"\s*\[\d+\]\s*$",
+            r"\s*\((?:19|20)\d{2}\)\s*$",
+            r"\s+(?:19|20)\d{2}\s*$",
+            r"\s+the\s+series\s*$",
+        )
+        changed = True
+        while changed and normalised:
+            changed = False
+            for pattern in suffixPatterns:
+                updated = re.sub(pattern, "", normalised, flags=re.IGNORECASE).strip()
+                if updated != normalised:
+                    normalised = updated
+                    changed = True
+        return normalised or self._buildTvShowFolderName(showName)
+
+    def _buildResetTvShowDuplicateKey(self, showName: str) -> str:
+        """Return a loose duplicate-detection key for TV show folder names."""
+        return "".join(
+            ch.lower() for ch in self._stripResetTvShowDuplicateSuffixes(showName) if ch.isalnum()
+        )
+
+    def _findResetDuplicateCanonicalNameGroup(
+        self, duplicateKey: str, groups: list[dict]
+    ) -> Optional[dict]:
+        """Return an existing duplicate-name group close enough to *duplicateKey*."""
+        bestGroup = None
+        bestRatio = 0.0
+        for group in groups:
+            ratio = difflib.SequenceMatcher(None, duplicateKey, group["key"]).ratio()
+            if ratio > bestRatio:
+                bestGroup = group
+                bestRatio = ratio
+        return bestGroup if bestRatio >= 0.9 else None
 
     def _makePromptCacheKey(self, defaultName: str, fileType: str) -> tuple[str, str]:
         """

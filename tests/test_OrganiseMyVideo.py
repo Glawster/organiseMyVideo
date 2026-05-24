@@ -5172,6 +5172,58 @@ def testResetTvEpisodeTitlesWarnsWhenTrailingTheFoldersDuplicate(
     assert caplog.text.count("scanning: Crown, The") == 2
 
 
+def testResetTvEpisodeTitlesWarnsWhenNormalizedNamesDuplicate(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+
+    for showName, filename in (
+        ("Grimm", "Grimm.S01E01.Pilot.mkv"),
+        ("Grimm (2011)", "Grimm.S01E02.Bears.Will.Be.Bears.mkv"),
+        ("Hijack [419254]", "Hijack.S01E01.Final.Call.mkv"),
+        ("Hijack 2023", "Hijack.S01E02.3.Joules.mkv"),
+        ("Hijak", "Hijack.S01E03.Draw.a.Blank.mkv"),
+        ("Homestead", "Homestead.S01E01.Homecoming.mkv"),
+        ("Homestead The Series", "Homestead.S01E02.Threshold.mkv"),
+    ):
+        seasonDir = tvStorage / showName / "Season 01"
+        seasonDir.mkdir(parents=True)
+        (seasonDir / filename).write_bytes(b"x" * 20)
+
+    (tvStorage / "Hijack [419254]" / "series.xml").write_text(
+        "<Series><SeriesID>419254</SeriesID></Series>", encoding="utf-8"
+    )
+
+    with patch.object(
+        confirmedOrganizer,
+        "_fetchTvMetadataFromScraper",
+        side_effect=AssertionError("scraper lookup should not run"),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ):
+            with caplog.at_level("INFO"):
+                stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 7, "errors": 0}
+    assert (
+        "rescan found possible duplicate TV show folders for canonical name "
+        "Grimm: Grimm, Grimm (2011)"
+    ) in caplog.text
+    assert (
+        "rescan found possible duplicate TV show folders for canonical name "
+        "Hijack: Hijack 2023, Hijack [419254], Hijak"
+    ) in caplog.text
+    assert (
+        "rescan found possible duplicate TV show folders for canonical name "
+        "Homestead: Homestead, Homestead The Series"
+    ) in caplog.text
+
+
 def testResetTvEpisodeTitlesRepairsIncompleteShowMetadata(
     tmp_path: Path,
     confirmedOrganizer: VideoOrganizer,
