@@ -4685,10 +4685,15 @@ def testResetTvEpisodeTitlesRenamesNoisyStoredEpisodes(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer
 ):
     tvStorage = tmp_path / "video1" / "TV"
-    metadataDir = tvStorage / "After Life" / "Season 01" / "metadata"
+    seasonDir = tvStorage / "After Life" / "Season 01"
+    metadataDir = seasonDir / "metadata"
     metadataDir.mkdir(parents=True)
-    episodeFile = metadataDir.parent / "After.Life.S01E04.1080p.WEB.h264.mkv"
+    episodeFile = seasonDir / "After.Life.S01E04.1080p.WEB.h264.mkv"
     episodeFile.write_bytes(b"x" * 20)
+    episodeSidecarXml = seasonDir / "After.Life.S01E04.1080p.WEB.h264.xml"
+    episodeSidecarXml.write_text("<Item />", encoding="utf-8")
+    episodeSidecarJpg = seasonDir / "After.Life.S01E04.1080p.WEB.h264.jpg"
+    episodeSidecarJpg.write_bytes(b"cover")
     episodeMetadataFile = metadataDir / "After.Life.S01E04.1080p.WEB.h264.xml"
     episodeMetadataFile.write_text(
         """<?xml version="1.0" encoding="utf-8"?>
@@ -4700,6 +4705,8 @@ def testResetTvEpisodeTitlesRenamesNoisyStoredEpisodes(
 """,
         encoding="utf-8",
     )
+    episodeMetadataJpg = metadataDir / "After.Life.S01E04.1080p.WEB.h264.jpg"
+    episodeMetadataJpg.write_bytes(b"thumb")
 
     libraryPath = tmp_path / "metadataLibrary.json"
     libraryPath.write_text(
@@ -4719,12 +4726,21 @@ def testResetTvEpisodeTitlesRenamesNoisyStoredEpisodes(
             stats = confirmedOrganizer.resetTvEpisodeTitles()
 
     renamedEpisode = metadataDir.parent / "After.Life.S01E04.Sic.Semper.Systema.mkv"
+    renamedEpisodeSidecarXml = seasonDir / "After.Life.S01E04.Sic.Semper.Systema.xml"
+    renamedEpisodeSidecarJpg = seasonDir / "After.Life.S01E04.Sic.Semper.Systema.jpg"
     renamedMetadata = metadataDir / "After.Life.S01E04.Sic.Semper.Systema.xml"
+    renamedMetadataJpg = metadataDir / "After.Life.S01E04.Sic.Semper.Systema.jpg"
     assert stats == {"renamed": 1, "skipped": 0, "errors": 0}
     assert renamedEpisode.exists()
     assert not episodeFile.exists()
+    assert renamedEpisodeSidecarXml.exists()
+    assert not episodeSidecarXml.exists()
+    assert renamedEpisodeSidecarJpg.exists()
+    assert not episodeSidecarJpg.exists()
     assert renamedMetadata.exists()
     assert not episodeMetadataFile.exists()
+    assert renamedMetadataJpg.exists()
+    assert not episodeMetadataJpg.exists()
     assert "<EpisodeName>Sic Semper Systema</EpisodeName>" in renamedMetadata.read_text(
         encoding="utf-8"
     )
@@ -4880,6 +4896,47 @@ def testResetTvEpisodeTitlesLogsShowNamesAndOnlyRenameChanges(
     assert "using saved metadata library" not in caplog.text
     assert "fetch TV metadata" not in caplog.text
     assert "TV episode title reset complete" not in caplog.text
+
+
+def testResetTvEpisodeTitlesWarnsWhenSeriesIdMatchesAcrossShowFolders(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+
+    grimmDir = tvStorage / "Grimm" / "Season 01"
+    grimmDir.mkdir(parents=True)
+    (grimmDir.parent / "series.xml").write_text(
+        "<Series><SeriesID>777</SeriesID></Series>", encoding="utf-8"
+    )
+    (grimmDir / "Grimm.S01E01.Pilot.mkv").write_bytes(b"x" * 20)
+
+    grimmYearDir = tvStorage / "Grimm (2011)" / "Season 01"
+    grimmYearDir.mkdir(parents=True)
+    (grimmYearDir.parent / "series.xml").write_text(
+        "<Series><SeriesID>777</SeriesID></Series>", encoding="utf-8"
+    )
+    (grimmYearDir / "Grimm.S01E02.Bears.Will.Be.Bears.mkv").write_bytes(b"x" * 20)
+
+    with patch.object(
+        confirmedOrganizer,
+        "_fetchTvMetadataFromScraper",
+        side_effect=AssertionError("scraper lookup should not run"),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ):
+            with caplog.at_level("INFO"):
+                stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
+    assert (
+        "reset found possible duplicate TV show folders for SeriesID 777: "
+        "Grimm, Grimm (2011)"
+    ) in caplog.text
 
 
 def testVideoOrganizerDoesNotExposeGrokMethods(organizer: VideoOrganizer):

@@ -92,6 +92,85 @@ class VideoMixin:
 
         yield from showFiles.items()
 
+    def _iterResetTvShowDirs(self, tvDir: Path) -> Iterable[Path]:
+        """Yield top-level TV show directories for reset scans."""
+        try:
+            showDirs = sorted(
+                showDir for showDir in tvDir.iterdir() if showDir.is_dir()
+            )
+        except OSError as error:
+            logger.warning("could not inspect TV storage %s: %s", tvDir, error)
+            return
+        yield from showDirs
+
+    def _readResetTvShowSeriesId(self, showDir: Path) -> Optional[str]:
+        """Return the best available series ID for a stored TV show folder."""
+        seriesRoot = self._readXmlRoot(showDir / "series.xml")
+        seriesId = self._readFirstXmlText(seriesRoot, ("SeriesID", "seriesid", "id"))
+        if seriesId:
+            return seriesId
+
+        for dvdIdFile in sorted(showDir.glob("mcm_id__*.dvdid.xml")):
+            dvdIdRoot = self._readXmlRoot(dvdIdFile)
+            seriesId = self._readFirstXmlText(dvdIdRoot, ("SeriesID", "seriesid", "id"))
+            if seriesId:
+                return seriesId
+
+        for episodeXml in sorted(showDir.rglob("metadata/*.xml")):
+            episodeRoot = self._readXmlRoot(episodeXml)
+            seriesId = self._readFirstXmlText(
+                episodeRoot, ("SeriesID", "seriesid", "id")
+            )
+            if seriesId:
+                return seriesId
+
+        return None
+
+    def _logResetDuplicateTvShowFolders(self, tvDir: Path) -> None:
+        """Warn when multiple stored TV show folders share the same series ID."""
+        showDirsBySeriesId = {}
+        for showDir in self._iterResetTvShowDirs(tvDir):
+            seriesId = self._readResetTvShowSeriesId(showDir)
+            if not seriesId:
+                continue
+            showDirsBySeriesId.setdefault(seriesId, []).append(showDir.name)
+
+        for seriesId, showNames in sorted(showDirsBySeriesId.items()):
+            uniqueShowNames = sorted(set(showNames), key=str.casefold)
+            if len(uniqueShowNames) < 2:
+                continue
+            logger.warning(
+                "reset found possible duplicate TV show folders for SeriesID %s: %s",
+                seriesId,
+                ", ".join(uniqueShowNames),
+            )
+
+    def _iterResetEpisodeCompanionRenames(
+        self, videoFile: Path, destinationPath: Path
+    ) -> list[tuple[Path, Path]]:
+        """Return existing same-stem XML/JPG companion files that should be renamed."""
+        candidates = []
+        sameDir = videoFile.parent
+        metadataDir = sameDir / "metadata"
+        for baseDir in (sameDir, metadataDir):
+            for suffix in (".xml", ".jpg"):
+                candidates.append(
+                    (
+                        baseDir / f"{videoFile.stem}{suffix}",
+                        baseDir / f"{destinationPath.stem}{suffix}",
+                    )
+                )
+
+        renames = []
+        seen = set()
+        for sourcePath, destPath in candidates:
+            if sourcePath in seen:
+                continue
+            seen.add(sourcePath)
+            if sourcePath.exists() and sourcePath != destPath:
+                renames.append((sourcePath, destPath))
+        return renames
+
     def scanStorageLocations(self) -> Tuple[List[Path], List[Path]]:
         """
         Scan system for movie and video storage locations.
@@ -2202,23 +2281,32 @@ class VideoMixin:
             logger.error("reset target already exists: %s", destinationPath)
             return "errors"
 
-        metadataFile = videoFile.parent / "metadata" / f"{videoFile.stem}.xml"
-        destinationMetadataFile = metadataFile.with_name(f"{destinationPath.stem}.xml")
+        companionRenames = self._iterResetEpisodeCompanionRenames(
+            videoFile, destinationPath
+        )
+        for sourcePath, companionDestination in companionRenames:
+            if companionDestination.exists():
+                logger.error("reset target already exists: %s", companionDestination)
+                return "errors"
+
+        destinationMetadataFile = (
+            videoFile.parent / "metadata" / f"{destinationPath.stem}.xml"
+        )
 
         logger.action("reset TV title: %s -> %s", videoFile.name, destinationPath.name)
         if self.dryRun:
             self._recordSummaryRename(videoFile, destinationPath)
-            if metadataFile.exists() and destinationMetadataFile != metadataFile:
-                self._recordSummaryRename(metadataFile, destinationMetadataFile)
+            for sourcePath, companionDestination in companionRenames:
+                self._recordSummaryRename(sourcePath, companionDestination)
             return "renamed"
 
         videoFile.rename(destinationPath)
         self._recordSummaryRename(videoFile, destinationPath)
-        if metadataFile.exists():
-            if destinationMetadataFile != metadataFile:
-                destinationMetadataFile.parent.mkdir(parents=True, exist_ok=True)
-                metadataFile.rename(destinationMetadataFile)
-                self._recordSummaryRename(metadataFile, destinationMetadataFile)
+        for sourcePath, companionDestination in companionRenames:
+            companionDestination.parent.mkdir(parents=True, exist_ok=True)
+            sourcePath.rename(companionDestination)
+            self._recordSummaryRename(sourcePath, companionDestination)
+        if destinationMetadataFile.exists():
             self._updateEpisodeMetadataFile(
                 destinationMetadataFile,
                 episodeTitle=resolvedTvInfo.get("episodeTitle"),
@@ -2238,6 +2326,7 @@ class VideoMixin:
             return stats
 
         for tvDir in videoDirs:
+            self._logResetDuplicateTvShowFolders(tvDir)
             for showName, videoFiles in self._iterResetTvShowFiles(tvDir):
                 logger.info(f"reset scanning TV show: {showName}")
                 for videoFile in videoFiles:
