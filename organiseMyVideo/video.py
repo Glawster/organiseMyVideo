@@ -290,7 +290,8 @@ class VideoMixin:
         if not value:
             return None
 
-        cleaned = value.strip()
+        original = value.strip()
+        cleaned = original
         noisyBracketPattern = (
             r"[\[\(][^\]\)]*"
             r"(?:720p|1080p|2160p|web(?:-dl|rip)?|hdtv|bluray|brrip|x264|x265|"
@@ -314,6 +315,8 @@ class VideoMixin:
             cleaned = cleaned[: noiseStart.start()].strip(" -._")
 
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        if cleaned and cleaned != original:
+            cleaned = self._normaliseTimedTvEpisodeTitle(cleaned)
         return cleaned or None
 
     def parseMovieFilename(self, filename: str) -> Optional[dict]:
