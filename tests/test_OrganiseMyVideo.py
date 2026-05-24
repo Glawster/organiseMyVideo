@@ -4913,8 +4913,8 @@ def testResetTvEpisodeTitlesLogsShowNamesAndOnlyRenameChanges(
                 stats = confirmedOrganizer.resetTvEpisodeTitles()
 
     assert stats == {"renamed": 1, "skipped": 1, "errors": 0}
-    assert "rescanning: After Life [361563]" in caplog.text
-    assert "rescanning: Another Show [999999]" in caplog.text
+    assert "scanning: After Life [361563]" in caplog.text
+    assert "scanning: Another Show [999999]" in caplog.text
     assert (
         "rescan TV title: After.Life.S01E04.1080p.WEB.h264.mkv"
         " -> After.Life.S01E04.Sic.Semper.Systema.mkv"
