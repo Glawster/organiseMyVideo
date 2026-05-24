@@ -5029,6 +5029,52 @@ def testResetTvEpisodeTitlesNormalisesTimedEpisodeTitles(
     assert not episodeFile.exists()
 
 
+def testResetTvEpisodeTitlesPreservesSpacesWhenRetitlingSpacedEpisodeNames(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    seasonDir = tvStorage / "Percy Jackson and the Olympians" / "Season 01"
+    seasonDir.mkdir(parents=True)
+    episodeFile = (
+        seasonDir
+        / "Percy Jackson and the Olympians.S01E01.I Accidentally Vaporize My Teacher.mkv"
+    )
+    episodeFile.write_bytes(b"x" * 20)
+
+    with patch.object(
+        confirmedOrganizer,
+        "_tvEpisodeTitleNeedsCanonicalLookup",
+        return_value=True,
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "_enrichTvMetadata",
+            return_value={
+                "showName": "Percy Jackson and the Olympians",
+                "season": 1,
+                "episode": 1,
+                "episodeTitle": "I Accidentally Vaporize My Pre-Algebra Teacher",
+                "seriesId": "415151",
+                "extension": "mkv",
+                "type": "tv",
+            },
+        ):
+            with patch.object(
+                confirmedOrganizer,
+                "scanStorageLocations",
+                return_value=([], [tvStorage]),
+            ):
+                stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    renamedEpisode = (
+        seasonDir
+        / "Percy Jackson and the Olympians.S01E01.I Accidentally Vaporize My Pre-Algebra Teacher.mkv"
+    )
+    assert stats == {"renamed": 1, "skipped": 0, "errors": 0}
+    assert renamedEpisode.exists()
+    assert not episodeFile.exists()
+
+
 def testResetTvEpisodeTitlesLogsShowNamesAndOnlyRenameChanges(
     tmp_path: Path,
     confirmedOrganizer: VideoOrganizer,

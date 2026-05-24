@@ -1562,6 +1562,14 @@ class VideoMixin:
         tokens = normalised.split()
         return ".".join(tokens)
 
+    def _sanitiseTvFilenamePart(self, value: str) -> str:
+        """Return a spacing-preserving, filesystem-safe TV filename fragment."""
+        normalised = unicodedata.normalize("NFKC", value).replace("'", "")
+        normalised = re.sub(r"[^\w.\s-]+", " ", normalised, flags=re.UNICODE)
+        normalised = normalised.replace("_", " ")
+        normalised = re.sub(r"\s+", " ", normalised).strip()
+        return re.sub(r"\s*-\s*", "-", normalised)
+
     def _normaliseTimedTvEpisodeTitle(self, value: Optional[str]) -> Optional[str]:
         """Return a spacing-preserving title when the episode name contains times."""
         if not value:
@@ -1600,15 +1608,15 @@ class VideoMixin:
         normalised = re.sub(r"\s*-\s*", "-", normalised)
         return normalised or value
 
-    def _sanitiseTvEpisodeTitlePart(self, value: str) -> str:
+    def _sanitiseTvEpisodeTitlePart(
+        self, value: str, *, preserveInternalSpaces: bool = False
+    ) -> str:
         """Return a filesystem-safe TV episode title fragment."""
         timedTitle = self._normaliseTimedTvEpisodeTitle(value)
         if timedTitle and re.search(r"\b\d{1,2}(?:\.\d{2})?[ap]m\b", timedTitle):
-            safeTitle = timedTitle.replace("'", "")
-            safeTitle = re.sub(r"[^\w.\s-]+", " ", safeTitle, flags=re.UNICODE)
-            safeTitle = safeTitle.replace("_", " ")
-            safeTitle = re.sub(r"\s+", " ", safeTitle).strip()
-            return re.sub(r"\s*-\s*", "-", safeTitle)
+            return self._sanitiseTvFilenamePart(timedTitle)
+        if preserveInternalSpaces:
+            return self._sanitiseTvFilenamePart(value)
         return self._sanitiseFilenamePart(value)
 
     def _capitaliseLowercaseTvShowTitle(self, showName: Optional[str]) -> Optional[str]:
@@ -1625,7 +1633,9 @@ class VideoMixin:
             normalised,
         )
 
-    def _buildTvDestinationFilename(self, sourceFile: Path, tvInfo: dict) -> str:
+    def _buildTvDestinationFilename(
+        self, sourceFile: Path, tvInfo: dict, *, preserveSourceSpacing: bool = False
+    ) -> str:
         """Return the destination TV filename, preferring canonical enriched names."""
         showName = tvInfo.get("showName")
         season = tvInfo.get("season")
@@ -1638,9 +1648,33 @@ class VideoMixin:
         if not showName or season is None or episode is None:
             return sourceFile.name
 
-        showPart = self._sanitiseFilenamePart(showName)
+        sourceStem = sourceFile.stem
+        sourceMatch = re.match(
+            r"^(.+?)[\.\s_]+S(\d+)E(\d+)(?:[\.\s_]+(.+?))?$", sourceStem, re.IGNORECASE
+        )
+        preserveShowSpaces = False
+        preserveTitleSpaces = False
+        if preserveSourceSpacing and sourceMatch:
+            rawShow = sourceMatch.group(1) or ""
+            rawTitle = sourceMatch.group(4) or ""
+            preserveShowSpaces = bool(re.search(r"\s", rawShow)) and not re.search(
+                r"[._]", rawShow
+            )
+            preserveTitleSpaces = bool(re.search(r"\s", rawTitle)) and not re.search(
+                r"[._]", rawTitle
+            )
+
+        showPart = (
+            self._sanitiseTvFilenamePart(showName)
+            if preserveShowSpaces
+            else self._sanitiseFilenamePart(showName)
+        )
         titlePart = (
-            self._sanitiseTvEpisodeTitlePart(episodeTitle) if episodeTitle else ""
+            self._sanitiseTvEpisodeTitlePart(
+                episodeTitle, preserveInternalSpaces=preserveTitleSpaces
+            )
+            if episodeTitle
+            else ""
         )
         if not showPart:
             return sourceFile.name
@@ -2601,7 +2635,9 @@ class VideoMixin:
                 self._ensureTvDvdIdMetadata(videoFile, showDir, resolvedTvInfo)
 
         sourceMetadataFile = videoFile.parent / "metadata" / f"{videoFile.stem}.xml"
-        destinationName = self._buildTvDestinationFilename(videoFile, resolvedTvInfo)
+        destinationName = self._buildTvDestinationFilename(
+            videoFile, resolvedTvInfo, preserveSourceSpacing=True
+        )
         if (
             not needsCanonicalLookup
             and not needsTimedTitleNormalisation
