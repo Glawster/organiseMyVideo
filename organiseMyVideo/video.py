@@ -285,6 +285,22 @@ class VideoMixin:
 
         return None
 
+    def _parsedTvEpisodeTitleNeedsCleanup(self, filename: str) -> bool:
+        """Return True when a parsed TV episode title differs from the source filename."""
+        stem, extension = os.path.splitext(filename)
+        if not extension:
+            return False
+
+        pattern = r"^(.+?)[\.\s_]+S(\d+)E(\d+)(?:[\.\s_]+(.+?))?$"
+        match = re.match(pattern, stem, re.IGNORECASE)
+        if not match or not match.group(4):
+            return False
+
+        rawTitle = match.group(4).strip()
+        separatorNormalised = re.sub(r"[._]+", " ", rawTitle)
+        separatorNormalised = re.sub(r"\s+", " ", separatorNormalised).strip()
+        return self._cleanParsedTvEpisodeTitle(rawTitle) != separatorNormalised
+
     def _cleanParsedTvEpisodeTitle(self, value: Optional[str]) -> Optional[str]:
         """Return a cleaned filename-derived episode title, dropping release noise."""
         if not value:
@@ -2500,6 +2516,9 @@ class VideoMixin:
         if not parsedTvInfo:
             return "skipped"
         parsedEpisodeTitle = parsedTvInfo.get("episodeTitle")
+        parsedEpisodeTitleNeedsCleanup = self._parsedTvEpisodeTitleNeedsCleanup(
+            videoFile.name
+        )
         timedTitle = self._normaliseTimedTvEpisodeTitle(parsedEpisodeTitle)
         needsCanonicalLookup = self._tvEpisodeTitleNeedsCanonicalLookup(
             parsedEpisodeTitle
@@ -2587,7 +2606,7 @@ class VideoMixin:
             not needsCanonicalLookup
             and not needsTimedTitleNormalisation
             and not needsShowTitleNormalisation
-            and destinationName == videoFile.name
+            and not parsedEpisodeTitleNeedsCleanup
         ):
             if sourceMetadataFile.exists():
                 self._updateEpisodeMetadataFile(sourceMetadataFile, resolvedTvInfo)
