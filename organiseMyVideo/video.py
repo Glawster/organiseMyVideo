@@ -1297,9 +1297,10 @@ class VideoMixin:
 
         normalised = unicodedata.normalize("NFKC", value)
         timePattern = re.compile(
-            r"\b(\d{1,2})(?:[:.\s](\d{2}))\s*([AP])\.?\s*M\.?(?=$|[^A-Za-z0-9])",
+            r"\b(\d{1,2})(?:[:.\s](\d{2}))?\s*([AP])\.?\s*M\.?(?=$|[^A-Za-z0-9])",
             re.IGNORECASE,
         )
+        timeRangeToken = "organisemyvideotimerange"
 
         matchedTime = False
 
@@ -1307,18 +1308,24 @@ class VideoMixin:
             nonlocal matchedTime
             matchedTime = True
             hour = match.group(1)
-            minute = match.group(2)
+            minute = match.group(2) or "00"
             meridiem = match.group(3).lower()
-            minutePart = f".{minute}" if minute else ""
-            return f"{hour}{minutePart}{meridiem}m"
+            return f"{hour}.{minute}{meridiem}m"
 
         normalised = timePattern.sub(_replaceTime, normalised)
         if not matchedTime:
             return value
 
+        normalised = re.sub(
+            r"(?<=\b\d{1,2}\.\d{2}[ap]m)\s*-\s*(?=\d{1,2}\.\d{2}[ap]m\b)",
+            f" {timeRangeToken} ",
+            normalised,
+        )
         normalised = re.sub(r"[^\w.\s]+", " ", normalised, flags=re.UNICODE)
         normalised = normalised.replace("_", " ")
         normalised = re.sub(r"\s+", " ", normalised).strip()
+        normalised = re.sub(rf"\b{timeRangeToken}\b", "-", normalised)
+        normalised = re.sub(r"\s*-\s*", "-", normalised)
         return normalised or value
 
     def _sanitiseTvEpisodeTitlePart(self, value: str) -> str:
@@ -1326,9 +1333,10 @@ class VideoMixin:
         timedTitle = self._normaliseTimedTvEpisodeTitle(value)
         if timedTitle and re.search(r"\b\d{1,2}(?:\.\d{2})?[ap]m\b", timedTitle):
             safeTitle = timedTitle.replace("'", "")
-            safeTitle = re.sub(r"[^\w.\s]+", " ", safeTitle, flags=re.UNICODE)
+            safeTitle = re.sub(r"[^\w.\s-]+", " ", safeTitle, flags=re.UNICODE)
             safeTitle = safeTitle.replace("_", " ")
-            return re.sub(r"\s+", " ", safeTitle).strip()
+            safeTitle = re.sub(r"\s+", " ", safeTitle).strip()
+            return re.sub(r"\s*-\s*", "-", safeTitle)
         return self._sanitiseFilenamePart(value)
 
     def _buildTvDestinationFilename(self, sourceFile: Path, tvInfo: dict) -> str:

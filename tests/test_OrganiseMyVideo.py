@@ -3588,7 +3588,7 @@ def testMoveTvShowUsesCanonicalEpisodeTitleFilename(
     assert not srcFile.exists()
 
 
-def testMoveTvShowUsesSpacedTimeEpisodeTitleFilename(
+def testMoveTvShowUsesNormalisedTimeRangeEpisodeTitleFilename(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer
 ):
     srcFile = confirmedOrganizer.sourceDir / "episode.avi"
@@ -3610,7 +3610,50 @@ def testMoveTvShowUsesSpacedTimeEpisodeTitleFilename(
     )
 
     assert result is True
-    destFile = tvStorage / "24" / "Season 08" / "24.S08E13.Day 8 4.00am 5.00am.avi"
+    destFile = (
+        tvStorage / "24" / "Season 08" / "24.S08E13.Day 8 4.00am-5.00am.avi"
+    )
+    assert destFile.exists()
+    assert not srcFile.exists()
+
+
+def testMoveTvShowUsesNormalisedScrapedTimeRangeEpisodeTitleFilename(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "episode.mkv"
+    srcFile.write_bytes(b"x" * 100)
+
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    scraped = {
+        "showName": "24",
+        "season": 8,
+        "episode": 13,
+        "episodeTitle": "Day 8 4AM-5AM",
+        "seriesId": "12345",
+        "episodeId": "67890",
+        "extension": ".mkv",
+        "type": "tv",
+        "metadataSource": "tvdb",
+    }
+    emptyLibrary = confirmedOrganizer._newMetadataLibrary()
+    with patch.object(
+        confirmedOrganizer, "_loadMetadataLibrary", return_value=emptyLibrary
+    ):
+        with patch.object(confirmedOrganizer, "_saveMetadataLibrary"):
+            with patch.object(
+                confirmedOrganizer, "_fetchTvMetadataFromScraper", return_value=scraped
+            ):
+                result = confirmedOrganizer.moveTvShow(
+                    srcFile,
+                    {"showName": "24", "season": 8, "episode": 13, "type": "tv"},
+                    [tvStorage],
+                    interactive=False,
+                )
+
+    assert result is True
+    destFile = tvStorage / "24" / "Season 08" / "24.S08E13.Day 8 4.00am-5.00am.mkv"
     assert destFile.exists()
     assert not srcFile.exists()
 
@@ -4667,7 +4710,7 @@ def testResetTvEpisodeTitlesSkipsCleanStoredEpisodesWithSpacesAndApostrophes(
     assert episodeFile.exists()
 
 
-def testResetTvEpisodeTitlesSkipsCleanStoredEpisodesWithBracketMetadataSuffixes(
+def testResetTvEpisodeTitlesNormalisesHourOnlyTimedEpisodeTitles(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer
 ):
     tvStorage = tmp_path / "video1" / "TV"
@@ -4688,8 +4731,10 @@ def testResetTvEpisodeTitlesSkipsCleanStoredEpisodesWithBracketMetadataSuffixes(
         ):
             stats = confirmedOrganizer.resetTvEpisodeTitles()
 
-    assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
-    assert episodeFile.exists()
+    renamedEpisode = seasonDir / "24.S08E13.Day 8 4.00am-5.00am.avi"
+    assert stats == {"renamed": 1, "skipped": 0, "errors": 0}
+    assert renamedEpisode.exists()
+    assert not episodeFile.exists()
 
 
 def testResetTvEpisodeTitlesNormalisesTimedEpisodeTitles(
