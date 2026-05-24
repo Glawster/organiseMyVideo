@@ -4967,6 +4967,9 @@ def testResetTvEpisodeTitlesLogsShowNamesAndOnlyRenameChanges(
     (afterLifeSeasonDir.parent / "series.xml").write_text(
         "<Series><SeriesID>361563</SeriesID></Series>", encoding="utf-8"
     )
+    (afterLifeSeasonDir.parent / "mcm_id__361563.dvdid.xml").write_text(
+        "<Item><SeriesID>361563</SeriesID></Item>", encoding="utf-8"
+    )
     noisyEpisode = afterLifeSeasonDir / "After.Life.S01E04.1080p.WEB.h264.mkv"
     noisyEpisode.write_bytes(b"x" * 20)
 
@@ -4974,6 +4977,9 @@ def testResetTvEpisodeTitlesLogsShowNamesAndOnlyRenameChanges(
     anotherShowSeasonDir.mkdir(parents=True)
     (anotherShowSeasonDir.parent / "series.xml").write_text(
         "<Series><SeriesID>999999</SeriesID></Series>", encoding="utf-8"
+    )
+    (anotherShowSeasonDir.parent / "mcm_id__999999.dvdid.xml").write_text(
+        "<Item><SeriesID>999999</SeriesID></Item>", encoding="utf-8"
     )
     cleanEpisode = anotherShowSeasonDir / "Another.Show.S01E01.Pilot.mkv"
     cleanEpisode.write_bytes(b"x" * 20)
@@ -5008,6 +5014,8 @@ def testResetTvEpisodeTitlesLogsShowNamesAndOnlyRenameChanges(
     assert "using saved metadata library" not in caplog.text
     assert "fetch TV metadata" not in caplog.text
     assert "TV episode title reset complete" not in caplog.text
+    assert "preserving existing metadata files" not in caplog.text
+    assert "preserving existing metadata" not in caplog.text
 
 
 def testResetTvEpisodeTitlesWarnsWhenSeriesIdMatchesAcrossShowFolders(

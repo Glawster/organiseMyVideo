@@ -2411,8 +2411,9 @@ class VideoMixin:
                 )
 
         if showDir is not None:
-            self._ensureSeriesMetadata(showDir, resolvedTvInfo)
-            self._ensureTvDvdIdMetadata(videoFile, showDir, resolvedTvInfo)
+            with self._suppressResetNoiseLogs():
+                self._ensureSeriesMetadata(showDir, resolvedTvInfo)
+                self._ensureTvDvdIdMetadata(videoFile, showDir, resolvedTvInfo)
 
         if not needsCanonicalLookup and not needsTimedTitleNormalisation:
             return "skipped"
