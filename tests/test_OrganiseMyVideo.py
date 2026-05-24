@@ -565,6 +565,16 @@ def testFindExistingTvShowDirCaseInsensitive(tmp_path: Path, organizer: VideoOrg
     assert result is not None
 
 
+def testFindExistingTvShowDirMatchesTrailingTheFolderName(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    tvRoot = tmp_path / "TV"
+    (tvRoot / "Office, The").mkdir(parents=True)
+    result = organizer.findExistingTvShowDir("The Office", [tvRoot])
+    assert result is not None
+    assert result.name == "Office, The"
+
+
 def testFindExistingTvShowDirNotFound(tmp_path: Path, organizer: VideoOrganizer):
     tvRoot = tmp_path / "TV"
     tvRoot.mkdir()
@@ -583,6 +593,16 @@ def testFindBestMatchingTvShowExactMatch(tmp_path: Path, organizer: VideoOrganiz
     (tvRoot / "Breaking Bad").mkdir()
     result = organizer.findBestMatchingTvShow("Breaking Bad", [tvRoot])
     assert result == "Breaking Bad"
+
+
+def testFindBestMatchingTvShowMatchesTrailingTheFolderName(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    tvRoot = tmp_path / "TV"
+    tvRoot.mkdir()
+    (tvRoot / "Office, The").mkdir()
+    result = organizer.findBestMatchingTvShow("The Office", [tvRoot])
+    assert result == "Office, The"
 
 
 def testFindBestMatchingTvShowFuzzyMatchReturnsFolder(
@@ -1812,7 +1832,7 @@ def testProcessFilesDoesNotRefetchTvMetadataAfterClassification(
             confirmedOrganizer.processFiles(interactive=False)
 
     assert mockFetch.call_count == 1
-    destFile = tvStorage / "The Pitt" / "Season 02" / "The.Pitt.S02E05.mkv"
+    destFile = tvStorage / "Pitt, The" / "Season 02" / "The.Pitt.S02E05.mkv"
     assert destFile.exists()
     assert not srcFile.exists()
 
@@ -4232,8 +4252,10 @@ def testMoveTvShowReusesConfirmedChoiceWithoutSecondPrompt(
     assert firstResult is True
     assert secondResult is True
     assert mockInput.call_count == 1
-    assert (tvStorage / "The Pitt" / "Season 01" / "The.Pitt.S01E13.Pilot.mkv").exists()
-    assert (tvStorage / "The Pitt" / "Season 02" / "The.Pitt.S02E07.Hour.mkv").exists()
+    assert (
+        tvStorage / "Pitt, The" / "Season 01" / "The.Pitt.S01E13.Pilot.mkv"
+    ).exists()
+    assert (tvStorage / "Pitt, The" / "Season 02" / "The.Pitt.S02E07.Hour.mkv").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -4442,7 +4464,7 @@ def testRemoveTorrentsInLibraryConfirmDeletesTvTorrent(tmp_path: Path):
     torrentFile.write_bytes(b"torrent data")
 
     tvRoot = tmp_path / "TV"
-    (tvRoot / "The Office").mkdir(parents=True)
+    (tvRoot / "Office, The").mkdir(parents=True)
 
     org = VideoOrganizer(sourceDir=str(tmp_path / "source"), dryRun=False)
     with patch.object(org, "scanStorageLocations", return_value=([], [tvRoot])):

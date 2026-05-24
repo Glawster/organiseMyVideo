@@ -352,9 +352,13 @@ class VideoMixin:
         Returns:
             Path to existing directory or None
         """
+        folderNames = {
+            showName.casefold(),
+            self._buildTvShowFolderName(showName).casefold(),
+        }
         for tvRoot in videoDirs:
             for item in tvRoot.iterdir():
-                if item.is_dir() and item.name.lower() == showName.lower():
+                if item.is_dir() and item.name.casefold() in folderNames:
                     logger.value("found existing TV show", item)
                     return item
 
@@ -387,8 +391,26 @@ class VideoMixin:
         if not folderNames:
             return None
 
-        matches = difflib.get_close_matches(showName, folderNames, n=1, cutoff=0.6)
-        return matches[0] if matches else None
+        for candidateName in (showName, self._buildTvShowFolderName(showName)):
+            matches = difflib.get_close_matches(
+                candidateName, folderNames, n=1, cutoff=0.6
+            )
+            if matches:
+                return matches[0]
+        return None
+
+    def _buildTvShowFolderName(self, showName: str) -> str:
+        """Return the on-disk TV show folder name for *showName*."""
+        normalised = re.sub(r"\s+", " ", showName).strip()
+        if not normalised:
+            return showName
+        if re.search(r",\s*the$", normalised, re.IGNORECASE):
+            return normalised
+        match = re.match(r"^the\s+(.+)$", normalised, re.IGNORECASE)
+        if not match:
+            return normalised
+        remainder = match.group(1).strip()
+        return f"{remainder}, The" if remainder else normalised
 
     def _makePromptCacheKey(self, defaultName: str, fileType: str) -> tuple[str, str]:
         """
@@ -2027,7 +2049,7 @@ class VideoMixin:
                 logger.error("No TV storage locations found")
                 return False
 
-            showDir = storage / showName
+            showDir = storage / self._buildTvShowFolderName(showName)
 
         # Create season directory
         seasonDir = showDir / f"Season {season:02d}"
