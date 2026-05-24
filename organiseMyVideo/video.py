@@ -28,6 +28,7 @@ _MOVE_PROGRESS_REDUCED_BAR_RATIO = 5
 _MOVE_PROGRESS_MIN_REDUCED_BAR_WIDTH = 8
 _MOVE_PROGRESS_CHUNK_SIZE = 1024 * 1024
 _FILE_PROCESS_SEPARATOR = "-" * 72
+_IGNORED_LOCAL_FOLDER_NAMES = {"featurettes", "extras"}
 
 
 class VideoMixin:
@@ -1996,6 +1997,41 @@ class VideoMixin:
                 return True
         return False
 
+    def _renameExtrasFolders(self) -> None:
+        """Rename local ``Extras`` folders to ``Featurettes`` before scanning files."""
+        extrasFolders = sorted(
+            (
+                folder
+                for folder in self.sourceDir.rglob("*")
+                if folder.is_dir() and folder.name.casefold() == "extras"
+            ),
+            key=lambda folder: (len(folder.parts), str(folder)),
+            reverse=True,
+        )
+        for folder in extrasFolders:
+            destination = folder.with_name("Featurettes")
+            if destination.exists():
+                logger.warning("featurettes folder already exists: %s", destination)
+                continue
+            logger.action("rename folder: %s -> %s", folder, destination)
+            if self.dryRun:
+                continue
+            try:
+                folder.rename(destination)
+            except Exception as e:
+                logger.error("failed to rename %s: %s", folder, e)
+
+    def _shouldIgnoreLocalVideoFile(self, videoFile: Path) -> bool:
+        """Return True when *videoFile* lives inside an ignored local subfolder."""
+        try:
+            relativePath = videoFile.relative_to(self.sourceDir)
+        except ValueError:
+            relativePath = videoFile
+        return any(
+            part.casefold() in _IGNORED_LOCAL_FOLDER_NAMES
+            for part in relativePath.parts[:-1]
+        )
+
     def cleanNames(self) -> dict:
         """
         Strip known torrent/index prefixes from file and directory names in the source directory.
@@ -2246,11 +2282,14 @@ class VideoMixin:
             logger.error("No TV storage locations found!")
             return
 
+        self._renameExtrasFolders()
+
         # Get all video files (including those in subdirectories)
         videoFiles = [
             f
             for f in self.sourceDir.rglob("*")
             if f.is_file() and f.suffix.lower() in VIDEO_EXTENSIONS
+            and not self._shouldIgnoreLocalVideoFile(f)
         ]
 
         if not videoFiles:

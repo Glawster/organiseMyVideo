@@ -837,6 +837,77 @@ def testProcessFilesFindsVideoInSubdirectory(
     assert not srcFile.exists()
 
 
+def testProcessFilesIgnoresFeaturettesSubdirectory(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    """Featurettes files are skipped during local source scanning."""
+    normalFile = confirmedOrganizer.sourceDir / "One.Mile.2026.mp4"
+    normalFile.write_bytes(b"x" * 100)
+    featurettesDir = confirmedOrganizer.sourceDir / "Featurettes"
+    featurettesDir.mkdir()
+    ignoredFile = featurettesDir / "Bonus.Feature.2026.mp4"
+    ignoredFile.write_bytes(b"x" * 100)
+
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+    tvStorage = tmp_path / "TV"
+    tvStorage.mkdir()
+
+    with patch.object(
+        confirmedOrganizer,
+        "scanStorageLocations",
+        return_value=([movieStorage], [tvStorage]),
+    ):
+        with patch.object(confirmedOrganizer, "_prepareMetadataLibrary"):
+            with patch.object(
+                confirmedOrganizer,
+                "_classifyVideoFile",
+                return_value=(
+                    None,
+                    {"title": "One Mile", "year": "2026", "extension": ".mp4"},
+                ),
+            ):
+                with patch.object(
+                    confirmedOrganizer, "moveMovie", return_value=True
+                ) as mockMoveMovie:
+                    confirmedOrganizer.processFiles(interactive=False)
+
+    assert [call.args[0] for call in mockMoveMovie.call_args_list] == [normalFile]
+    assert ignoredFile.exists()
+
+
+def testProcessFilesRenamesExtrasFolderToFeaturettes(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    """Extras folders are normalised to Featurettes before scanning source files."""
+    extrasDir = confirmedOrganizer.sourceDir / "Extras"
+    extrasDir.mkdir()
+    extraFile = extrasDir / "Bonus.Feature.2026.mp4"
+    extraFile.write_bytes(b"x" * 100)
+
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+    tvStorage = tmp_path / "TV"
+    tvStorage.mkdir()
+
+    with patch.object(
+        confirmedOrganizer,
+        "scanStorageLocations",
+        return_value=([movieStorage], [tvStorage]),
+    ):
+        with patch.object(confirmedOrganizer, "_prepareMetadataLibrary"):
+            with patch.object(
+                confirmedOrganizer, "moveMovie", return_value=True
+            ) as mockMoveMovie:
+                confirmedOrganizer.processFiles(interactive=False)
+
+    featurettesDir = confirmedOrganizer.sourceDir / "Featurettes"
+    assert not extrasDir.exists()
+    assert featurettesDir.exists()
+    assert (featurettesDir / "Bonus.Feature.2026.mp4").exists()
+    mockMoveMovie.assert_not_called()
+
+
 def testProcessFilesUsesMovieMcmHintsWhenFilenameCannotBeParsed(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer
 ):
