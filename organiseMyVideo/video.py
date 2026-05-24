@@ -1543,6 +1543,20 @@ class VideoMixin:
             return re.sub(r"\s*-\s*", "-", safeTitle)
         return self._sanitiseFilenamePart(value)
 
+    def _capitaliseLowercaseTvShowTitle(self, showName: Optional[str]) -> Optional[str]:
+        """Return *showName* with word initials capitalised when it is all lowercase."""
+        if not showName:
+            return showName
+        normalised = re.sub(r"\s+", " ", showName).strip()
+        letters = [character for character in normalised if character.isalpha()]
+        if not letters or any(not character.islower() for character in letters):
+            return normalised
+        return re.sub(
+            r"(^|[^A-Za-z])([a-z])",
+            lambda match: f"{match.group(1)}{match.group(2).upper()}",
+            normalised,
+        )
+
     def _buildTvDestinationFilename(self, sourceFile: Path, tvInfo: dict) -> str:
         """Return the destination TV filename, preferring canonical enriched names."""
         showName = tvInfo.get("showName")
@@ -1636,6 +1650,29 @@ class VideoMixin:
         destMetadataDir.mkdir(parents=True, exist_ok=True)
         ET.ElementTree(item).write(destFile, encoding="utf-8", xml_declaration=True)
         logger.info("  episode metadata written")
+
+    def _buildEpisodeMetadataTemplateRoot(self, tvInfo: dict) -> Optional[ET.Element]:
+        """Return a starter episode metadata XML root from resolved TV metadata."""
+        season = tvInfo.get("season")
+        episode = tvInfo.get("episode")
+        if season is None or episode is None:
+            return None
+
+        item = ET.Element("Item")
+        fields = {
+            "ID": str(episode),
+            "EpisodeID": tvInfo.get("episodeId") or "",
+            "EpisodeNumber": str(episode),
+            "SeasonNumber": str(season),
+            "seriesid": tvInfo.get("seriesId") or "",
+            "IMDB_ID": tvInfo.get("imdbId") or "",
+            "EpisodeName": tvInfo.get("episodeTitle") or "",
+            "Type": "",
+        }
+        for key, value in fields.items():
+            child = ET.SubElement(item, key)
+            child.text = value
+        return item
 
     def _safeMcmIdFilenamePart(self, value: Optional[str]) -> str:
         """Return a value containing only ``[A-Za-z0-9_-]`` characters."""
@@ -2373,20 +2410,34 @@ class VideoMixin:
         return stats
 
     def _updateEpisodeMetadataFile(
-        self, metadataFile: Path, *, episodeTitle: Optional[str]
+        self, metadataFile: Path, tvInfo: dict
     ) -> None:
-        """Update the episode title stored in an existing metadata XML file."""
+        """Update or regenerate an existing episode metadata XML file."""
         root = self._readXmlRoot(metadataFile)
         if root is None:
+            if metadataFile.exists() and self._readXmlText(metadataFile) is not None:
+                root = self._buildEpisodeMetadataTemplateRoot(tvInfo)
+                if root is None:
+                    return
+                if self.dryRun:
+                    return
+                metadataFile.parent.mkdir(parents=True, exist_ok=True)
+                ET.ElementTree(root).write(
+                    metadataFile, encoding="utf-8", xml_declaration=True
+                )
             return
 
+        _, changed = self._updateEpisodeMetadataRoot(root, tvInfo)
+        episodeTitle = tvInfo.get("episodeTitle")
         episodeTitleNode = root.find("EpisodeName")
         if episodeTitleNode is None:
             episodeTitleNode = ET.SubElement(root, "EpisodeName")
-        if (episodeTitleNode.text or "") == (episodeTitle or ""):
+            changed = True
+        if (episodeTitleNode.text or "") != (episodeTitle or ""):
+            episodeTitleNode.text = episodeTitle or ""
+            changed = True
+        if not changed:
             return
-
-        episodeTitleNode.text = episodeTitle or ""
         if self.dryRun:
             return
         ET.ElementTree(root).write(metadataFile, encoding="utf-8", xml_declaration=True)
@@ -2463,12 +2514,29 @@ class VideoMixin:
                     self._enrichTvMetadata(resolvedTvInfo) or resolvedTvInfo
                 )
 
+        capitalisedShowName = self._capitaliseLowercaseTvShowTitle(
+            resolvedTvInfo.get("showName")
+        )
+        needsShowTitleNormalisation = capitalisedShowName != resolvedTvInfo.get(
+            "showName"
+        )
+        if needsShowTitleNormalisation:
+            resolvedTvInfo = dict(resolvedTvInfo)
+            resolvedTvInfo["showName"] = capitalisedShowName
+
         if showDir is not None:
             with self._suppressResetMetadataPreserveLogs():
                 self._ensureSeriesMetadata(showDir, resolvedTvInfo)
                 self._ensureTvDvdIdMetadata(videoFile, showDir, resolvedTvInfo)
 
-        if not needsCanonicalLookup and not needsTimedTitleNormalisation:
+        sourceMetadataFile = videoFile.parent / "metadata" / f"{videoFile.stem}.xml"
+        if (
+            not needsCanonicalLookup
+            and not needsTimedTitleNormalisation
+            and not needsShowTitleNormalisation
+        ):
+            if sourceMetadataFile.exists():
+                self._updateEpisodeMetadataFile(sourceMetadataFile, resolvedTvInfo)
             return "skipped"
 
         destinationName = self._buildTvDestinationFilename(videoFile, resolvedTvInfo)
@@ -2488,9 +2556,7 @@ class VideoMixin:
                 logger.error("rescan target already exists: %s", companionDestination)
                 return "errors"
 
-        destinationMetadataFile = (
-            videoFile.parent / "metadata" / f"{destinationPath.stem}.xml"
-        )
+        destinationMetadataFile = videoFile.parent / "metadata" / f"{destinationPath.stem}.xml"
 
         logger.action("rescan TV title: %s -> %s", videoFile.name, destinationPath.name)
         if self.dryRun:
@@ -2506,10 +2572,7 @@ class VideoMixin:
             sourcePath.rename(companionDestination)
             self._recordSummaryRename(sourcePath, companionDestination)
         if destinationMetadataFile.exists():
-            self._updateEpisodeMetadataFile(
-                destinationMetadataFile,
-                episodeTitle=resolvedTvInfo.get("episodeTitle"),
-            )
+            self._updateEpisodeMetadataFile(destinationMetadataFile, resolvedTvInfo)
         return "renamed"
 
     def resetTvEpisodeTitles(self) -> dict:

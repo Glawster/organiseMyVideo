@@ -4887,6 +4887,69 @@ def testResetTvEpisodeTitlesSkipsCleanStoredEpisodesWithoutScraperLookup(
     assert episodeFile.exists()
 
 
+def testResetTvEpisodeTitlesCapitalisesLowercaseShowNames(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    seasonDir = tvStorage / "after life" / "Season 01"
+    seasonDir.mkdir(parents=True)
+    episodeFile = seasonDir / "after.life.S01E04.Sic.Semper.Systema.mkv"
+    episodeFile.write_bytes(b"x" * 20)
+
+    with patch.object(
+        confirmedOrganizer,
+        "_fetchTvMetadataFromScraper",
+        side_effect=AssertionError("scraper lookup should not run"),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ):
+            stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 1, "skipped": 0, "errors": 0}
+    assert not episodeFile.exists()
+    assert (seasonDir / "After.Life.S01E04.Sic.Semper.Systema.mkv").exists()
+
+
+def testResetTvEpisodeTitlesRegeneratesCorruptEpisodeMetadataXml(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    seasonDir = tvStorage / "After Life" / "Season 01"
+    metadataDir = seasonDir / "metadata"
+    metadataDir.mkdir(parents=True)
+    episodeFile = seasonDir / "After.Life.S01E04.Sic.Semper.Systema.mkv"
+    episodeFile.write_bytes(b"x" * 20)
+    metadataFile = metadataDir / "After.Life.S01E04.Sic.Semper.Systema.xml"
+    metadataFile.write_text("<Item><EpisodeName>Sic & Semper Systema</EpisodeName></Item>")
+
+    libraryPath = tmp_path / "metadataLibrary.json"
+    libraryPath.write_text(
+        json.dumps(_savedAfterLifeMetadataLibrary()), encoding="utf-8"
+    )
+
+    with patch.object(
+        confirmedOrganizer,
+        "scanStorageLocations",
+        return_value=([], [tvStorage]),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "_getMetadataLibraryPath",
+            return_value=libraryPath,
+        ):
+            with caplog.at_level("WARNING"):
+                stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
+    assert "could not parse metadata XML" in caplog.text
+    regenerated = metadataFile.read_text(encoding="utf-8")
+    assert "<EpisodeName>Sic Semper Systema</EpisodeName>" in regenerated
+    assert "<seriesid>361563</seriesid>" in regenerated
+
+
 def testResetTvEpisodeTitlesSkipsCleanStoredEpisodesWithSpacesAndApostrophes(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer
 ):
