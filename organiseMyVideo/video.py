@@ -174,7 +174,7 @@ class VideoMixin:
             uniqueShowNames = sorted(set(showNames), key=str.casefold)
             if len(uniqueShowNames) < 2:
                 continue
-            logger.warning(
+            logger.info(
                 "rescan found possible duplicate TV show folders for SeriesID %s: %s",
                 seriesId,
                 ", ".join(uniqueShowNames),
@@ -186,7 +186,7 @@ class VideoMixin:
             uniqueShowNames = sorted(set(group["showNames"]), key=str.casefold)
             if len(uniqueShowNames) < 2:
                 continue
-            logger.warning(
+            logger.info(
                 "rescan found possible duplicate TV show folders for canonical name %s: %s",
                 group["canonicalName"],
                 ", ".join(uniqueShowNames),
