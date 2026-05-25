@@ -31,13 +31,6 @@ _FILE_PROCESS_SEPARATOR = "-" * 72
 _IGNORED_LOCAL_FOLDER_NAMES = {"featurettes", "extras"}
 
 
-def _logMultiline(*lines: str) -> None:
-    multiline = getattr(logger, "multiline", None)
-    if callable(multiline):
-        multiline(*lines)
-        return
-
-
 class VideoMixin:
     """Methods for parsing, locating, moving and cleaning video files."""
 
@@ -2722,7 +2715,7 @@ class VideoMixin:
             videoFile.parent / "metadata" / f"{destinationPath.stem}.xml"
         )
 
-        _logMultiline("renaming", videoFile.name, destinationPath.name)
+        logger.multiline("tv show", videoFile.name, destinationPath.name)
         if self.dryRun:
             self._recordSummaryRename(videoFile, destinationPath)
             for sourcePath, companionDestination in companionRenames:

@@ -18,7 +18,6 @@ from organiseMyVideo import video as video_module
 from organiseMyVideo.video import (
     _FILE_PROCESS_SEPARATOR,
     _XML_BINARY_CHECK_WINDOW,
-    _logMultiline,
 )
 
 # ---------------------------------------------------------------------------
@@ -62,17 +61,11 @@ def testExplicitDryRunFalse(tmp_path: Path):
     assert org.dryRun is False
 
 
-def testLogMultilineFallsBackToActionWhenLoggerLacksMultiline():
-    class _LoggerWithoutMultiline:
-        def __init__(self):
-            self.action = MagicMock()
+def testLoggerMultilineRendersIndentedEntries(caplog: pytest.LogCaptureFixture):
+    with caplog.at_level("INFO"):
+        video_module.logger.multiline("tv show", "old.mkv", "new.mkv")
 
-    mockLogger = _LoggerWithoutMultiline()
-
-    with patch.object(video_module, "logger", mockLogger):
-        _logMultiline("tv show", "old.mkv", "new.mkv")
-
-    mockLogger.action.assert_called_once_with("tv show:\n     old.mkv\n     new.mkv")
+    assert "...tv show:\n     old.mkv\n     new.mkv" in caplog.text
 
 
 def _savedAfterLifeMetadataLibrary() -> dict:
