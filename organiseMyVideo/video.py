@@ -136,21 +136,19 @@ class VideoMixin:
         yield from showDirs
 
     def _readResetTvShowSeriesId(self, showDir: Path) -> Optional[str]:
-        """Return the best available series ID for a stored TV show folder."""
-        return self._readTvShowSeriesId(showDir)
+        """Return a show-level SeriesID for duplicate detection during rescans."""
+        return self._readTvShowTopLevelSeriesId(showDir)
 
     def _buildResetDuplicateTvShowAnalysis(self, showEntries: list[dict]) -> dict:
         """Return duplicate-folder warning and merge data for *showEntries*."""
         showDirsBySeriesId = {}
         canonicalNameGroups = []
         canonicalNameGroupsByKey = {}
+        entriesByShowName = {entry["showName"]: entry for entry in showEntries}
         allShowNames = {entry["showName"] for entry in showEntries}
 
         for entry in showEntries:
             showName = entry["showName"]
-            seriesId = entry.get("seriesId")
-            if seriesId:
-                showDirsBySeriesId.setdefault(seriesId, []).append(showName)
             canonicalName = self._stripResetTvShowDuplicateSuffixes(showName)
             duplicateKey = self._buildResetTvShowDuplicateKey(showName)
             group = self._findResetDuplicateCanonicalNameGroup(
@@ -168,14 +166,22 @@ class VideoMixin:
             canonicalNameGroupsByKey[duplicateKey] = group
 
         candidateGroups = [
-            showNames
-            for showNames in showDirsBySeriesId.values()
-            if len(set(showNames)) > 1
-        ]
-        candidateGroups.extend(
             group["showNames"]
             for group in canonicalNameGroups
             if len(group["showNames"]) > 1
+        ]
+        for showNames in candidateGroups:
+            for showName in showNames:
+                entry = entriesByShowName.get(showName)
+                if entry is None:
+                    continue
+                if "seriesId" not in entry:
+                    entry["seriesId"] = self._readResetTvShowSeriesId(entry["showDir"])
+                seriesId = entry.get("seriesId")
+                if seriesId:
+                    showDirsBySeriesId.setdefault(seriesId, set()).add(showName)
+        candidateGroups.extend(
+            showNames for showNames in showDirsBySeriesId.values() if len(showNames) > 1
         )
         adjacency = {showName: set() for showName in allShowNames}
         for group in candidateGroups:
@@ -250,7 +256,7 @@ class VideoMixin:
         return [
             {
                 "showName": showDir.name,
-                "seriesId": self._readResetTvShowSeriesId(showDir),
+                "showDir": showDir,
             }
             for showDir in self._iterResetTvShowDirs(tvDir)
         ]
@@ -2946,6 +2952,15 @@ class VideoMixin:
             resolvedTvInfo = dict(resolvedTvInfo)
             resolvedTvInfo["showName"] = capitalisedShowName
 
+        resolvedEpisodeTitle = resolvedTvInfo.get("episodeTitle")
+        parsedEpisodeTitleKey = self._normaliseLookupText(parsedEpisodeTitle)
+        resolvedEpisodeTitleKey = self._normaliseLookupText(resolvedEpisodeTitle)
+        hasIncorrectEpisodeTitle = bool(
+            parsedEpisodeTitleKey
+            and resolvedEpisodeTitleKey
+            and parsedEpisodeTitleKey != resolvedEpisodeTitleKey
+        )
+
         if showDir is not None:
             with self._suppressResetMetadataPreserveLogs():
                 self._ensureSeriesMetadata(showDir, resolvedTvInfo)
@@ -2956,6 +2971,7 @@ class VideoMixin:
             needsCanonicalLookup
             or needsTimedTitleNormalisation
             or parsedEpisodeTitleNeedsCleanup
+            or hasIncorrectEpisodeTitle
         )
         destinationName = self._buildTvDestinationFilename(
             videoFile, resolvedTvInfo, preferSpaceStyle=preferSpaceStyle
@@ -2965,6 +2981,7 @@ class VideoMixin:
             and not needsTimedTitleNormalisation
             and not needsShowTitleNormalisation
             and not parsedEpisodeTitleNeedsCleanup
+            and not hasIncorrectEpisodeTitle
         ):
             if sourceMetadataFile.exists():
                 self._updateEpisodeMetadataFile(sourceMetadataFile, resolvedTvInfo)

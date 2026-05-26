@@ -5228,6 +5228,56 @@ def testResetTvEpisodeTitlesLogsShowNamesAndOnlyRenameChanges(
     assert "preserving existing metadata" not in caplog.text
 
 
+def testResetTvEpisodeTitlesRenamesMalformedIncorrectEpisodeTitles(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+
+    seasonDir = tvStorage / "After Life" / "Season 01"
+    seasonDir.mkdir(parents=True)
+    (seasonDir.parent / "series.xml").write_text(
+        "<Series><SeriesID>347507</SeriesID></Series>", encoding="utf-8"
+    )
+    wrongTitleEpisode = seasonDir / "After.Life.S01E04.Wrong.Title.mkv"
+    wrongTitleEpisode.write_bytes(b"x" * 20)
+
+    libraryPath = tmp_path / "metadataLibrary.json"
+    libraryPath.write_text(
+        json.dumps(_savedAfterLifeMetadataLibrary()), encoding="utf-8"
+    )
+
+    with (
+        patch.object(
+            confirmedOrganizer,
+            "_fetchTvMetadataFromScraper",
+            side_effect=AssertionError("scraper lookup should not run"),
+        ),
+        patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ),
+        patch.object(
+            confirmedOrganizer,
+            "_getMetadataLibraryPath",
+            return_value=libraryPath,
+        ),
+    ):
+        with caplog.at_level("INFO"):
+            stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 1, "skipped": 0, "errors": 0}
+    assert (seasonDir / "After Life.S01E04.Sic Semper Systema.mkv").exists()
+    assert not wrongTitleEpisode.exists()
+    assert (
+        "...renaming:\n"
+        "     After.Life.S01E04.Wrong.Title.mkv\n"
+        "     After Life.S01E04.Sic Semper Systema.mkv"
+    ) in caplog.text
+
+
 def testResetTvEpisodeTitlesWarnsWhenSeriesIdMatchesAcrossShowFolders(
     tmp_path: Path,
     confirmedOrganizer: VideoOrganizer,
@@ -5306,6 +5356,59 @@ def testResetTvEpisodeTitlesWarnsWhenTrailingTheFoldersDuplicate(
     ) in caplog.text
     assert "scanning: The Crown" not in caplog.text
     assert caplog.text.count("scanning: Crown, The") == 2
+
+
+def testResetTvEpisodeTitlesDetectsNameDuplicatesWithoutEpisodeMetadataScan(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+
+    canonicalDir = tvStorage / "Crown, The" / "Season 01"
+    canonicalMetadataDir = canonicalDir / "metadata"
+    canonicalMetadataDir.mkdir(parents=True)
+    (canonicalDir / "The.Crown.S01E01.Wolferton.Splash.mkv").write_bytes(b"x" * 20)
+    (canonicalMetadataDir / "The.Crown.S01E01.Wolferton.Splash.xml").write_text(
+        "<Item><SeriesID>123</SeriesID></Item>", encoding="utf-8"
+    )
+
+    leadingArticleDir = tvStorage / "The Crown" / "Season 01"
+    leadingArticleMetadataDir = leadingArticleDir / "metadata"
+    leadingArticleMetadataDir.mkdir(parents=True)
+    (leadingArticleDir / "The.Crown.S01E02.Hyde.Park.Corner.mkv").write_bytes(
+        b"x" * 20
+    )
+    (
+        leadingArticleMetadataDir / "The.Crown.S01E02.Hyde.Park.Corner.xml"
+    ).write_text("<Item><SeriesID>123</SeriesID></Item>", encoding="utf-8")
+
+    with (
+        patch.object(
+            confirmedOrganizer,
+            "_fetchTvMetadataFromScraper",
+            side_effect=AssertionError("scraper lookup should not run"),
+        ),
+        patch.object(
+            confirmedOrganizer,
+            "_readTvSeasonMetadataSeriesId",
+            side_effect=AssertionError("duplicate checks should not scan episode XML"),
+        ),
+        patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ),
+    ):
+        with caplog.at_level("INFO"):
+            stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
+    assert (
+        "...rescan found possible duplicate TV show folders for: Crown, The:\n"
+        "     Crown, The\n"
+        "     The Crown"
+    ) in caplog.text
 
 
 def testResetTvEpisodeTitlesPromptsToMergeDuplicateFolders(
