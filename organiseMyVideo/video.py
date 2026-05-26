@@ -1643,6 +1643,31 @@ class VideoMixin:
             normalised,
         )
 
+    def _resolveStoredTvShowFolderName(
+        self, showDir: Path, showName: str, videoFiles: list[Path]
+    ) -> str:
+        """Return the preferred on-disk show folder name for rescan fixes."""
+        normalised = re.sub(r"\s+", " ", showName).strip()
+        if not normalised:
+            return showName
+
+        seriesRoot = self._readXmlRoot(showDir / "series.xml")
+        candidateNames = [
+            self._readFirstXmlText(seriesRoot, ("LocalTitle", "SeriesName"))
+        ]
+        candidateNames.extend(
+            (self.parseTvFilename(videoFile.name) or {}).get("showName")
+            for videoFile in videoFiles
+        )
+        for candidate in candidateNames:
+            if not candidate:
+                continue
+            candidate = re.sub(r"\s+", " ", candidate).strip()
+            if candidate.casefold() == normalised.casefold() and candidate != normalised:
+                return candidate
+
+        return self._capitaliseLowercaseTvShowTitle(normalised) or showName
+
     def _buildTvDestinationFilename(
         self,
         sourceFile: Path,
@@ -1706,11 +1731,13 @@ class VideoMixin:
         self, tvDir: Path, showName: str, videoFiles: list[Path]
     ) -> tuple[str, list[Path]]:
         """Return the rescan show label and video paths after any lowercase-folder fix."""
-        capitalisedShowName = self._capitaliseLowercaseTvShowTitle(showName)
+        showDir = tvDir / showName
+        capitalisedShowName = self._resolveStoredTvShowFolderName(
+            showDir, showName, videoFiles
+        )
         if capitalisedShowName == showName:
             return showName, videoFiles
 
-        showDir = tvDir / showName
         destinationDir = tvDir / capitalisedShowName
         if destinationDir.exists():
             logger.error("rescan TV show target already exists: %s", destinationDir)

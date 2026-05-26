@@ -4045,21 +4045,15 @@ def testPromptUserConfirmationMDefaultsToCurrentName(organizer: VideoOrganizer):
     assert result == {"name": "Breaking Bad", "type": "movie"}
 
 
-def testPromptUserConfirmationPrintsLegendOnFirstCall(organizer: VideoOrganizer):
-    """Key legend is printed exactly once, on the first call."""
+def testPromptUserConfirmationDoesNotPrintLegend(organizer: VideoOrganizer):
+    """Text prompts render inline without a separate legend banner."""
     with (
         patch("builtins.input", return_value="y"),
         patch("builtins.print") as mockPrint,
     ):
         result = organizer.promptUserConfirmation("file.mkv", "My Show", "tv")
     assert result == {"name": "My Show", "type": "tv"}
-    assert mockPrint.call_count == 1
-    printed = mockPrint.call_args[0][0]
-    assert "y" in printed
-    assert "n" in printed
-    assert "t" in printed
-    assert "m" in printed
-    assert "q" in printed
+    mockPrint.assert_not_called()
 
 
 def testPromptUserConfirmationLegendNotPrintedOnSecondCall(organizer: VideoOrganizer):
@@ -4091,7 +4085,8 @@ def testPromptUserConfirmationWritesTextPromptToStderrWhenInteractive(
 
     assert result == {"name": "My Show", "type": "tv"}
     mockInput.assert_called_once_with()
-    assert "TV Show detected: 'My Show'\n" in fakeStderr.getvalue()
+    assert "  TV Show detected: My Show\n" in fakeStderr.getvalue()
+    assert "  Episode Title:    None\n" in fakeStderr.getvalue()
     assert "Is this correct?  (y/n/q/t/m or enter new name): " in fakeStderr.getvalue()
     assert fakeStdout.getvalue() == ""
 
@@ -4116,8 +4111,8 @@ def testPromptUserConfirmationShowsEpisodeTitleWhenAvailable(
         )
 
     assert result == {"name": "The Pitt", "type": "tv"}
-    assert "TV Show detected: 'The Pitt'\n" in fakeStderr.getvalue()
-    assert "Episode Title: Pilot\n" in fakeStderr.getvalue()
+    assert "  TV Show detected: The Pitt\n" in fakeStderr.getvalue()
+    assert "  Episode Title:    Pilot\n" in fakeStderr.getvalue()
     assert "Is this correct?  (y/n/q/t/m or enter new name): " in fakeStderr.getvalue()
     assert fakeStdout.getvalue() == ""
 
@@ -4155,7 +4150,9 @@ def testPromptUserConfirmationUsesCursesMenuWhenEnabled(organizer: VideoOrganize
         result = organizer.promptUserConfirmation("file.mkv", "My Show", "tv")
     assert result == {"name": "My Show", "type": "tv"}
     mockMenu.assert_called_once_with(
-        "TV Show detected: 'My Show'\nIs this correct?  (y/n/q/t/m or enter new name): ",
+        "  TV Show detected: My Show\n"
+        "  Episode Title:    None\n"
+        "  Is this correct?  (y/n/q/t/m or enter new name): ",
         validChoices={"y", "n", "q", "t", "m"},
         defaultChoice="y",
     )
@@ -4931,6 +4928,38 @@ def testResetTvEpisodeTitlesCapitalisesLowercaseShowNames(
     assert "renaming TV Show: After Life (from after life)" in caplog.text
 
 
+def testResetTvEpisodeTitlesPreservesMixedCaseShowNamesFromEpisodes(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    seasonDir = tvStorage / "izombie" / "Season 01"
+    seasonDir.mkdir(parents=True)
+    episodeFile = seasonDir / "iZombie.S01E01.Pilot.mkv"
+    episodeFile.write_bytes(b"x" * 20)
+
+    with patch.object(
+        confirmedOrganizer,
+        "_fetchTvMetadataFromScraper",
+        side_effect=AssertionError("scraper lookup should not run"),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ):
+            with caplog.at_level("INFO"):
+                stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    renamedSeasonDir = tvStorage / "iZombie" / "Season 01"
+    assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
+    assert renamedSeasonDir.exists()
+    assert (renamedSeasonDir / "iZombie.S01E01.Pilot.mkv").exists()
+    assert not episodeFile.exists()
+    assert "renaming TV Show: iZombie (from izombie)" in caplog.text
+
+
 def testResetTvEpisodeTitlesRegeneratesCorruptEpisodeMetadataXml(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
 ):
@@ -5146,11 +5175,11 @@ def testResetTvEpisodeTitlesLogsShowNamesAndOnlyRenameChanges(
     assert "scanning: After Life [361563]" in caplog.text
     assert "scanning: Another Show [999999]" in caplog.text
     assert (
-        "...tv show:\n"
+        "...renaming:\n"
         "     After.Life.S01E04.1080p.WEB.h264.mkv\n"
         "     After Life.S01E04.Sic Semper Systema.mkv"
     ) in caplog.text
-    assert "...tv show:\n     Another.Show.S01E01.Opening.Night.mkv" not in caplog.text
+    assert "...renaming:\n     Another.Show.S01E01.Opening.Night.mkv" not in caplog.text
     assert (afterLifeSeasonDir / "After Life.S01E04.Sic Semper Systema.mkv").exists()
     assert cleanEpisode.exists()
     assert not noisyEpisode.exists()
@@ -5199,8 +5228,9 @@ def testResetTvEpisodeTitlesWarnsWhenSeriesIdMatchesAcrossShowFolders(
 
     assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
     assert (
-        "rescan found possible duplicate TV show folders for SeriesID 777: "
-        "Grimm, Grimm (2011)"
+        "...rescan found possible duplicate TV show folders for: 777:\n"
+        "     Grimm\n"
+        "     Grimm (2011)"
     ) in caplog.text
 
 
@@ -5234,8 +5264,9 @@ def testResetTvEpisodeTitlesWarnsWhenTrailingTheFoldersDuplicate(
 
     assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
     assert (
-        "rescan found possible duplicate TV show folders for canonical name "
-        "Crown, The: Crown, The, The Crown"
+        "...rescan found possible duplicate TV show folders for: Crown, The:\n"
+        "     Crown, The\n"
+        "     The Crown"
     ) in caplog.text
     assert "scanning: The Crown" not in caplog.text
     assert caplog.text.count("scanning: Crown, The") == 2
@@ -5280,16 +5311,20 @@ def testResetTvEpisodeTitlesWarnsWhenNormalizedNamesDuplicate(
 
     assert stats == {"renamed": 0, "skipped": 7, "errors": 0}
     assert (
-        "rescan found possible duplicate TV show folders for canonical name "
-        "Grimm: Grimm, Grimm (2011)"
+        "...rescan found possible duplicate TV show folders for: Grimm:\n"
+        "     Grimm\n"
+        "     Grimm (2011)"
     ) in caplog.text
     assert (
-        "rescan found possible duplicate TV show folders for canonical name "
-        "Hijack: Hijack 2023, Hijack [419254], Hijak"
+        "...rescan found possible duplicate TV show folders for: Hijack:\n"
+        "     Hijack 2023\n"
+        "     Hijack [419254]\n"
+        "     Hijak"
     ) in caplog.text
     assert (
-        "rescan found possible duplicate TV show folders for canonical name "
-        "Homestead: Homestead, Homestead The Series"
+        "...rescan found possible duplicate TV show folders for: Homestead:\n"
+        "     Homestead\n"
+        "     Homestead The Series"
     ) in caplog.text
 
 
