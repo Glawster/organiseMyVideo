@@ -139,30 +139,73 @@ class VideoMixin:
         """Return the best available series ID for a stored TV show folder."""
         return self._readTvShowSeriesId(showDir)
 
-    def _logResetDuplicateTvShowFolders(self, tvDir: Path) -> None:
-        """Warn when multiple stored TV show folders share the same series ID."""
+    def _buildResetDuplicateTvShowAnalysis(self, showEntries: list[dict]) -> dict:
+        """Return duplicate-folder warning and merge data for *showEntries*."""
         showDirsBySeriesId = {}
         canonicalNameGroups = []
-        for showDir in self._iterResetTvShowDirs(tvDir):
-            seriesId = self._readResetTvShowSeriesId(showDir)
+        canonicalNameGroupsByKey = {}
+        allShowNames = {entry["showName"] for entry in showEntries}
+
+        for entry in showEntries:
+            showName = entry["showName"]
+            seriesId = entry.get("seriesId")
             if seriesId:
-                showDirsBySeriesId.setdefault(seriesId, []).append(showDir.name)
-            canonicalName = self._stripResetTvShowDuplicateSuffixes(showDir.name)
-            duplicateKey = self._buildResetTvShowDuplicateKey(showDir.name)
+                showDirsBySeriesId.setdefault(seriesId, []).append(showName)
+            canonicalName = self._stripResetTvShowDuplicateSuffixes(showName)
+            duplicateKey = self._buildResetTvShowDuplicateKey(showName)
             group = self._findResetDuplicateCanonicalNameGroup(
-                duplicateKey, canonicalNameGroups
+                duplicateKey, canonicalNameGroups, canonicalNameGroupsByKey
             )
             if group is None:
-                canonicalNameGroups.append(
-                    {
-                        "key": duplicateKey,
-                        "canonicalName": canonicalName,
-                        "showNames": [showDir.name],
-                    }
-                )
-                continue
-            group["showNames"].append(showDir.name)
+                group = {
+                    "key": duplicateKey,
+                    "canonicalName": canonicalName,
+                    "showNames": {showName},
+                }
+                canonicalNameGroups.append(group)
+            else:
+                group["showNames"].add(showName)
+            canonicalNameGroupsByKey[duplicateKey] = group
 
+        candidateGroups = [
+            showNames for showNames in showDirsBySeriesId.values() if len(set(showNames)) > 1
+        ]
+        candidateGroups.extend(
+            group["showNames"] for group in canonicalNameGroups if len(group["showNames"]) > 1
+        )
+        adjacency = {showName: set() for showName in allShowNames}
+        for group in candidateGroups:
+            uniqueNames = set(group)
+            for showName in uniqueNames:
+                adjacency.setdefault(showName, set()).update(uniqueNames - {showName})
+
+        duplicateGroups = []
+        seen = set()
+        for showName in self._sortResetDuplicateShowNames(allShowNames):
+            if showName in seen or not adjacency.get(showName):
+                continue
+            stack = [showName]
+            component = set()
+            while stack:
+                current = stack.pop()
+                if current in component:
+                    continue
+                component.add(current)
+                stack.extend(adjacency.get(current, ()))
+            seen.update(component)
+            if len(component) > 1:
+                duplicateGroups.append(self._sortResetDuplicateShowNames(component))
+
+        return {
+            "showNamesBySeriesId": showDirsBySeriesId,
+            "canonicalNameGroups": canonicalNameGroups,
+            "duplicateGroups": duplicateGroups,
+        }
+
+    def _logResetDuplicateTvShowWarnings(
+        self, showDirsBySeriesId: dict, canonicalNameGroups: list[dict]
+    ) -> None:
+        """Log duplicate-folder warnings from precomputed analysis."""
         for seriesId, showNames in sorted(showDirsBySeriesId.items()):
             uniqueShowNames = sorted(set(showNames), key=str.casefold)
             if len(uniqueShowNames) < 2:
@@ -188,6 +231,21 @@ class VideoMixin:
                     *uniqueShowNames,
                 ]
             )
+
+    def _logResetDuplicateTvShowFolders(self, tvDir: Path) -> None:
+        """Warn when multiple stored TV show folders look like duplicates."""
+        showEntries = [
+            {
+                "showName": showDir.name,
+                "seriesId": self._readResetTvShowSeriesId(showDir),
+            }
+            for showDir in self._iterResetTvShowDirs(tvDir)
+        ]
+        duplicateAnalysis = self._buildResetDuplicateTvShowAnalysis(showEntries)
+        self._logResetDuplicateTvShowWarnings(
+            duplicateAnalysis["showNamesBySeriesId"],
+            duplicateAnalysis["canonicalNameGroups"],
+        )
 
     def _shouldPromptInteractively(self) -> bool:
         """Return True when stdin/stdout are interactive enough for user prompts."""
@@ -216,68 +274,8 @@ class VideoMixin:
         self, showEntries: list[dict]
     ) -> list[list[str]]:
         """Return connected groups of possibly-duplicate TV show folders."""
-        candidateGroups = []
-        showNamesBySeriesId = {}
-        canonicalNameGroups = []
-        allShowNames = {entry["showName"] for entry in showEntries}
-
-        for entry in showEntries:
-            showName = entry["showName"]
-            seriesId = entry.get("seriesId")
-            if seriesId:
-                showNamesBySeriesId.setdefault(seriesId, set()).add(showName)
-            canonicalName = self._stripResetTvShowDuplicateSuffixes(showName)
-            duplicateKey = self._buildResetTvShowDuplicateKey(showName)
-            group = self._findResetDuplicateCanonicalNameGroup(
-                duplicateKey, canonicalNameGroups
-            )
-            if group is None:
-                canonicalNameGroups.append(
-                    {
-                        "key": duplicateKey,
-                        "canonicalName": canonicalName,
-                        "showNames": {showName},
-                    }
-                )
-            else:
-                group["showNames"].add(showName)
-
-        candidateGroups.extend(
-            showNames
-            for showNames in showNamesBySeriesId.values()
-            if len(showNames) > 1
-        )
-        candidateGroups.extend(
-            group["showNames"]
-            for group in canonicalNameGroups
-            if len(group["showNames"]) > 1
-        )
-        if not candidateGroups:
-            return []
-
-        adjacency = {showName: set() for showName in allShowNames}
-        for group in candidateGroups:
-            uniqueNames = set(group)
-            for showName in uniqueNames:
-                adjacency.setdefault(showName, set()).update(uniqueNames - {showName})
-
-        duplicateGroups = []
-        seen = set()
-        for showName in self._sortResetDuplicateShowNames(allShowNames):
-            if showName in seen or not adjacency.get(showName):
-                continue
-            stack = [showName]
-            component = set()
-            while stack:
-                current = stack.pop()
-                if current in component:
-                    continue
-                component.add(current)
-                stack.extend(adjacency.get(current, ()))
-            seen.update(component)
-            if len(component) > 1:
-                duplicateGroups.append(self._sortResetDuplicateShowNames(component))
-        return duplicateGroups
+        duplicateAnalysis = self._buildResetDuplicateTvShowAnalysis(showEntries)
+        return duplicateAnalysis["duplicateGroups"]
 
     def _promptResetDuplicateTvShowMerge(
         self, showNames: list[str]
@@ -362,14 +360,18 @@ class VideoMixin:
             pass
 
     def _mergeResetDuplicateTvShowFolders(
-        self, tvDir: Path, showEntries: list[dict]
+        self,
+        tvDir: Path,
+        showEntries: list[dict],
+        duplicateGroups: Optional[list[list[str]]] = None,
     ) -> list[dict]:
         """Prompt for and merge duplicate TV show folders before rescanning."""
         if not self._shouldPromptInteractively():
             return showEntries
 
         entriesByShowName = {entry["showName"]: entry for entry in showEntries}
-        duplicateGroups = self._collectResetDuplicateTvShowGroups(showEntries)
+        if duplicateGroups is None:
+            duplicateGroups = self._collectResetDuplicateTvShowGroups(showEntries)
         if not duplicateGroups:
             return showEntries
 
@@ -753,18 +755,34 @@ class VideoMixin:
             if ch.isalnum()
         )
 
+    def _canReachResetDuplicateKeyMatchThreshold(
+        self, leftKey: str, rightKey: str, threshold: float
+    ) -> bool:
+        """Return whether two keys could reach *threshold* before fuzzy matching."""
+        minLength = min(len(leftKey), len(rightKey))
+        maxPossibleRatio = (2 * minLength) / (len(leftKey) + len(rightKey))
+        return maxPossibleRatio >= threshold
+
     def _findResetDuplicateCanonicalNameGroup(
-        self, duplicateKey: str, groups: list[dict]
+        self, duplicateKey: str, groups: list[dict], groupsByKey: dict[str, dict]
     ) -> Optional[dict]:
         """Return an existing duplicate-name group close enough to *duplicateKey*."""
+        if duplicateKey in groupsByKey:
+            return groupsByKey[duplicateKey]
+
+        ratioThreshold = 0.9
         bestGroup = None
         bestRatio = 0.0
         for group in groups:
+            if not self._canReachResetDuplicateKeyMatchThreshold(
+                duplicateKey, group["key"], ratioThreshold
+            ):
+                continue
             ratio = difflib.SequenceMatcher(None, duplicateKey, group["key"]).ratio()
             if ratio > bestRatio:
                 bestGroup = group
                 bestRatio = ratio
-        return bestGroup if bestRatio >= 0.9 else None
+        return bestGroup if bestRatio >= ratioThreshold else None
 
     def _makePromptCacheKey(self, defaultName: str, fileType: str) -> tuple[str, str]:
         """
@@ -3016,7 +3034,6 @@ class VideoMixin:
             return stats
 
         for tvDir in videoDirs:
-            self._logResetDuplicateTvShowFolders(tvDir)
             if self._shouldPromptInteractively():
                 showEntries = [
                     {
@@ -3028,6 +3045,11 @@ class VideoMixin:
                         tvDir
                     )
                 ]
+                duplicateAnalysis = self._buildResetDuplicateTvShowAnalysis(showEntries)
+                self._logResetDuplicateTvShowWarnings(
+                    duplicateAnalysis["showNamesBySeriesId"],
+                    duplicateAnalysis["canonicalNameGroups"],
+                )
                 showEntryIterator = (
                     (
                         showEntry["showName"],
@@ -3035,10 +3057,11 @@ class VideoMixin:
                         showEntry["videoFiles"],
                     )
                     for showEntry in self._mergeResetDuplicateTvShowFolders(
-                        tvDir, showEntries
+                        tvDir, showEntries, duplicateAnalysis["duplicateGroups"]
                     )
                 )
             else:
+                self._logResetDuplicateTvShowFolders(tvDir)
                 showEntryIterator = self._iterResetTvShowFiles(tvDir)
 
             for showName, seriesId, videoFiles in showEntryIterator:
