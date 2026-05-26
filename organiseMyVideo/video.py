@@ -167,10 +167,10 @@ class VideoMixin:
             uniqueShowNames = sorted(set(showNames), key=str.casefold)
             if len(uniqueShowNames) < 2:
                 continue
-            logger.info(
-                "rescan found possible duplicate TV show folders for SeriesID %s: %s",
+            logger.multiline(
+                "rescan found possible duplicate TV show folders for SeriesID: %s",
                 seriesId,
-                ", ".join(uniqueShowNames),
+                "\n ".join(uniqueShowNames),
             )
 
         for group in sorted(
@@ -179,10 +179,10 @@ class VideoMixin:
             uniqueShowNames = sorted(set(group["showNames"]), key=str.casefold)
             if len(uniqueShowNames) < 2:
                 continue
-            logger.info(
-                "rescan found possible duplicate TV show folders for canonical name %s: %s",
+            logger.multiline(
+                "rescan found possible duplicate TV show folders for canonical name: %s",
                 group["canonicalName"],
-                ", ".join(uniqueShowNames),
+                "\n".join(uniqueShowNames),
             )
 
     def _iterResetEpisodeCompanionRenames(
@@ -2715,7 +2715,7 @@ class VideoMixin:
             videoFile.parent / "metadata" / f"{destinationPath.stem}.xml"
         )
 
-        logger.multiline("tv show", videoFile.name, destinationPath.name)
+        logger.multiline("renaming", videoFile.name, destinationPath.name)
         if self.dryRun:
             self._recordSummaryRename(videoFile, destinationPath)
             for sourcePath, companionDestination in companionRenames:
