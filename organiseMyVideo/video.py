@@ -169,8 +169,9 @@ class VideoMixin:
                 continue
             logger.multiline(
                 [
-                    f"rescan found possible duplicate TV show folders for SeriesIDi: {seriesId}",
-                    f"{', '.join(uniqueShowNames)}",
+                    f"rescan found possible duplicate TV show folders for: {seriesId}",
+                    # display each element of uniqueShowNames on a separate line for readability when there are many
+                    *uniqueShowNames
                 ]
             )
 
@@ -182,8 +183,9 @@ class VideoMixin:
                 continue
             logger.multiline(
                 [
-                    f"rescan found possible duplicate TV show folders for canonical name: {group['canonicalName']}",
-                    f"{', '.join(uniqueShowNames)}",
+                    f"rescan found possible duplicate TV show folders for: {group['canonicalName']}",
+                    # display each element of uniqueShowNames on a separate line for readability when there are many
+                    *uniqueShowNames
                 ]
             )
 
