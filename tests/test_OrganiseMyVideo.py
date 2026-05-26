@@ -5360,6 +5360,53 @@ def testResetTvEpisodeTitlesPromptsToMergeDuplicateFolders(
     assert "merge TV show folders: Crown, The <- The Crown" in caplog.text
 
 
+def testResetTvEpisodeTitlesCollectsVideoFilesAfterInteractiveMerge(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+
+    canonicalDir = tvStorage / "Crown, The" / "Season 01"
+    canonicalDir.mkdir(parents=True)
+    (canonicalDir / "The.Crown.S01E01.Wolferton.Splash.mkv").write_bytes(b"x" * 20)
+
+    duplicateRoot = tvStorage / "The Crown"
+    duplicateDir = duplicateRoot / "Season 02"
+    duplicateDir.mkdir(parents=True)
+    (duplicateDir / "The.Crown.S02E01.Misadventure.mkv").write_bytes(b"x" * 20)
+
+    originalIterResetTvShowFiles = confirmedOrganizer._iterResetTvShowFiles
+
+    def wrappedIterResetTvShowFiles(tvDir: Path):
+        assert not duplicateRoot.exists()
+        return originalIterResetTvShowFiles(tvDir)
+
+    with (
+        patch.object(
+            confirmedOrganizer,
+            "_fetchTvMetadataFromScraper",
+            side_effect=AssertionError("scraper lookup should not run"),
+        ),
+        patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ),
+        patch.object(
+            confirmedOrganizer, "_shouldPromptInteractively", return_value=True
+        ),
+        patch.object(confirmedOrganizer, "_readMenuChoice", side_effect=["y", "1"]),
+        patch.object(
+            confirmedOrganizer,
+            "_iterResetTvShowFiles",
+            side_effect=wrappedIterResetTvShowFiles,
+        ),
+    ):
+        stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
+
+
 def testResetTvEpisodeTitlesSkipsMergePreparationWhenNotInteractive(
     tmp_path: Path,
     confirmedOrganizer: VideoOrganizer,

@@ -168,10 +168,14 @@ class VideoMixin:
             canonicalNameGroupsByKey[duplicateKey] = group
 
         candidateGroups = [
-            showNames for showNames in showDirsBySeriesId.values() if len(set(showNames)) > 1
+            showNames
+            for showNames in showDirsBySeriesId.values()
+            if len(set(showNames)) > 1
         ]
         candidateGroups.extend(
-            group["showNames"] for group in canonicalNameGroups if len(group["showNames"]) > 1
+            group["showNames"]
+            for group in canonicalNameGroups
+            if len(group["showNames"]) > 1
         )
         adjacency = {showName: set() for showName in allShowNames}
         for group in candidateGroups:
@@ -234,18 +238,22 @@ class VideoMixin:
 
     def _logResetDuplicateTvShowFolders(self, tvDir: Path) -> None:
         """Warn when multiple stored TV show folders look like duplicates."""
-        showEntries = [
+        showEntries = self._buildResetDuplicateTvShowEntries(tvDir)
+        duplicateAnalysis = self._buildResetDuplicateTvShowAnalysis(showEntries)
+        self._logResetDuplicateTvShowWarnings(
+            duplicateAnalysis["showNamesBySeriesId"],
+            duplicateAnalysis["canonicalNameGroups"],
+        )
+
+    def _buildResetDuplicateTvShowEntries(self, tvDir: Path) -> list[dict]:
+        """Return top-level TV show entries for duplicate analysis and prompts."""
+        return [
             {
                 "showName": showDir.name,
                 "seriesId": self._readResetTvShowSeriesId(showDir),
             }
             for showDir in self._iterResetTvShowDirs(tvDir)
         ]
-        duplicateAnalysis = self._buildResetDuplicateTvShowAnalysis(showEntries)
-        self._logResetDuplicateTvShowWarnings(
-            duplicateAnalysis["showNamesBySeriesId"],
-            duplicateAnalysis["canonicalNameGroups"],
-        )
 
     def _shouldPromptInteractively(self) -> bool:
         """Return True when stdin/stdout are interactive enough for user prompts."""
@@ -399,34 +407,12 @@ class VideoMixin:
                 if self.dryRun:
                     continue
 
-                originalVideoFiles = list(sourceEntry["videoFiles"])
                 self._mergeResetTvShowFolderContents(sourceDir, destinationDir)
-                mergedVideoFiles = []
-                remainingVideoFiles = []
-                for videoFile in originalVideoFiles:
-                    destinationPath = destinationDir / videoFile.relative_to(sourceDir)
-                    if destinationPath.exists():
-                        mergedVideoFiles.append(destinationPath)
-                    elif videoFile.exists():
-                        remainingVideoFiles.append(videoFile)
-
-                masterEntry["videoFiles"].extend(mergedVideoFiles)
-                masterEntry["videoFiles"] = sorted(
-                    {Path(path) for path in masterEntry["videoFiles"]},
-                    key=lambda path: str(path).casefold(),
-                )
                 if not masterEntry.get("seriesId") and sourceEntry.get("seriesId"):
                     masterEntry["seriesId"] = sourceEntry["seriesId"]
-                if remainingVideoFiles:
-                    sourceEntry["videoFiles"] = remainingVideoFiles
-                else:
-                    sourceEntry["_mergedInto"] = masterShowName
+                sourceEntry["_mergedInto"] = masterShowName
 
-        return [
-            entry
-            for entry in showEntries
-            if entry.get("videoFiles") and not entry.get("_mergedInto")
-        ]
+        return [entry for entry in showEntries if not entry.get("_mergedInto")]
 
     def _iterResetEpisodeCompanionRenames(
         self, videoFile: Path, destinationPath: Path
@@ -3035,31 +3021,16 @@ class VideoMixin:
 
         for tvDir in videoDirs:
             if self._shouldPromptInteractively():
-                showEntries = [
-                    {
-                        "showName": showName,
-                        "seriesId": seriesId,
-                        "videoFiles": list(videoFiles),
-                    }
-                    for showName, seriesId, videoFiles in self._iterResetTvShowFiles(
-                        tvDir
-                    )
-                ]
+                showEntries = self._buildResetDuplicateTvShowEntries(tvDir)
                 duplicateAnalysis = self._buildResetDuplicateTvShowAnalysis(showEntries)
                 self._logResetDuplicateTvShowWarnings(
                     duplicateAnalysis["showNamesBySeriesId"],
                     duplicateAnalysis["canonicalNameGroups"],
                 )
-                showEntryIterator = (
-                    (
-                        showEntry["showName"],
-                        showEntry.get("seriesId"),
-                        showEntry["videoFiles"],
-                    )
-                    for showEntry in self._mergeResetDuplicateTvShowFolders(
-                        tvDir, showEntries, duplicateAnalysis["duplicateGroups"]
-                    )
+                self._mergeResetDuplicateTvShowFolders(
+                    tvDir, showEntries, duplicateAnalysis["duplicateGroups"]
                 )
+                showEntryIterator = self._iterResetTvShowFiles(tvDir)
             else:
                 self._logResetDuplicateTvShowFolders(tvDir)
                 showEntryIterator = self._iterResetTvShowFiles(tvDir)
