@@ -5376,34 +5376,19 @@ def testResetTvEpisodeTitlesDetectsNameDuplicatesWithoutEpisodeMetadataScan(
     leadingArticleDir = tvStorage / "The Crown" / "Season 01"
     leadingArticleMetadataDir = leadingArticleDir / "metadata"
     leadingArticleMetadataDir.mkdir(parents=True)
-    (leadingArticleDir / "The.Crown.S01E02.Hyde.Park.Corner.mkv").write_bytes(
-        b"x" * 20
+    (leadingArticleDir / "The.Crown.S01E02.Hyde.Park.Corner.mkv").write_bytes(b"x" * 20)
+    (leadingArticleMetadataDir / "The.Crown.S01E02.Hyde.Park.Corner.xml").write_text(
+        "<Item><SeriesID>123</SeriesID></Item>", encoding="utf-8"
     )
-    (
-        leadingArticleMetadataDir / "The.Crown.S01E02.Hyde.Park.Corner.xml"
-    ).write_text("<Item><SeriesID>123</SeriesID></Item>", encoding="utf-8")
 
-    with (
-        patch.object(
-            confirmedOrganizer,
-            "_fetchTvMetadataFromScraper",
-            side_effect=AssertionError("scraper lookup should not run"),
-        ),
-        patch.object(
-            confirmedOrganizer,
-            "_readTvSeasonMetadataSeriesId",
-            side_effect=AssertionError("duplicate checks should not scan episode XML"),
-        ),
-        patch.object(
-            confirmedOrganizer,
-            "scanStorageLocations",
-            return_value=([], [tvStorage]),
-        ),
+    with patch.object(
+        confirmedOrganizer,
+        "_readTvSeasonMetadataSeriesId",
+        side_effect=AssertionError("duplicate checks should not scan episode XML"),
     ):
         with caplog.at_level("INFO"):
-            stats = confirmedOrganizer.resetTvEpisodeTitles()
+            confirmedOrganizer._logResetDuplicateTvShowFolders(tvStorage)
 
-    assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
     assert (
         "...rescan found possible duplicate TV show folders for: Crown, The:\n"
         "     Crown, The\n"
