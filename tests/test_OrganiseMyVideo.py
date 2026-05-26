@@ -5360,6 +5360,45 @@ def testResetTvEpisodeTitlesPromptsToMergeDuplicateFolders(
     assert "merge TV show folders: Crown, The <- The Crown" in caplog.text
 
 
+def testResetTvEpisodeTitlesSkipsMergePreparationWhenNotInteractive(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+
+    canonicalDir = tvStorage / "Crown, The" / "Season 01"
+    canonicalDir.mkdir(parents=True)
+    (canonicalDir / "The.Crown.S01E01.Wolferton.Splash.mkv").write_bytes(b"x" * 20)
+
+    duplicateDir = tvStorage / "The Crown" / "Season 02"
+    duplicateDir.mkdir(parents=True)
+    (duplicateDir / "The.Crown.S02E01.Misadventure.mkv").write_bytes(b"x" * 20)
+
+    with (
+        patch.object(
+            confirmedOrganizer,
+            "_fetchTvMetadataFromScraper",
+            side_effect=AssertionError("scraper lookup should not run"),
+        ),
+        patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ),
+        patch.object(
+            confirmedOrganizer, "_shouldPromptInteractively", return_value=False
+        ),
+        patch.object(
+            confirmedOrganizer,
+            "_mergeResetDuplicateTvShowFolders",
+            side_effect=AssertionError("non-interactive rescans should stream"),
+        ),
+    ):
+        stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
+
+
 def testResetTvEpisodeTitlesWarnsWhenNormalizedNamesDuplicate(
     tmp_path: Path,
     confirmedOrganizer: VideoOrganizer,

@@ -171,7 +171,7 @@ class VideoMixin:
                 [
                     f"rescan found possible duplicate TV show folders for: {seriesId}",
                     # display each element of uniqueShowNames on a separate line for readability when there are many
-                    *uniqueShowNames
+                    *uniqueShowNames,
                 ]
             )
 
@@ -185,7 +185,7 @@ class VideoMixin:
                 [
                     f"rescan found possible duplicate TV show folders for: {group['canonicalName']}",
                     # display each element of uniqueShowNames on a separate line for readability when there are many
-                    *uniqueShowNames
+                    *uniqueShowNames,
                 ]
             )
 
@@ -243,7 +243,9 @@ class VideoMixin:
                 group["showNames"].add(showName)
 
         candidateGroups.extend(
-            showNames for showNames in showNamesBySeriesId.values() if len(showNames) > 1
+            showNames
+            for showNames in showNamesBySeriesId.values()
+            if len(showNames) > 1
         )
         candidateGroups.extend(
             group["showNames"]
@@ -333,7 +335,9 @@ class VideoMixin:
         if not sourceDir.exists() or not sourceDir.is_dir():
             return
         destinationDir.mkdir(parents=True, exist_ok=True)
-        for sourcePath in sorted(sourceDir.iterdir(), key=lambda item: item.name.casefold()):
+        for sourcePath in sorted(
+            sourceDir.iterdir(), key=lambda item: item.name.casefold()
+        ):
             destinationPath = destinationDir / sourcePath.name
             if destinationPath.exists():
                 if sourcePath.is_dir() and destinationPath.is_dir():
@@ -347,7 +351,9 @@ class VideoMixin:
                     "rescan merge skipped existing path: %s", destinationPath
                 )
                 continue
-            logger.action("merge TV show folder item: %s -> %s", sourcePath, destinationPath)
+            logger.action(
+                "merge TV show folder item: %s -> %s", sourcePath, destinationPath
+            )
             shutil.move(str(sourcePath), str(destinationPath))
 
         try:
@@ -1894,7 +1900,10 @@ class VideoMixin:
             if not candidate:
                 continue
             candidate = re.sub(r"\s+", " ", candidate).strip()
-            if candidate.casefold() == normalised.casefold() and candidate != normalised:
+            if (
+                candidate.casefold() == normalised.casefold()
+                and candidate != normalised
+            ):
                 return candidate
 
         return self._capitaliseLowercaseTvShowTitle(normalised) or showName
@@ -3008,19 +3017,31 @@ class VideoMixin:
 
         for tvDir in videoDirs:
             self._logResetDuplicateTvShowFolders(tvDir)
-            showEntries = [
-                {
-                    "showName": showName,
-                    "seriesId": seriesId,
-                    "videoFiles": list(videoFiles),
-                }
-                for showName, seriesId, videoFiles in self._iterResetTvShowFiles(tvDir)
-            ]
-            showEntries = self._mergeResetDuplicateTvShowFolders(tvDir, showEntries)
-            for showEntry in showEntries:
-                showName = showEntry["showName"]
-                seriesId = showEntry.get("seriesId")
-                videoFiles = showEntry["videoFiles"]
+            if self._shouldPromptInteractively():
+                showEntries = [
+                    {
+                        "showName": showName,
+                        "seriesId": seriesId,
+                        "videoFiles": list(videoFiles),
+                    }
+                    for showName, seriesId, videoFiles in self._iterResetTvShowFiles(
+                        tvDir
+                    )
+                ]
+                showEntryIterator = (
+                    (
+                        showEntry["showName"],
+                        showEntry.get("seriesId"),
+                        showEntry["videoFiles"],
+                    )
+                    for showEntry in self._mergeResetDuplicateTvShowFolders(
+                        tvDir, showEntries
+                    )
+                )
+            else:
+                showEntryIterator = self._iterResetTvShowFiles(tvDir)
+
+            for showName, seriesId, videoFiles in showEntryIterator:
                 showName, videoFiles = self._maybeRenameResetTvShowFolder(
                     tvDir, showName, videoFiles
                 )
