@@ -1871,10 +1871,12 @@ class VideoMixin:
         """Return a filesystem-safe TV episode title fragment."""
         timedTitle = self._normaliseTimedTvEpisodeTitle(value)
         if timedTitle and re.search(r"\b\d{1,2}(?:\.\d{2})?[ap]m\b", timedTitle):
-            return self._sanitiseTvFilenamePart(timedTitle)
-        if preserveInternalSpaces:
-            return self._sanitiseTvFilenamePart(value)
-        return self._sanitiseFilenamePart(value)
+            sanitised = self._sanitiseTvFilenamePart(timedTitle)
+        elif preserveInternalSpaces:
+            sanitised = self._sanitiseTvFilenamePart(value)
+        else:
+            sanitised = self._sanitiseFilenamePart(value)
+        return sanitised.rstrip(".")
 
     def _capitaliseLowercaseTvShowTitle(self, showName: Optional[str]) -> Optional[str]:
         """Return *showName* with word initials capitalised when it is all lowercase."""
