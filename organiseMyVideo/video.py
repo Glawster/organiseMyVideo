@@ -189,6 +189,237 @@ class VideoMixin:
                 ]
             )
 
+    def _shouldPromptInteractively(self) -> bool:
+        """Return True when stdin/stdout are interactive enough for user prompts."""
+        stdinIsTty = getattr(sys.stdin, "isatty", None)
+        stdoutIsTty = getattr(sys.stdout, "isatty", None)
+        stderrIsTty = getattr(sys.stderr, "isatty", None)
+        return bool(
+            callable(stdinIsTty)
+            and stdinIsTty()
+            and (
+                (callable(stdoutIsTty) and stdoutIsTty())
+                or (callable(stderrIsTty) and stderrIsTty())
+            )
+        )
+
+    def _sortResetDuplicateShowNames(self, showNames: Iterable[str]) -> list[str]:
+        """Return duplicate folder names ordered for merge prompts."""
+
+        def _sortKey(showName: str) -> tuple[bool, int, str]:
+            canonicalName = self._buildTvShowFolderName(showName)
+            return (canonicalName != showName, len(showName), showName.casefold())
+
+        return sorted(set(showNames), key=_sortKey)
+
+    def _collectResetDuplicateTvShowGroups(
+        self, showEntries: list[dict]
+    ) -> list[list[str]]:
+        """Return connected groups of possibly-duplicate TV show folders."""
+        candidateGroups = []
+        showNamesBySeriesId = {}
+        canonicalNameGroups = []
+        allShowNames = {entry["showName"] for entry in showEntries}
+
+        for entry in showEntries:
+            showName = entry["showName"]
+            seriesId = entry.get("seriesId")
+            if seriesId:
+                showNamesBySeriesId.setdefault(seriesId, set()).add(showName)
+            canonicalName = self._stripResetTvShowDuplicateSuffixes(showName)
+            duplicateKey = self._buildResetTvShowDuplicateKey(showName)
+            group = self._findResetDuplicateCanonicalNameGroup(
+                duplicateKey, canonicalNameGroups
+            )
+            if group is None:
+                canonicalNameGroups.append(
+                    {
+                        "key": duplicateKey,
+                        "canonicalName": canonicalName,
+                        "showNames": {showName},
+                    }
+                )
+            else:
+                group["showNames"].add(showName)
+
+        candidateGroups.extend(
+            showNames for showNames in showNamesBySeriesId.values() if len(showNames) > 1
+        )
+        candidateGroups.extend(
+            group["showNames"]
+            for group in canonicalNameGroups
+            if len(group["showNames"]) > 1
+        )
+        if not candidateGroups:
+            return []
+
+        adjacency = {showName: set() for showName in allShowNames}
+        for group in candidateGroups:
+            uniqueNames = set(group)
+            for showName in uniqueNames:
+                adjacency.setdefault(showName, set()).update(uniqueNames - {showName})
+
+        duplicateGroups = []
+        seen = set()
+        for showName in self._sortResetDuplicateShowNames(allShowNames):
+            if showName in seen or not adjacency.get(showName):
+                continue
+            stack = [showName]
+            component = set()
+            while stack:
+                current = stack.pop()
+                if current in component:
+                    continue
+                component.add(current)
+                stack.extend(adjacency.get(current, ()))
+            seen.update(component)
+            if len(component) > 1:
+                duplicateGroups.append(self._sortResetDuplicateShowNames(component))
+        return duplicateGroups
+
+    def _promptResetDuplicateTvShowMerge(
+        self, showNames: list[str]
+    ) -> Optional[tuple[str, list[str]]]:
+        """Ask whether duplicate TV show folders should be merged."""
+        orderedShowNames = self._sortResetDuplicateShowNames(showNames)
+        mergePrompt = (
+            "Possible duplicate TV show folders detected during rescan:\n"
+            + "\n".join(f"  {showName}" for showName in orderedShowNames)
+            + "\nMerge these folders? (y/n): "
+        )
+        shouldMerge = self._readMenuChoice(
+            mergePrompt, validChoices={"y", "n"}, defaultChoice="n"
+        )
+        if shouldMerge != "y":
+            return None
+
+        selectionKeys = "123456789abcdefghijklmnopqrstuvwxyz"
+        if len(orderedShowNames) > len(selectionKeys):
+            defaultMaster = orderedShowNames[0]
+            prompt = (
+                "Enter the master TV show folder name exactly as shown "
+                f"(default: {defaultMaster}): "
+            )
+            selectedMaster = self._readTextResponse(prompt).strip() or defaultMaster
+            if selectedMaster not in orderedShowNames:
+                logger.warning(
+                    "rescan merge skipped: unknown master TV show folder %s",
+                    selectedMaster,
+                )
+                return None
+            return selectedMaster, orderedShowNames
+
+        choiceMap = dict(zip(selectionKeys, orderedShowNames))
+        choiceLines = "\n".join(
+            f"  {key}) {showName}" for key, showName in choiceMap.items()
+        )
+        defaultChoice = next(iter(choiceMap))
+        choicePrompt = (
+            "Choose the master TV show folder for the merged result:\n"
+            f"{choiceLines}\n"
+            f"Select master folder ({'/'.join(choiceMap)}): "
+        )
+        selectedChoice = self._readMenuChoice(
+            choicePrompt,
+            validChoices=set(choiceMap),
+            defaultChoice=defaultChoice,
+        )
+        return choiceMap[selectedChoice], orderedShowNames
+
+    def _mergeResetTvShowFolderContents(
+        self, sourceDir: Path, destinationDir: Path
+    ) -> None:
+        """Move non-conflicting files from *sourceDir* into *destinationDir*."""
+        if not sourceDir.exists() or not sourceDir.is_dir():
+            return
+        destinationDir.mkdir(parents=True, exist_ok=True)
+        for sourcePath in sorted(sourceDir.iterdir(), key=lambda item: item.name.casefold()):
+            destinationPath = destinationDir / sourcePath.name
+            if destinationPath.exists():
+                if sourcePath.is_dir() and destinationPath.is_dir():
+                    self._mergeResetTvShowFolderContents(sourcePath, destinationPath)
+                    try:
+                        sourcePath.rmdir()
+                    except OSError:
+                        pass
+                    continue
+                logger.warning(
+                    "rescan merge skipped existing path: %s", destinationPath
+                )
+                continue
+            logger.action("merge TV show folder item: %s -> %s", sourcePath, destinationPath)
+            shutil.move(str(sourcePath), str(destinationPath))
+
+        try:
+            sourceDir.rmdir()
+        except OSError:
+            pass
+
+    def _mergeResetDuplicateTvShowFolders(
+        self, tvDir: Path, showEntries: list[dict]
+    ) -> list[dict]:
+        """Prompt for and merge duplicate TV show folders before rescanning."""
+        if not self._shouldPromptInteractively():
+            return showEntries
+
+        entriesByShowName = {entry["showName"]: entry for entry in showEntries}
+        duplicateGroups = self._collectResetDuplicateTvShowGroups(showEntries)
+        if not duplicateGroups:
+            return showEntries
+
+        for duplicateGroup in duplicateGroups:
+            promptResult = self._promptResetDuplicateTvShowMerge(duplicateGroup)
+            if promptResult is None:
+                continue
+
+            masterShowName, orderedShowNames = promptResult
+            masterEntry = entriesByShowName.get(masterShowName)
+            if masterEntry is None:
+                continue
+
+            for showName in orderedShowNames:
+                if showName == masterShowName:
+                    continue
+                sourceEntry = entriesByShowName.get(showName)
+                if sourceEntry is None or sourceEntry.get("_mergedInto"):
+                    continue
+                sourceDir = tvDir / showName
+                destinationDir = tvDir / masterShowName
+                logger.action(
+                    "merge TV show folders: %s <- %s", masterShowName, showName
+                )
+                if self.dryRun:
+                    continue
+
+                originalVideoFiles = list(sourceEntry["videoFiles"])
+                self._mergeResetTvShowFolderContents(sourceDir, destinationDir)
+                mergedVideoFiles = []
+                remainingVideoFiles = []
+                for videoFile in originalVideoFiles:
+                    destinationPath = destinationDir / videoFile.relative_to(sourceDir)
+                    if destinationPath.exists():
+                        mergedVideoFiles.append(destinationPath)
+                    elif videoFile.exists():
+                        remainingVideoFiles.append(videoFile)
+
+                masterEntry["videoFiles"].extend(mergedVideoFiles)
+                masterEntry["videoFiles"] = sorted(
+                    {Path(path) for path in masterEntry["videoFiles"]},
+                    key=lambda path: str(path).casefold(),
+                )
+                if not masterEntry.get("seriesId") and sourceEntry.get("seriesId"):
+                    masterEntry["seriesId"] = sourceEntry["seriesId"]
+                if remainingVideoFiles:
+                    sourceEntry["videoFiles"] = remainingVideoFiles
+                else:
+                    sourceEntry["_mergedInto"] = masterShowName
+
+        return [
+            entry
+            for entry in showEntries
+            if entry.get("videoFiles") and not entry.get("_mergedInto")
+        ]
+
     def _iterResetEpisodeCompanionRenames(
         self, videoFile: Path, destinationPath: Path
     ) -> list[tuple[Path, Path]]:
@@ -2777,7 +3008,19 @@ class VideoMixin:
 
         for tvDir in videoDirs:
             self._logResetDuplicateTvShowFolders(tvDir)
-            for showName, seriesId, videoFiles in self._iterResetTvShowFiles(tvDir):
+            showEntries = [
+                {
+                    "showName": showName,
+                    "seriesId": seriesId,
+                    "videoFiles": list(videoFiles),
+                }
+                for showName, seriesId, videoFiles in self._iterResetTvShowFiles(tvDir)
+            ]
+            showEntries = self._mergeResetDuplicateTvShowFolders(tvDir, showEntries)
+            for showEntry in showEntries:
+                showName = showEntry["showName"]
+                seriesId = showEntry.get("seriesId")
+                videoFiles = showEntry["videoFiles"]
                 showName, videoFiles = self._maybeRenameResetTvShowFolder(
                     tvDir, showName, videoFiles
                 )

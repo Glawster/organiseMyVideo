@@ -64,7 +64,7 @@ python organiseMyVideo.py --torrent --clean --confirm
 | `--clean` | Clean the source directory, or when combined with `--torrent`, also clean prefixed `.torrent` names |
 | `--non-interactive` | Skip prompts for files that cannot be auto-detected |
 | `--refresh` | Rebuild the saved metadata library from storage before processing files |
-| `--rescan` | Scan existing TV library files and rename episodes whose filename title still looks like release noise |
+| `--rescan` | Scan existing TV library files and rename episodes whose filename title still looks like release noise; when run interactively it can also prompt to merge duplicate show folders and choose the master folder |
 | `--no-curses` | Use line-based prompts instead of the default curses single-key menus |
 | `--torrent` | Run torrent cleanup against the `Downloads` folder that sits next to the source directory |
 | `--debug` | Enable debug logging, including TVDB title payload debug lines |
@@ -73,7 +73,7 @@ The metadata library is saved in `~/.config/organiseMyVideo/metadataLibrary.json
 
 `--auto` reuses the normal organiser logic without prompts and writes a plain-text transfer/rename summary into the source directory so you can review any manual tidy-up afterwards.
 
-`--rescan` scans the existing TV library roots, normalises retitled episodes to the newer space-style show/title fragments, capitalises lowercase TV show folders when needed, and only falls back to scraper lookups when the current filename suffix still looks like release noise or is missing. It also warns when multiple show folders share the same stored SeriesID so likely duplicates are easier to spot. When an episode is retitled, matching same-stem `.xml` and `.jpg` companion files are renamed with it. Console output is otherwise limited to `rescanning: ...` lines plus any actual rescan rename lines.
+`--rescan` scans the existing TV library roots, normalises retitled episodes to the newer space-style show/title fragments, capitalises lowercase TV show folders when needed, and only falls back to scraper lookups when the current filename suffix still looks like release noise or is missing. It also warns when multiple show folders share the same stored SeriesID so likely duplicates are easier to spot, and interactive runs can prompt to merge those duplicate folders while choosing which one remains the master. When an episode is retitled, matching same-stem `.xml` and `.jpg` companion files are renamed with it. Console output is otherwise limited to `rescanning: ...` lines plus any actual rescan rename lines.
 
 ---
 

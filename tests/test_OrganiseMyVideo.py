@@ -5308,6 +5308,58 @@ def testResetTvEpisodeTitlesWarnsWhenTrailingTheFoldersDuplicate(
     assert caplog.text.count("scanning: Crown, The") == 2
 
 
+def testResetTvEpisodeTitlesPromptsToMergeDuplicateFolders(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+
+    canonicalDir = tvStorage / "Crown, The" / "Season 01"
+    canonicalDir.mkdir(parents=True)
+    canonicalEpisode = canonicalDir / "The.Crown.S01E01.Wolferton.Splash.mkv"
+    canonicalEpisode.write_bytes(b"x" * 20)
+
+    duplicateDir = tvStorage / "The Crown" / "Season 02"
+    duplicateDir.mkdir(parents=True)
+    duplicateEpisode = duplicateDir / "The.Crown.S02E01.Misadventure.mkv"
+    duplicateEpisode.write_bytes(b"x" * 20)
+
+    with (
+        patch.object(
+            confirmedOrganizer,
+            "_fetchTvMetadataFromScraper",
+            side_effect=AssertionError("scraper lookup should not run"),
+        ),
+        patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ),
+        patch.object(
+            confirmedOrganizer, "_shouldPromptInteractively", return_value=True
+        ),
+        patch.object(
+            confirmedOrganizer, "_readMenuChoice", side_effect=["y", "1"]
+        ) as mockMenu,
+    ):
+        with caplog.at_level("INFO"):
+            stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
+    assert mockMenu.call_count == 2
+    assert "Merge these folders? (y/n): " in mockMenu.call_args_list[0].args[0]
+    assert "Choose the master TV show folder for the merged result:" in (
+        mockMenu.call_args_list[1].args[0]
+    )
+    assert "1) Crown, The" in mockMenu.call_args_list[1].args[0]
+    assert "2) The Crown" in mockMenu.call_args_list[1].args[0]
+    assert (tvStorage / "Crown, The" / "Season 02" / duplicateEpisode.name).exists()
+    assert not (tvStorage / "The Crown").exists()
+    assert caplog.text.count("scanning: Crown, The") == 1
+    assert "merge TV show folders: Crown, The <- The Crown" in caplog.text
+
+
 def testResetTvEpisodeTitlesWarnsWhenNormalizedNamesDuplicate(
     tmp_path: Path,
     confirmedOrganizer: VideoOrganizer,
