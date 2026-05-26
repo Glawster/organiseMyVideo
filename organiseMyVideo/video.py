@@ -30,14 +30,6 @@ _MOVE_PROGRESS_CHUNK_SIZE = 1024 * 1024
 _FILE_PROCESS_SEPARATOR = "-" * 72
 _IGNORED_LOCAL_FOLDER_NAMES = {"featurettes", "extras"}
 
-
-def _logMultilineInfo(message: str, *lines: str) -> None:
-    """Log a simple indented multi-line block via the stable info() surface."""
-    formattedLines = [f"{message}:"]
-    formattedLines.extend(f"     {line}" for line in lines)
-    logger.info("\n".join(formattedLines))
-
-
 class VideoMixin:
     """Methods for parsing, locating, moving and cleaning video files."""
 
@@ -2720,7 +2712,7 @@ class VideoMixin:
             videoFile.parent / "metadata" / f"{destinationPath.stem}.xml"
         )
 
-        _logMultilineInfo("tv show", videoFile.name, destinationPath.name)
+        logger.multiline("tv show", videoFile.name, destinationPath.name)
         if self.dryRun:
             self._recordSummaryRename(videoFile, destinationPath)
             for sourcePath, companionDestination in companionRenames:
