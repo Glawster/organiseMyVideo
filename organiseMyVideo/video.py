@@ -30,6 +30,7 @@ _MOVE_PROGRESS_CHUNK_SIZE = 1024 * 1024
 _FILE_PROCESS_SEPARATOR = "-" * 72
 _IGNORED_LOCAL_FOLDER_NAMES = {"featurettes", "extras"}
 
+
 class VideoMixin:
     """Methods for parsing, locating, moving and cleaning video files."""
 
@@ -166,9 +167,11 @@ class VideoMixin:
             uniqueShowNames = sorted(set(showNames), key=str.casefold)
             if len(uniqueShowNames) < 2:
                 continue
-            logger.info(
-                f"rescan found possible duplicate TV show folders for SeriesID "
-                f"{seriesId}: {', '.join(uniqueShowNames)}"
+            logger.multiline(
+                [
+                    f"rescan found possible duplicate TV show folders for SeriesIDi: {seriesId}",
+                    f"{', '.join(uniqueShowNames)}",
+                ]
             )
 
         for group in sorted(
@@ -177,9 +180,11 @@ class VideoMixin:
             uniqueShowNames = sorted(set(group["showNames"]), key=str.casefold)
             if len(uniqueShowNames) < 2:
                 continue
-            logger.info(
-                f"rescan found possible duplicate TV show folders for canonical "
-                f"name {group['canonicalName']}: {', '.join(uniqueShowNames)}"
+            logger.multiline(
+                [
+                    f"rescan found possible duplicate TV show folders for canonical name: {group['canonicalName']}",
+                    f"{', '.join(uniqueShowNames)}",
+                ]
             )
 
     def _iterResetEpisodeCompanionRenames(
@@ -2712,7 +2717,7 @@ class VideoMixin:
             videoFile.parent / "metadata" / f"{destinationPath.stem}.xml"
         )
 
-        logger.multiline("tv show", videoFile.name, destinationPath.name)
+        logger.multiline(["renaming", videoFile.name, destinationPath.name])
         if self.dryRun:
             self._recordSummaryRename(videoFile, destinationPath)
             for sourcePath, companionDestination in companionRenames:
