@@ -4146,6 +4146,7 @@ def testPromptUserConfirmationDoesNotReuseMovieChoices(organizer: VideoOrganizer
 
 def testPromptUserConfirmationUsesCursesMenuWhenEnabled(organizer: VideoOrganizer):
     organizer.useCurses = True
+    organizer._promptHelpDisplayed = True
     with (
         patch.object(organizer, "_shouldUseCursesPrompts", return_value=True),
         patch.object(organizer, "_readCursesMenuChoice", return_value="y") as mockMenu,
