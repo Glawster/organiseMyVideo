@@ -4960,6 +4960,42 @@ def testResetTvEpisodeTitlesPreservesMixedCaseShowNamesFromEpisodes(
     assert "renaming TV Show: iZombie (from izombie)" in caplog.text
 
 
+def testResetTvEpisodeTitlesPreservesMixedCaseShowNamesFromSeriesMetadata(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    showDir = tvStorage / "izombie"
+    seasonDir = showDir / "Season 01"
+    seasonDir.mkdir(parents=True)
+    (showDir / "series.xml").write_text(
+        "<Series><SeriesName>iZombie</SeriesName></Series>", encoding="utf-8"
+    )
+    episodeFile = seasonDir / "izombie.S01E01.Pilot.mkv"
+    episodeFile.write_bytes(b"x" * 20)
+
+    with patch.object(
+        confirmedOrganizer,
+        "_fetchTvMetadataFromScraper",
+        side_effect=AssertionError("scraper lookup should not run"),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ):
+            with caplog.at_level("INFO"):
+                stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    renamedSeasonDir = tvStorage / "iZombie" / "Season 01"
+    assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
+    assert renamedSeasonDir.exists()
+    assert (renamedSeasonDir / "izombie.S01E01.Pilot.mkv").exists()
+    assert not episodeFile.exists()
+    assert "renaming TV Show: iZombie (from izombie)" in caplog.text
+
+
 def testResetTvEpisodeTitlesRegeneratesCorruptEpisodeMetadataXml(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
 ):
