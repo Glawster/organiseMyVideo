@@ -31,6 +31,13 @@ _FILE_PROCESS_SEPARATOR = "-" * 72
 _IGNORED_LOCAL_FOLDER_NAMES = {"featurettes", "extras"}
 
 
+def _logMultilineInfo(message: str, *lines: str) -> None:
+    """Log a simple indented multi-line block via the stable info() surface."""
+    formattedLines = [f"{message}:"]
+    formattedLines.extend(f"     {line}" for line in lines)
+    logger.info("\n".join(formattedLines))
+
+
 class VideoMixin:
     """Methods for parsing, locating, moving and cleaning video files."""
 
@@ -167,10 +174,9 @@ class VideoMixin:
             uniqueShowNames = sorted(set(showNames), key=str.casefold)
             if len(uniqueShowNames) < 2:
                 continue
-            logger.multiline(
-                "rescan found possible duplicate TV show folders for SeriesID: %s",
-                seriesId,
-                "\n ".join(uniqueShowNames),
+            logger.info(
+                f"rescan found possible duplicate TV show folders for SeriesID "
+                f"{seriesId}: {', '.join(uniqueShowNames)}"
             )
 
         for group in sorted(
@@ -179,10 +185,9 @@ class VideoMixin:
             uniqueShowNames = sorted(set(group["showNames"]), key=str.casefold)
             if len(uniqueShowNames) < 2:
                 continue
-            logger.multiline(
-                "rescan found possible duplicate TV show folders for canonical name: %s",
-                group["canonicalName"],
-                "\n".join(uniqueShowNames),
+            logger.info(
+                f"rescan found possible duplicate TV show folders for canonical "
+                f"name {group['canonicalName']}: {', '.join(uniqueShowNames)}"
             )
 
     def _iterResetEpisodeCompanionRenames(
@@ -2715,7 +2720,7 @@ class VideoMixin:
             videoFile.parent / "metadata" / f"{destinationPath.stem}.xml"
         )
 
-        logger.multiline("renaming", videoFile.name, destinationPath.name)
+        _logMultilineInfo("tv show", videoFile.name, destinationPath.name)
         if self.dryRun:
             self._recordSummaryRename(videoFile, destinationPath)
             for sourcePath, companionDestination in companionRenames:

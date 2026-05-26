@@ -63,7 +63,7 @@ def testExplicitDryRunFalse(tmp_path: Path):
 
 def testLoggerMultilineRendersIndentedEntries(caplog: pytest.LogCaptureFixture):
     with caplog.at_level("INFO"):
-        video_module.logger.multiline("tv show", "old.mkv", "new.mkv")
+        video_module._logMultilineInfo("tv show", "old.mkv", "new.mkv")
 
     assert "...tv show:\n     old.mkv\n     new.mkv" in caplog.text
 
