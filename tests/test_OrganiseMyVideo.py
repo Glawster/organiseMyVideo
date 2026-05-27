@@ -5436,7 +5436,7 @@ def testResetTvEpisodeTitlesPromptsToMergeDuplicateFolders(
 
     assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
     assert mockMenu.call_count == 2
-    assert "Merge these folders? (y/n/q): " in mockMenu.call_args_list[0].args[0]
+    assert mockMenu.call_args_list[0].args[0] == "Merge these folders? (y/n/q): "
     assert "Choose the master TV show folder for the merged result:" in (
         mockMenu.call_args_list[1].args[0]
     )
@@ -5481,6 +5481,7 @@ def testResetTvEpisodeTitlesPromptsImmediatelyAfterEachDuplicateWarning(
         assert expectedWarnings[callIndex] in caplog.text
         for laterWarning in expectedWarnings[callIndex + 1 :]:
             assert laterWarning not in caplog.text
+        assert prompt == "Merge these folders? (y/n/q): "
         _readChoice.callCount += 1
         return "n"
 
@@ -5548,7 +5549,7 @@ def testResetTvEpisodeTitlesCanQuitFromDuplicateMergePrompt(
 
     assert excInfo.value.code == 0
     assert mockMenu.call_count == 1
-    assert "Merge these folders? (y/n/q): " in mockMenu.call_args.args[0]
+    assert mockMenu.call_args.args[0] == "Merge these folders? (y/n/q): "
     assert "user requested to quit" in caplog.text
     assert "rescanning: Crown, The" not in caplog.text
 

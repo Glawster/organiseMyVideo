@@ -305,11 +305,7 @@ class VideoMixin:
     ) -> Optional[tuple[str, list[str]]]:
         """Ask whether duplicate TV show folders should be merged."""
         orderedShowNames = self._sortResetDuplicateShowNames(showNames)
-        mergePrompt = (
-            "Possible duplicate TV show folders detected during rescan:\n"
-            + "\n".join(f"  {showName}" for showName in orderedShowNames)
-            + "\nMerge these folders? (y/n/q): "
-        )
+        mergePrompt = "Merge these folders? (y/n/q): "
         shouldMerge = self._readMenuChoice(
             mergePrompt, validChoices={"y", "n", "q"}, defaultChoice="n"
         )
