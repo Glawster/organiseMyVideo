@@ -1,5 +1,6 @@
 """Core video-file organisation: scan storage, parse filenames, move files, clean names."""
 
+from contextlib import contextmanager
 import errno
 import difflib
 import os
@@ -26,6 +27,8 @@ _MOVE_PROGRESS_MIN_COLUMNS = 20
 _MOVE_PROGRESS_REDUCED_BAR_RATIO = 5
 _MOVE_PROGRESS_MIN_REDUCED_BAR_WIDTH = 8
 _MOVE_PROGRESS_CHUNK_SIZE = 1024 * 1024
+_FILE_PROCESS_SEPARATOR = "-" * 72
+_IGNORED_LOCAL_FOLDER_NAMES = {"featurettes", "extras"}
 
 
 class VideoMixin:
@@ -46,6 +49,171 @@ class VideoMixin:
         "mcm_id__*.dvdid.xml",
     )
     _TV_SEASON_MCM_PATTERNS = ("folder.jpg",)
+    _MOVIE_ARTWORK_PATTERNS = ("folder.jpg", "banner.jpg", "backdrop*.jpg")
+    _TV_SHOW_ARTWORK_PATTERNS = ("folder.jpg", "banner.jpg", "backdrop*.jpg")
+    _TV_SEASON_ARTWORK_PATTERNS = ("folder.jpg",)
+
+    @contextmanager
+    def _suppressResetNoiseLogs(self):
+        """Temporarily silence noisy info/action logging during reset scans."""
+        from . import metadata as metadata_module
+
+        targets = (logger, metadata_module.logger)
+        methodNames = ("doing", "done", "info", "value", "action")
+        originals = {
+            target: {name: getattr(target, name) for name in methodNames}
+            for target in targets
+        }
+
+        try:
+            for target in targets:
+                for name in methodNames:
+                    setattr(target, name, lambda *args, **kwargs: None)
+            yield
+        finally:
+            for target, methods in originals.items():
+                for name, method in methods.items():
+                    setattr(target, name, method)
+
+    @contextmanager
+    def _suppressResetMetadataPreserveLogs(self):
+        """Hide no-op metadata preservation logs while keeping real update logs."""
+        from . import metadata as metadata_module
+
+        targets = (logger, metadata_module.logger)
+        originals = {target: target.value for target in targets}
+
+        def _wrapValue(original):
+            def _value(label, *args, **kwargs):
+                if label in {
+                    "preserving existing metadata",
+                    "preserving existing metadata files",
+                }:
+                    return None
+                return original(label, *args, **kwargs)
+
+            return _value
+
+        try:
+            for target in targets:
+                target.value = _wrapValue(target.value)
+            yield
+        finally:
+            for target, original in originals.items():
+                target.value = original
+
+    def _iterResetTvShowFiles(self, tvDir: Path):
+        """Yield grouped reset candidates by top-level TV show folder."""
+        showFiles = {}
+        for videoFile in sorted(tvDir.rglob("*")):
+            if (
+                not videoFile.is_file()
+                or videoFile.suffix.lower() not in VIDEO_EXTENSIONS
+            ):
+                continue
+            relativePath = videoFile.relative_to(tvDir)
+            showName = (
+                relativePath.parts[0] if len(relativePath.parts) > 1 else tvDir.name
+            )
+            showFiles.setdefault(showName, []).append(videoFile)
+
+        for showName, videoFiles in showFiles.items():
+            showDir = tvDir / showName
+            seriesId = (
+                self._readResetTvShowSeriesId(showDir) if showDir.is_dir() else None
+            )
+            yield showName, seriesId, videoFiles
+
+    def _iterResetTvShowDirs(self, tvDir: Path) -> Iterable[Path]:
+        """Yield top-level TV show directories for reset scans."""
+        try:
+            showDirs = sorted(
+                showDir for showDir in tvDir.iterdir() if showDir.is_dir()
+            )
+        except OSError as error:
+            logger.warning("could not inspect TV storage %s: %s", tvDir, error)
+            return
+        yield from showDirs
+
+    def _readResetTvShowSeriesId(self, showDir: Path) -> Optional[str]:
+        """Return the best available series ID for a stored TV show folder."""
+        return self._readTvShowSeriesId(showDir)
+
+    def _logResetDuplicateTvShowFolders(self, tvDir: Path) -> None:
+        """Warn when multiple stored TV show folders share the same series ID."""
+        showDirsBySeriesId = {}
+        canonicalNameGroups = []
+        for showDir in self._iterResetTvShowDirs(tvDir):
+            seriesId = self._readResetTvShowSeriesId(showDir)
+            if seriesId:
+                showDirsBySeriesId.setdefault(seriesId, []).append(showDir.name)
+            canonicalName = self._stripResetTvShowDuplicateSuffixes(showDir.name)
+            duplicateKey = self._buildResetTvShowDuplicateKey(showDir.name)
+            group = self._findResetDuplicateCanonicalNameGroup(
+                duplicateKey, canonicalNameGroups
+            )
+            if group is None:
+                canonicalNameGroups.append(
+                    {
+                        "key": duplicateKey,
+                        "canonicalName": canonicalName,
+                        "showNames": [showDir.name],
+                    }
+                )
+                continue
+            group["showNames"].append(showDir.name)
+
+        for seriesId, showNames in sorted(showDirsBySeriesId.items()):
+            uniqueShowNames = sorted(set(showNames), key=str.casefold)
+            if len(uniqueShowNames) < 2:
+                continue
+            logger.multiline(
+                [
+                    f"rescan found possible duplicate TV show folders for: {seriesId}",
+                    # display each element of uniqueShowNames on a separate line for readability when there are many
+                    *uniqueShowNames
+                ]
+            )
+
+        for group in sorted(
+            canonicalNameGroups, key=lambda item: item["canonicalName"].casefold()
+        ):
+            uniqueShowNames = sorted(set(group["showNames"]), key=str.casefold)
+            if len(uniqueShowNames) < 2:
+                continue
+            logger.multiline(
+                [
+                    f"rescan found possible duplicate TV show folders for: {group['canonicalName']}",
+                    # display each element of uniqueShowNames on a separate line for readability when there are many
+                    *uniqueShowNames
+                ]
+            )
+
+    def _iterResetEpisodeCompanionRenames(
+        self, videoFile: Path, destinationPath: Path
+    ) -> list[tuple[Path, Path]]:
+        """Return existing same-stem XML/JPG companion files that should be renamed."""
+        candidates = []
+        sameDir = videoFile.parent
+        metadataDir = sameDir / "metadata"
+        for baseDir in (sameDir, metadataDir):
+            for suffix in (".xml", ".jpg"):
+                candidates.append(
+                    (
+                        baseDir / f"{videoFile.stem}{suffix}",
+                        baseDir / f"{destinationPath.stem}{suffix}",
+                    )
+                )
+
+        renames = []
+        seen = set()
+        for sourcePath, destPath in candidates:
+            if sourcePath in seen:
+                continue
+            seen.add(sourcePath)
+            if sourcePath.exists() and sourcePath != destPath:
+                renames.append((sourcePath, destPath))
+        return renames
 
     def scanStorageLocations(self) -> Tuple[List[Path], List[Path]]:
         """
@@ -54,7 +222,7 @@ class VideoMixin:
         Returns:
             Tuple of (movie_directories, tv_directories)
         """
-        logger.info("scanning for storage locations...")
+        logger.info("scanning for storage locations")
 
         movieDirs = []
         videoDirs = []
@@ -110,11 +278,7 @@ class VideoMixin:
             showName = re.sub(r"[\.\s_]+", " ", match.group(1)).strip()
             season = int(match.group(2))
             episode = int(match.group(3))
-            episodeTitle = (
-                re.sub(r"[\.\s_]+", " ", match.group(4)).strip()
-                if match.group(4)
-                else None
-            )
+            episodeTitle = self._cleanParsedTvEpisodeTitle(match.group(4))
 
             return {
                 "showName": showName,
@@ -126,6 +290,56 @@ class VideoMixin:
             }
 
         return None
+
+    def _parsedTvEpisodeTitleNeedsCleanup(self, filename: str) -> bool:
+        """Return True when a parsed TV episode title differs from the source filename."""
+        stem, extension = os.path.splitext(filename)
+        if not extension:
+            return False
+
+        pattern = r"^(.+?)[\.\s_]+S(\d+)E(\d+)(?:[\.\s_]+(.+?))?$"
+        match = re.match(pattern, stem, re.IGNORECASE)
+        if not match or not match.group(4):
+            return False
+
+        rawTitle = match.group(4).strip()
+        separatorNormalised = re.sub(r"[._]+", " ", rawTitle)
+        separatorNormalised = re.sub(r"\s+", " ", separatorNormalised).strip()
+        return self._cleanParsedTvEpisodeTitle(rawTitle) != separatorNormalised
+
+    def _cleanParsedTvEpisodeTitle(self, value: Optional[str]) -> Optional[str]:
+        """Return a cleaned filename-derived episode title, dropping release noise."""
+        if not value:
+            return None
+
+        original = value.strip()
+        cleaned = original
+        noisyBracketPattern = (
+            r"[\[\(][^\]\)]*"
+            r"(?:720p|1080p|2160p|web(?:-dl|rip)?|hdtv|bluray|brrip|x264|x265|"
+            r"h\.?264|hevc|ddp?|aac|proper|repack|multi|eztv(?:x)?(?:\.to)?|"
+            r"ettv|rarbg|successfulcrab|amb3r|ethel)"
+            r"[^\]\)]*[\]\)]"
+        )
+        cleaned = re.sub(noisyBracketPattern, " ", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"(?:\s*\[[^\]]+\])+$", "", cleaned).strip()
+        cleaned = re.sub(r"[._]+", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+        noiseStartPattern = (
+            r"(?:^|[\s-])"
+            r"(?:720p|1080p|2160p|web(?:-dl|rip)?|hdtv|bluray|brrip|x264|x265|"
+            r"h\.?264|hevc|ddp?|aac|proper|repack|multi|eztv(?:x)?(?:\.to)?|"
+            r"ettv|rarbg|successfulcrab|amb3r|ethel)\b"
+        )
+        noiseStart = re.search(noiseStartPattern, cleaned, re.IGNORECASE)
+        if noiseStart:
+            cleaned = cleaned[: noiseStart.start()].strip(" -._")
+
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        if cleaned and cleaned != original:
+            cleaned = self._normaliseTimedTvEpisodeTitle(cleaned)
+        return cleaned or None
 
     def parseMovieFilename(self, filename: str) -> Optional[dict]:
         """
@@ -201,11 +415,26 @@ class VideoMixin:
         Returns:
             Path to existing directory or None
         """
+        exactFolderName = showName.casefold()
+        canonicalFolderName = self._buildTvShowFolderName(showName).casefold()
         for tvRoot in videoDirs:
+            canonicalMatch = None
+            exactMatch = None
             for item in tvRoot.iterdir():
-                if item.is_dir() and item.name.lower() == showName.lower():
-                    logger.value("found existing TV show", item)
-                    return item
+                if not item.is_dir():
+                    continue
+                itemName = item.name.casefold()
+                if itemName == canonicalFolderName:
+                    canonicalMatch = item
+                    continue
+                if itemName == exactFolderName:
+                    exactMatch = item
+            if canonicalMatch is not None:
+                logger.value("found existing TV show", canonicalMatch)
+                return canonicalMatch
+            if exactMatch is not None:
+                logger.value("found existing TV show", exactMatch)
+                return exactMatch
 
         return None
 
@@ -236,8 +465,69 @@ class VideoMixin:
         if not folderNames:
             return None
 
-        matches = difflib.get_close_matches(showName, folderNames, n=1, cutoff=0.6)
-        return matches[0] if matches else None
+        for candidateName in (showName, self._buildTvShowFolderName(showName)):
+            matches = difflib.get_close_matches(
+                candidateName, folderNames, n=1, cutoff=0.6
+            )
+            if matches:
+                return matches[0]
+        return None
+
+    def _buildTvShowFolderName(self, showName: str) -> str:
+        """Return the on-disk TV show folder name for *showName*."""
+        normalised = re.sub(r"\s+", " ", showName).strip()
+        if not normalised:
+            return showName
+        if re.search(r",\s*the$", normalised, re.IGNORECASE):
+            return normalised
+        match = re.match(r"^the\s+(.+)$", normalised, re.IGNORECASE)
+        if not match:
+            return normalised
+        remainder = match.group(1).strip()
+        return f"{remainder}, The" if remainder else normalised
+
+    def _stripResetTvShowDuplicateSuffixes(self, showName: str) -> str:
+        """Return a show name with common duplicate-only suffixes removed."""
+        normalised = unicodedata.normalize(
+            "NFKC", self._buildTvShowFolderName(showName)
+        )
+        normalised = re.sub(r"\s+", " ", normalised).strip()
+        suffixPatterns = (
+            r"\s*\[\d+\]\s*$",
+            r"\s*\((?:19|20)\d{2}\)\s*$",
+            r"\s+(?:19|20)\d{2}\s*$",
+            r"\s+the\s+series\s*$",
+        )
+        changed = True
+        while changed and normalised:
+            changed = False
+            for pattern in suffixPatterns:
+                updated = re.sub(pattern, "", normalised, flags=re.IGNORECASE).strip()
+                if updated != normalised:
+                    normalised = updated
+                    changed = True
+        return normalised or self._buildTvShowFolderName(showName)
+
+    def _buildResetTvShowDuplicateKey(self, showName: str) -> str:
+        """Return a loose duplicate-detection key for TV show folder names."""
+        return "".join(
+            ch.lower()
+            for ch in self._stripResetTvShowDuplicateSuffixes(showName)
+            if ch.isalnum()
+        )
+
+    def _findResetDuplicateCanonicalNameGroup(
+        self, duplicateKey: str, groups: list[dict]
+    ) -> Optional[dict]:
+        """Return an existing duplicate-name group close enough to *duplicateKey*."""
+        bestGroup = None
+        bestRatio = 0.0
+        for group in groups:
+            ratio = difflib.SequenceMatcher(None, duplicateKey, group["key"]).ratio()
+            if ratio > bestRatio:
+                bestGroup = group
+                bestRatio = ratio
+        return bestGroup if bestRatio >= 0.9 else None
 
     def _makePromptCacheKey(self, defaultName: str, fileType: str) -> tuple[str, str]:
         """
@@ -342,6 +632,8 @@ class VideoMixin:
         """
         inputStream = sys.stdin
         outputStream = sys.stdout
+        if sys.stderr.isatty():
+            outputStream = sys.stderr
         fileDescriptor = inputStream.fileno()
         try:
             originalTerminalState = termios.tcgetattr(fileDescriptor)
@@ -365,15 +657,16 @@ class VideoMixin:
                 if key == "\x04":
                     raise EOFError("single-key prompt cancelled by user (Ctrl+D)")
                 if key in ("\n", "\r") and defaultChoice is not None:
-                    print(defaultChoice, file=outputStream, flush=True)
+                    print(defaultChoice, end="\r\n", file=outputStream, flush=True)
                     return defaultChoice
                 if key:
                     lowered = key.lower()
                     if lowered in validChoices:
-                        print(lowered, file=outputStream, flush=True)
+                        print(lowered, end="\r\n", file=outputStream, flush=True)
                         return lowered
                 print(
-                    f"\nUse one of: {validChoiceText}",
+                    f"\r\nUse one of: {validChoiceText}",
+                    end="\r\n",
                     file=outputStream,
                     flush=True,
                 )
@@ -469,6 +762,15 @@ class VideoMixin:
                 matches.append(match)
         return matches
 
+    def _hasMatchingFiles(self, sourceDir: Path, patterns: Iterable[str]) -> bool:
+        """
+        Return True when *sourceDir* contains at least one glob-pattern match.
+
+        Uses the same matching rules as :meth:`_collectMatchingFiles`.
+        Returns False when *sourceDir* is missing or not a directory.
+        """
+        return bool(self._collectMatchingFiles(sourceDir, patterns))
+
     def _copyFilesIntoDir(self, sourceFiles: Iterable[Path], destDir: Path) -> None:
         """
         Copy pre-filtered companion files into *destDir*.
@@ -478,12 +780,24 @@ class VideoMixin:
             destDir: Destination directory that should receive the copied files.
         """
         for sourcePath in sourceFiles:
-            destPath = destDir / sourcePath.name
-            logger.action(f"copy metadata: {sourcePath} -> {destPath}")
-            if self.dryRun:
-                continue
-            destDir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(sourcePath, destPath)
+            self._copyFileIfMissing(sourcePath, destDir / sourcePath.name)
+
+    def _copyFileIfMissing(self, sourcePath: Path, destPath: Path) -> None:
+        """
+        Copy *sourcePath* to *destPath* only when destination does not already exist.
+
+        Existing destinations are preserved unchanged. Parent directories are
+        created automatically when writing.
+        """
+        if destPath.exists():
+            logger.value("preserving existing metadata", destPath)
+            return
+
+        logger.action(f"copy metadata: {sourcePath} -> {destPath}")
+        if self.dryRun:
+            return
+        destPath.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(sourcePath, destPath)
 
     def _getMoveProgressStream(self) -> Optional[TextIO]:
         """Return the live console stream for move progress, if interactive."""
@@ -630,6 +944,47 @@ class VideoMixin:
                 raise
             self._copyFileWithProgress(sourceFile, destFile)
 
+    def _recordSummaryTransfer(self, sourcePath: Path, destPath: Path) -> None:
+        """Record a file transfer for the optional text summary."""
+        self._summaryTransfers.append((str(sourcePath), str(destPath)))
+
+    def _recordSummaryRename(self, sourcePath: Path, destPath: Path) -> None:
+        """Record an in-place rename for the optional text summary."""
+        self._summaryRenames.append((str(sourcePath), str(destPath)))
+
+    def _writeSummaryReport(self) -> None:
+        """Write the optional transfer/rename summary file when configured."""
+        summaryReportPath = getattr(self, "summaryReportPath", None)
+        if not summaryReportPath:
+            return
+
+        reportPath = Path(summaryReportPath)
+        reportPath.parent.mkdir(parents=True, exist_ok=True)
+        lines = [
+            f"organiseMyVideo {'DRY-RUN ' if self.dryRun else ''}summary".strip(),
+            "",
+            "Transfers:",
+        ]
+        if self._summaryTransfers:
+            lines.extend(
+                f"- {sourcePath} -> {destPath}"
+                for sourcePath, destPath in self._summaryTransfers
+            )
+        else:
+            lines.append("- none")
+
+        lines.extend(["", "Renames:"])
+        if self._summaryRenames:
+            lines.extend(
+                f"- {sourcePath} -> {destPath}"
+                for sourcePath, destPath in self._summaryRenames
+            )
+        else:
+            lines.append("- none")
+        lines.append("")
+        reportPath.write_text("\n".join(lines), encoding="utf-8")
+        logger.value("summary report", reportPath)
+
     def _extractEpisodeMetadataImage(self, metadataFile: Path) -> Optional[str]:
         """Return the local metadata image filename referenced by an MCM episode XML file."""
         xmlText = self._readXmlText(metadataFile)
@@ -721,6 +1076,67 @@ class VideoMixin:
             return int(match.group(1))
         return None
 
+    def _readTvShowTopLevelSeriesId(self, showDir: Optional[Path]) -> Optional[str]:
+        """Return a show SeriesID from show-level metadata only."""
+        if showDir is None:
+            return None
+
+        seriesRoot = self._readXmlRoot(showDir / "series.xml")
+        seriesId = self._readFirstXmlText(seriesRoot, ("SeriesID", "seriesid", "id"))
+        if seriesId:
+            return seriesId
+
+        for dvdIdFile in sorted(showDir.glob("mcm_id__*.dvdid.xml")):
+            dvdIdRoot = self._readXmlRoot(dvdIdFile)
+            seriesId = self._readFirstXmlText(dvdIdRoot, ("SeriesID", "seriesid", "id"))
+            if seriesId:
+                return seriesId
+
+        return None
+
+    def _readTvSeasonMetadataSeriesId(self, seasonDir: Optional[Path]) -> Optional[str]:
+        """Return a SeriesID from season-level ``metadata/*.xml`` files."""
+        if seasonDir is None:
+            return None
+
+        metadataDir = seasonDir / "metadata"
+        if not metadataDir.is_dir():
+            return None
+
+        for episodeXml in sorted(metadataDir.glob("*.xml")):
+            episodeRoot = self._readXmlRoot(episodeXml)
+            seriesId = self._readFirstXmlText(
+                episodeRoot, ("SeriesID", "seriesid", "id")
+            )
+            if seriesId:
+                return seriesId
+
+        return None
+
+    def _readTvShowSeriesId(
+        self, showDir: Optional[Path], seasonDir: Optional[Path] = None
+    ) -> Optional[str]:
+        """Return a SeriesID using show XML, show dvdid XML, then season metadata."""
+        seriesId = self._readTvShowTopLevelSeriesId(showDir)
+        if seriesId:
+            return seriesId
+
+        if seasonDir is not None:
+            return self._readTvSeasonMetadataSeriesId(seasonDir)
+
+        if showDir is None:
+            return None
+
+        for episodeXml in sorted(showDir.rglob("metadata/*.xml")):
+            episodeRoot = self._readXmlRoot(episodeXml)
+            seriesId = self._readFirstXmlText(
+                episodeRoot, ("SeriesID", "seriesid", "id")
+            )
+            if seriesId:
+                return seriesId
+
+        return None
+
     def _readMovieMcmHints(self, sourceFile: Path) -> Optional[dict]:
         """
         Return standardised movie hints from nearby MCM XML files.
@@ -738,8 +1154,20 @@ class VideoMixin:
             ``imdbId`` (Optional[str]), ``tmdbId`` (Optional[str]), and
             ``metadataSource`` (str).
         """
-        movieRoot = self._readXmlRoot(sourceFile.parent / "movie.xml")
-        if movieRoot is None:
+        sourceDir = sourceFile.parent
+        movieXmlFile = sourceDir / "movie.xml"
+        movieRoot = self._readXmlRoot(movieXmlFile)
+        mcmPresence = {
+            "movieXmlExists": movieXmlFile.exists(),
+            "dvdIdXmlExists": self._hasMatchingFiles(
+                sourceDir, ("mcm_id__*.dvdid.xml",)
+            ),
+            "artworkExists": self._hasMatchingFiles(
+                sourceDir, self._MOVIE_ARTWORK_PATTERNS
+            ),
+        }
+
+        if movieRoot is None and not any(mcmPresence.values()):
             return None
 
         title = self._readFirstXmlText(movieRoot, ("LocalTitle", "OriginalTitle"))
@@ -749,7 +1177,7 @@ class VideoMixin:
 
         if not self._hasAnyMetadata(
             title=title, year=year, imdbId=imdbId, tmdbId=tmdbId
-        ):
+        ) and not any(mcmPresence.values()):
             return None
 
         return {
@@ -759,6 +1187,7 @@ class VideoMixin:
             "imdbId": imdbId,
             "tmdbId": tmdbId,
             "metadataSource": "mcm",
+            "mcm": mcmPresence,
         }
 
     def _readTvMcmHints(self, sourceFile: Path) -> Optional[dict]:
@@ -801,9 +1230,58 @@ class VideoMixin:
         ) or self._inferSeasonFromPath(sourceSeasonDir)
         episode = self._readIntXmlText(episodeRoot, ("EpisodeNumber", "ID"))
         episodeTitle = self._readFirstXmlText(episodeRoot, ("EpisodeName",))
-        imdbId = self._readFirstXmlText(episodeRoot, ("IMDB_ID", "IMDbId"))
-        seriesId = self._readFirstXmlText(seriesRoot, ("SeriesID", "id"))
+        imdbId = self._readFirstXmlText(episodeRoot, ("IMDB_ID", "IMDbId")) or (
+            self._readFirstXmlText(seriesRoot, ("IMDB_ID", "IMDbId"))
+        )
+        seriesId = self._readTvShowSeriesId(sourceShowDir, sourceSeasonDir)
         episodeId = self._readFirstXmlText(episodeRoot, ("EpisodeID",))
+        sourceHasTvLayout = bool(
+            sourceShowDir
+            or re.match(r"^season\b", sourceSeasonDir.name, re.IGNORECASE)
+            or (sourceSeasonDir / "metadata").is_dir()
+        )
+        tvMcm = {
+            "showXmlExists": bool(
+                sourceHasTvLayout
+                and sourceShowDir
+                and (sourceShowDir / "series.xml").exists()
+            ),
+            "dvdIdXmlExists": bool(
+                sourceHasTvLayout
+                and sourceShowDir
+                and self._hasMatchingFiles(sourceShowDir, ("mcm_id__*.dvdid.xml",))
+            ),
+            "seasonMetadataFolderExists": bool(
+                sourceHasTvLayout
+                and sourceSeasonDir != self.sourceDir
+                and (sourceSeasonDir / "metadata").is_dir()
+            ),
+            "episodeXmlExists": bool(
+                sourceHasTvLayout
+                and sourceSeasonDir != self.sourceDir
+                and self._hasMatchingFiles(
+                    sourceSeasonDir / "metadata",
+                    ("*.xml",),
+                )
+            ),
+            "artworkExists": bool(
+                sourceHasTvLayout
+                and (
+                    (
+                        sourceShowDir
+                        and self._hasMatchingFiles(
+                            sourceShowDir, self._TV_SHOW_ARTWORK_PATTERNS
+                        )
+                    )
+                    or (
+                        sourceSeasonDir != self.sourceDir
+                        and self._hasMatchingFiles(
+                            sourceSeasonDir, self._TV_SEASON_ARTWORK_PATTERNS
+                        )
+                    )
+                )
+            ),
+        }
 
         if not self._hasAnyMetadata(
             showName=showName,
@@ -813,7 +1291,7 @@ class VideoMixin:
             imdbId=imdbId,
             seriesId=seriesId,
             episodeId=episodeId,
-        ):
+        ) and not any(tvMcm.values()):
             return None
 
         return {
@@ -826,6 +1304,7 @@ class VideoMixin:
             "seriesId": seriesId,
             "episodeId": episodeId,
             "metadataSource": "mcm",
+            "mcm": tvMcm,
         }
 
     def _readMcmHints(self, sourceFile: Path) -> Optional[dict]:
@@ -956,7 +1435,12 @@ class VideoMixin:
         """Return scraped/library-enriched TV info, or the original parsed info if enrichment fails."""
         if not tvInfo:
             return None
-        return self._enrichTvMetadata(tvInfo) or tvInfo
+        resolved = self._enrichTvMetadata(tvInfo) or tvInfo
+        if resolved.get("season") is not None and resolved.get("episode") is not None:
+            marked = dict(resolved)
+            marked["_tvMetadataLookupAttempted"] = True
+            return marked
+        return resolved
 
     def _parseAndResolveTvInfo(
         self, sourceFile: Path, mcmHints: Optional[dict]
@@ -974,15 +1458,111 @@ class VideoMixin:
             value is not None and value != "" for value in metadataValues.values()
         )
 
-    def _replicateMovieMetadata(self, sourceFile: Path, destDir: Path) -> None:
-        """Copy supported MCM movie companion files into the destination folder."""
-        if sourceFile.parent == self.sourceDir:
+    def _buildMovieDvdIdFilename(self, movieInfo: dict) -> Optional[str]:
+        """
+        Return a deterministic movie MCM dvdid filename using resolved IDs.
+
+        Naming order is: imdb+tmdb, imdb-only, then tmdb-only.
+        """
+        imdbId = self._safeMcmIdFilenamePart(movieInfo.get("imdbId"))
+        tmdbId = self._safeMcmIdFilenamePart(movieInfo.get("tmdbId"))
+        if imdbId and tmdbId:
+            return f"mcm_id__{imdbId}-{tmdbId}.dvdid.xml"
+        if imdbId:
+            return f"mcm_id__{imdbId}.dvdid.xml"
+        if tmdbId:
+            return f"mcm_id__{tmdbId}.dvdid.xml"
+        return None
+
+    def _ensureMovieDvdIdMetadata(self, destDir: Path, movieInfo: dict) -> None:
+        """
+        Create a movie-level ``mcm_id__*.dvdid.xml`` only when missing.
+
+        Args:
+            destDir: Destination movie directory for the dvdid XML file.
+            movieInfo: Resolved movie metadata.
+        """
+        existing = self._collectMatchingFiles(destDir, ("mcm_id__*.dvdid.xml",))
+        if existing:
+            logger.value("preserving existing metadata files", len(existing))
             return
 
-        movieMetadataFiles = self._collectMatchingFiles(
-            sourceFile.parent, self._MOVIE_MCM_PATTERNS
-        )
-        self._copyFilesIntoDir(movieMetadataFiles, destDir)
+        dvdIdFilename = self._buildMovieDvdIdFilename(movieInfo)
+        if not dvdIdFilename:
+            return
+
+        imdbId = movieInfo.get("imdbId")
+        tmdbId = movieInfo.get("tmdbId")
+        dvdIdFile = destDir / dvdIdFilename
+        root = ET.Element("Item")
+        if imdbId:
+            ET.SubElement(root, "IMDbId").text = imdbId
+        if tmdbId:
+            ET.SubElement(root, "TMDbId").text = tmdbId
+        ET.SubElement(root, "Type").text = "movie"
+
+        logger.action("create metadata: %s", dvdIdFile)
+        if self.dryRun:
+            return
+        destDir.mkdir(parents=True, exist_ok=True)
+        ET.ElementTree(root).write(dvdIdFile, encoding="utf-8", xml_declaration=True)
+
+    def _writeMovieMcmTemplate(self, destDir: Path, movieInfo: dict) -> None:
+        """Create a starter ``movie.xml`` when enough movie metadata is known."""
+        title = movieInfo.get("title")
+        if not title:
+            return
+
+        root = ET.Element("Title")
+        ET.SubElement(root, "LocalTitle").text = title
+        ET.SubElement(root, "OriginalTitle").text = title
+        ET.SubElement(root, "ProductionYear").text = movieInfo.get("year") or ""
+        ET.SubElement(root, "IMDbId").text = movieInfo.get("imdbId") or ""
+        ET.SubElement(root, "TMDbId").text = movieInfo.get("tmdbId") or ""
+
+        self._writeMovieMetadataFile(destDir / "movie.xml", root)
+
+    def _writeMovieMetadataFile(self, movieFile: Path, root: ET.Element) -> None:
+        """Write ``movie.xml`` to *movieFile*."""
+        if movieFile.exists():
+            logger.value("preserving existing metadata", movieFile)
+            return
+        logger.action("create metadata: %s", movieFile)
+        if self.dryRun:
+            return
+        movieFile.parent.mkdir(parents=True, exist_ok=True)
+        ET.ElementTree(root).write(movieFile, encoding="utf-8", xml_declaration=True)
+
+    def _ensureMovieMetadata(self, destDir: Path, movieInfo: dict) -> None:
+        """Create destination ``movie.xml`` only when missing; preserve existing files."""
+        title = movieInfo.get("title")
+        if not title:
+            return
+        movieFile = destDir / "movie.xml"
+        if movieFile.exists():
+            logger.value("preserving existing metadata", movieFile)
+            return
+        self._writeMovieMcmTemplate(destDir, movieInfo)
+
+    def _replicateMovieMetadata(
+        self, sourceFile: Path, destDir: Path, movieInfo: Optional[dict] = None
+    ) -> None:
+        """Copy supported MCM movie companion files into the destination folder."""
+        if sourceFile.parent != self.sourceDir:
+            movieMetadataFiles = self._collectMatchingFiles(
+                sourceFile.parent, self._MOVIE_MCM_PATTERNS
+            )
+            self._copyFilesIntoDir(movieMetadataFiles, destDir)
+
+        if not movieInfo:
+            return
+
+        enriched = self._enrichMovieMetadata(movieInfo)
+        resolved = enriched or movieInfo
+
+        self._ensureMovieMetadata(destDir, resolved)
+        self._ensureMovieDvdIdMetadata(destDir, resolved)
+        self._fetchMovieArtwork(resolved, destDir)
 
     def _sanitiseFilenamePart(self, value: str) -> str:
         """Return a dot-separated, filesystem-safe filename fragment."""
@@ -992,7 +1572,110 @@ class VideoMixin:
         tokens = normalised.split()
         return ".".join(tokens)
 
-    def _buildTvDestinationFilename(self, sourceFile: Path, tvInfo: dict) -> str:
+    def _sanitiseTvFilenamePart(self, value: str) -> str:
+        """Return a spacing-preserving, filesystem-safe TV filename fragment."""
+        normalised = unicodedata.normalize("NFKC", value).replace("'", "")
+        normalised = re.sub(r"[^\w.\s-]+", " ", normalised, flags=re.UNICODE)
+        normalised = normalised.replace("_", " ")
+        normalised = re.sub(r"\s+", " ", normalised).strip()
+        return re.sub(r"\s*-\s*", "-", normalised)
+
+    def _normaliseTimedTvEpisodeTitle(self, value: Optional[str]) -> Optional[str]:
+        """Return a spacing-preserving title when the episode name contains times."""
+        if not value:
+            return value
+
+        normalised = unicodedata.normalize("NFKC", value)
+        timePattern = re.compile(
+            r"\b(\d{1,2})(?:[:.\s](\d{2}))?\s*([AP])\.?\s*M\.?(?=$|[^A-Za-z0-9])",
+            re.IGNORECASE,
+        )
+        timeRangeToken = "organisemyvideotimerange"
+
+        matchedTime = False
+
+        def _replaceTime(match: re.Match[str]) -> str:
+            nonlocal matchedTime
+            matchedTime = True
+            hour = match.group(1)
+            minute = match.group(2) or "00"
+            meridiem = match.group(3).lower()
+            return f"{hour}.{minute}{meridiem}m"
+
+        normalised = timePattern.sub(_replaceTime, normalised)
+        if not matchedTime:
+            return value
+
+        normalised = re.sub(
+            r"(\b\d{1,2}\.\d{2}[ap]m)\s*-\s*(\d{1,2}\.\d{2}[ap]m\b)",
+            rf"\1 {timeRangeToken} \2",
+            normalised,
+        )
+        normalised = re.sub(r"[^\w.\s]+", " ", normalised, flags=re.UNICODE)
+        normalised = normalised.replace("_", " ")
+        normalised = re.sub(r"\s+", " ", normalised).strip()
+        normalised = re.sub(rf"\b{timeRangeToken}\b", "-", normalised)
+        normalised = re.sub(r"\s*-\s*", "-", normalised)
+        return normalised or value
+
+    def _sanitiseTvEpisodeTitlePart(
+        self, value: str, *, preserveInternalSpaces: bool = False
+    ) -> str:
+        """Return a filesystem-safe TV episode title fragment."""
+        timedTitle = self._normaliseTimedTvEpisodeTitle(value)
+        if timedTitle and re.search(r"\b\d{1,2}(?:\.\d{2})?[ap]m\b", timedTitle):
+            return self._sanitiseTvFilenamePart(timedTitle)
+        if preserveInternalSpaces:
+            return self._sanitiseTvFilenamePart(value)
+        return self._sanitiseFilenamePart(value)
+
+    def _capitaliseLowercaseTvShowTitle(self, showName: Optional[str]) -> Optional[str]:
+        """Return *showName* with word initials capitalised when it is all lowercase."""
+        if not showName:
+            return showName
+        normalised = re.sub(r"\s+", " ", showName).strip()
+        letters = [character for character in normalised if character.isalpha()]
+        if not letters or any(not character.islower() for character in letters):
+            return normalised
+        return re.sub(
+            r"(^|[^A-Za-z])([a-z])",
+            lambda match: f"{match.group(1)}{match.group(2).upper()}",
+            normalised,
+        )
+
+    def _resolveStoredTvShowFolderName(
+        self, showDir: Path, showName: str, videoFiles: list[Path]
+    ) -> str:
+        """Return the preferred on-disk show folder name for rescan fixes."""
+        normalised = re.sub(r"\s+", " ", showName).strip()
+        if not normalised:
+            return showName
+
+        seriesRoot = self._readXmlRoot(showDir / "series.xml")
+        candidateNames = [
+            self._readFirstXmlText(seriesRoot, ("LocalTitle", "SeriesName"))
+        ]
+        candidateNames.extend(
+            (self.parseTvFilename(videoFile.name) or {}).get("showName")
+            for videoFile in videoFiles
+        )
+        for candidate in candidateNames:
+            if not candidate:
+                continue
+            candidate = re.sub(r"\s+", " ", candidate).strip()
+            if candidate.casefold() == normalised.casefold() and candidate != normalised:
+                return candidate
+
+        return self._capitaliseLowercaseTvShowTitle(normalised) or showName
+
+    def _buildTvDestinationFilename(
+        self,
+        sourceFile: Path,
+        tvInfo: dict,
+        *,
+        preserveSourceSpacing: bool = False,
+        preferSpaceStyle: bool = False,
+    ) -> str:
         """Return the destination TV filename, preferring canonical enriched names."""
         showName = tvInfo.get("showName")
         season = tvInfo.get("season")
@@ -1005,8 +1688,37 @@ class VideoMixin:
         if not showName or season is None or episode is None:
             return sourceFile.name
 
-        showPart = self._sanitiseFilenamePart(showName)
-        titlePart = self._sanitiseFilenamePart(episodeTitle) if episodeTitle else ""
+        sourceStem = sourceFile.stem
+        sourceMatch = re.match(
+            r"^(.+?)[\.\s_]+S(\d+)E(\d+)(?:[\.\s_]+(.+?))?$", sourceStem, re.IGNORECASE
+        )
+        preserveShowSpaces = False
+        preserveTitleSpaces = False
+        if preserveSourceSpacing and sourceMatch:
+            rawShow = sourceMatch.group(1) or ""
+            rawTitle = sourceMatch.group(4) or ""
+            preserveShowSpaces = bool(re.search(r"\s", rawShow)) and not re.search(
+                r"[._]", rawShow
+            )
+            preserveTitleSpaces = bool(re.search(r"\s", rawTitle)) and not re.search(
+                r"[._]", rawTitle
+            )
+
+        useSpaceStyleShow = preferSpaceStyle or preserveShowSpaces
+        useSpaceStyleTitle = preferSpaceStyle or preserveTitleSpaces
+
+        showPart = (
+            self._sanitiseTvFilenamePart(showName)
+            if useSpaceStyleShow
+            else self._sanitiseFilenamePart(showName)
+        )
+        titlePart = (
+            self._sanitiseTvEpisodeTitlePart(
+                episodeTitle, preserveInternalSpaces=useSpaceStyleTitle
+            )
+            if episodeTitle
+            else ""
+        )
         if not showPart:
             return sourceFile.name
 
@@ -1014,6 +1726,50 @@ class VideoMixin:
         if titlePart:
             parts.append(titlePart)
         return f"{'.'.join(parts)}{extension}"
+
+    def _maybeRenameResetTvShowFolder(
+        self, tvDir: Path, showName: str, videoFiles: list[Path]
+    ) -> tuple[str, list[Path]]:
+        """Return the rescan show label and video paths after any lowercase-folder fix."""
+        showDir = tvDir / showName
+        capitalisedShowName = self._resolveStoredTvShowFolderName(
+            showDir, showName, videoFiles
+        )
+        if capitalisedShowName == showName:
+            return showName, videoFiles
+
+        destinationDir = tvDir / capitalisedShowName
+        if destinationDir.exists():
+            logger.error("rescan TV show target already exists: %s", destinationDir)
+            return showName, videoFiles
+
+        logger.action(
+            "renaming TV Show: %s (from %s)", destinationDir.name, showDir.name
+        )
+        if self.dryRun:
+            return capitalisedShowName, videoFiles
+
+        try:
+            showDir.rename(destinationDir)
+        except OSError as error:
+            logger.error("could not rename TV show folder %s: %s", showDir, error)
+            return showName, videoFiles
+
+        return capitalisedShowName, [
+            destinationDir / videoFile.relative_to(showDir) for videoFile in videoFiles
+        ]
+
+    def _buildMovieDestinationFilename(self, sourceFile: Path, movieInfo: dict) -> str:
+        """Return the destination movie filename, preferring canonical metadata names."""
+        title = movieInfo.get("title")
+        year = movieInfo.get("year")
+        extension = movieInfo.get("extension") or sourceFile.suffix
+        if extension and not extension.startswith("."):
+            extension = f".{extension}"
+
+        if not title or not year:
+            return sourceFile.name
+        return f"{title} ({year}){extension}"
 
     def _writeEpisodeMcmTemplate(
         self,
@@ -1031,6 +1787,11 @@ class VideoMixin:
             tvInfo: Parsed or inferred TV metadata.  When season or episode is
                     missing, the method returns without writing a template.
         """
+        destFile = destMetadataDir / f"{destStem or sourceFile.stem}.xml"
+        if destFile.exists():
+            logger.value("preserving existing metadata", destFile)
+            return
+
         mcmHints = self._readTvMcmHints(sourceFile) or {}
         season = tvInfo.get("season") or mcmHints.get("season")
         episode = tvInfo.get("episode")
@@ -1058,17 +1819,137 @@ class VideoMixin:
             child.text = value
 
         destFile = destMetadataDir / f"{destStem or sourceFile.stem}.xml"
-        logger.action("create metadata: %s", destFile)
+        logger.action("create episode metadata template:")
+        logger.info(f"  {destFile.name}")
         if self.dryRun:
             return
 
         destMetadataDir.mkdir(parents=True, exist_ok=True)
         ET.ElementTree(item).write(destFile, encoding="utf-8", xml_declaration=True)
+        logger.info("  episode metadata written")
+
+    def _buildEpisodeMetadataTemplateRoot(self, tvInfo: dict) -> Optional[ET.Element]:
+        """Return a starter episode metadata XML root from resolved TV metadata."""
+        season = tvInfo.get("season")
+        episode = tvInfo.get("episode")
+        if season is None or episode is None:
+            return None
+
+        item = ET.Element("Item")
+        fields = {
+            "ID": str(episode),
+            "EpisodeID": tvInfo.get("episodeId") or "",
+            "EpisodeNumber": str(episode),
+            "SeasonNumber": str(season),
+            "seriesid": tvInfo.get("seriesId") or "",
+            "IMDB_ID": tvInfo.get("imdbId") or "",
+            "EpisodeName": tvInfo.get("episodeTitle") or "",
+            "Type": "",
+        }
+        for key, value in fields.items():
+            child = ET.SubElement(item, key)
+            child.text = value
+        return item
+
+    def _safeMcmIdFilenamePart(self, value: Optional[str]) -> str:
+        """Return a value containing only ``[A-Za-z0-9_-]`` characters."""
+        if not value:
+            return ""
+        return re.sub(r"[^A-Za-z0-9_-]+", "", value)
+
+    def _buildTvDvdIdFilename(self, tvInfo: dict, mcmHints: dict) -> Optional[str]:
+        """
+        Return a deterministic TV MCM dvdid filename using resolved IDs.
+
+        ``tvInfo`` values take precedence over ``mcmHints`` fallbacks.
+        Naming order is: imdb+series, imdb-only, then series-only.
+        """
+        imdbId = self._safeMcmIdFilenamePart(
+            tvInfo.get("imdbId") or mcmHints.get("imdbId")
+        )
+        seriesId = self._safeMcmIdFilenamePart(
+            tvInfo.get("seriesId") or mcmHints.get("seriesId")
+        )
+        if imdbId and seriesId:
+            return f"mcm_id__{imdbId}-{seriesId}.dvdid.xml"
+        if imdbId:
+            return f"mcm_id__{imdbId}.dvdid.xml"
+        if seriesId:
+            return f"mcm_id__{seriesId}.dvdid.xml"
+        return None
+
+    def _ensureTvDvdIdMetadata(
+        self, sourceFile: Path, showDir: Path, tvInfo: dict
+    ) -> None:
+        """
+        Create a show-level TV ``mcm_id__*.dvdid.xml`` only when missing.
+
+        Args:
+            sourceFile: Episode file used to read fallback MCM hints.
+            showDir: Destination show directory for show-level metadata files.
+            tvInfo: Resolved TV metadata from parsing/enrichment.
+        """
+        mcmHints = self._readTvMcmHints(sourceFile) or {}
+        existing = self._collectMatchingFiles(showDir, ("mcm_id__*.dvdid.xml",))
+        if existing:
+            updated = 0
+            for existingFile in existing:
+                root = self._readXmlRoot(existingFile)
+                if root is None:
+                    continue
+                changed = False
+                changed = (
+                    self._setXmlFieldIfMissing(
+                        root,
+                        "SeriesID",
+                        tvInfo.get("seriesId") or mcmHints.get("seriesId"),
+                    )
+                    or changed
+                )
+                changed = (
+                    self._setXmlFieldIfMissing(
+                        root, "IMDB_ID", tvInfo.get("imdbId") or mcmHints.get("imdbId")
+                    )
+                    or changed
+                )
+                if not changed:
+                    continue
+                updated += 1
+                logger.action("update metadata: %s", existingFile)
+                if self.dryRun:
+                    continue
+                existingFile.parent.mkdir(parents=True, exist_ok=True)
+                ET.ElementTree(root).write(
+                    existingFile, encoding="utf-8", xml_declaration=True
+                )
+            if updated == 0:
+                logger.value("preserving existing metadata files", len(existing))
+            return
+
+        dvdIdFilename = self._buildTvDvdIdFilename(tvInfo, mcmHints)
+        if not dvdIdFilename:
+            return
+
+        seriesId = tvInfo.get("seriesId") or mcmHints.get("seriesId")
+        imdbId = tvInfo.get("imdbId") or mcmHints.get("imdbId")
+        dvdIdFile = showDir / dvdIdFilename
+        root = ET.Element("Item")
+        if seriesId:
+            ET.SubElement(root, "SeriesID").text = seriesId
+        if imdbId:
+            ET.SubElement(root, "IMDB_ID").text = imdbId
+        ET.SubElement(root, "Type").text = "tv"
+
+        logger.action("create metadata: %s", dvdIdFile)
+        if self.dryRun:
+            return
+        showDir.mkdir(parents=True, exist_ok=True)
+        ET.ElementTree(root).write(dvdIdFile, encoding="utf-8", xml_declaration=True)
 
     def _setXmlFieldIfMissing(
         self, root: ET.Element, tag: str, value: Optional[str]
     ) -> bool:
-        """Set XML `tag` only when missing/blank and return True if changed."""
+        """Set XML ``tag`` only when missing/blank and return True if changed."""
         if value in (None, ""):
             return False
         valueText = str(value)
@@ -1082,10 +1963,70 @@ class VideoMixin:
             return True
         return False
 
-    def _updateEpisodeMetadataRoot(
+    def _writeSeriesMcmTemplate(self, showDir: Path, tvInfo: dict) -> None:
+        """Create a starter ``series.xml`` when enough canonical show metadata is known."""
+        showName = tvInfo.get("showName")
+        seriesId = tvInfo.get("seriesId")
+        imdbId = tvInfo.get("imdbId")
+        if not showName or not (seriesId or imdbId):
+            return
+
+        root = ET.Element("Series")
+        ET.SubElement(root, "SeriesName").text = showName
+        ET.SubElement(root, "LocalTitle").text = showName
+        ET.SubElement(root, "SeriesID").text = seriesId or ""
+        ET.SubElement(root, "IMDB_ID").text = imdbId or ""
+        self._writeSeriesMetadataFile(showDir / "series.xml", root)
+
+    def _updateSeriesMetadataRoot(
         self, root: ET.Element, tvInfo: dict
     ) -> tuple[ET.Element, bool]:
-        """Update an episode XML root with resolved metadata values when fields are missing."""
+        """Backfill missing ``SeriesID`` in ``series.xml`` without overwriting values."""
+        changed = False
+        changed = (
+            self._setXmlFieldIfMissing(root, "SeriesID", tvInfo.get("seriesId"))
+            or changed
+        )
+        return root, changed
+
+    def _writeSeriesMetadataFile(self, seriesFile: Path, root: ET.Element) -> None:
+        """Write ``series.xml`` to *seriesFile*."""
+        if seriesFile.exists():
+            logger.value("preserving existing metadata", seriesFile)
+            return
+        logger.action("create metadata: %s", seriesFile)
+        if self.dryRun:
+            return
+        seriesFile.parent.mkdir(parents=True, exist_ok=True)
+        ET.ElementTree(root).write(seriesFile, encoding="utf-8", xml_declaration=True)
+
+    def _ensureSeriesMetadata(self, showDir: Path, tvInfo: dict) -> None:
+        """Create or backfill destination ``series.xml`` while preserving existing values."""
+        showName = tvInfo.get("showName")
+        if not showName:
+            return
+        seriesFile = showDir / "series.xml"
+        if seriesFile.exists():
+            root = self._readXmlRoot(seriesFile)
+            if root is None:
+                logger.value("preserving existing metadata", seriesFile)
+                return
+            root, changed = self._updateSeriesMetadataRoot(root, tvInfo)
+            if not changed:
+                logger.value("preserving existing metadata", seriesFile)
+                return
+            logger.action("update metadata: %s", seriesFile)
+            if self.dryRun:
+                return
+            seriesFile.parent.mkdir(parents=True, exist_ok=True)
+            ET.ElementTree(root).write(
+                seriesFile, encoding="utf-8", xml_declaration=True
+            )
+            return
+        self._writeSeriesMcmTemplate(showDir, tvInfo)
+
+    def _updateEpisodeMetadataRoot(self, root: ET.Element, tvInfo: dict) -> ET.Element:
+        """Update an episode XML root with resolved metadata values."""
         updates = {
             "EpisodeID": tvInfo.get("episodeId"),
             "EpisodeNumber": (
@@ -1105,67 +2046,14 @@ class VideoMixin:
 
     def _writeEpisodeMetadataFile(self, destFile: Path, root: ET.Element) -> None:
         """Write an episode metadata XML file to *destFile*."""
-        logger.action("create metadata: %s", destFile)
+        logger.action("update episode metadata:")
+        logger.info(f"  {destFile.name}")
         if self.dryRun:
             return
 
         destFile.parent.mkdir(parents=True, exist_ok=True)
         ET.ElementTree(root).write(destFile, encoding="utf-8", xml_declaration=True)
-
-    def _writeSeriesMcmTemplate(self, showDir: Path, tvInfo: dict) -> None:
-        """Create a starter `series.xml` when enough canonical show metadata is known."""
-        showName = tvInfo.get("showName")
-        seriesId = tvInfo.get("seriesId")
-        imdbId = tvInfo.get("imdbId")
-        if not showName or not (seriesId or imdbId):
-            return
-
-        root = ET.Element("Series")
-        ET.SubElement(root, "SeriesName").text = showName
-        ET.SubElement(root, "LocalTitle").text = showName
-        ET.SubElement(root, "SeriesID").text = seriesId or ""
-        ET.SubElement(root, "IMDB_ID").text = imdbId or ""
-        self._writeSeriesMetadataFile(showDir / "series.xml", root)
-
-    def _updateSeriesMetadataRoot(
-        self, root: ET.Element, tvInfo: dict
-    ) -> tuple[ET.Element, bool]:
-        """Update `series.xml` with resolved values while preserving existing non-empty fields."""
-        changed = False
-        showName = tvInfo.get("showName")
-        changed = self._setXmlFieldIfMissing(root, "SeriesName", showName) or changed
-        changed = self._setXmlFieldIfMissing(root, "LocalTitle", showName) or changed
-        changed = (
-            self._setXmlFieldIfMissing(root, "SeriesID", tvInfo.get("seriesId"))
-            or changed
-        )
-        changed = (
-            self._setXmlFieldIfMissing(root, "IMDB_ID", tvInfo.get("imdbId")) or changed
-        )
-        return root, changed
-
-    def _writeSeriesMetadataFile(self, seriesFile: Path, root: ET.Element) -> None:
-        """Write `series.xml` to `seriesFile`."""
-        logger.action("create metadata: %s", seriesFile)
-        if self.dryRun:
-            return
-        seriesFile.parent.mkdir(parents=True, exist_ok=True)
-        ET.ElementTree(root).write(seriesFile, encoding="utf-8", xml_declaration=True)
-
-    def _ensureSeriesMetadata(self, showDir: Path, tvInfo: dict) -> None:
-        """Ensure destination show directory has `series.xml` with canonical metadata."""
-        showName = tvInfo.get("showName")
-        if not showName:
-            return
-        seriesFile = showDir / "series.xml"
-        if not seriesFile.exists():
-            self._writeSeriesMcmTemplate(showDir, tvInfo)
-            return
-
-        seriesRoot = self._readXmlRoot(seriesFile) or ET.Element("Series")
-        seriesRoot, changed = self._updateSeriesMetadataRoot(seriesRoot, tvInfo)
-        if changed:
-            self._writeSeriesMetadataFile(seriesFile, seriesRoot)
+        logger.info("  episode metadata written")
 
     def _replicateTvMetadata(
         self,
@@ -1190,9 +2078,9 @@ class VideoMixin:
             sourceSeasonDir != self.sourceDir and sourceSeasonDir.is_dir()
         )
 
-        if sourceHasSeasonContext and re.match(
-            r"^season\b", sourceSeasonDir.name, re.IGNORECASE
-        ):
+        logger.info("replicating MCM metadata")
+
+        if re.match(r"^season\b", sourceSeasonDir.name, re.IGNORECASE):
             sourceShowDir = sourceSeasonDir.parent
             if sourceShowDir != self.sourceDir:
                 showMetadataFiles = self._collectMatchingFiles(
@@ -1207,6 +2095,7 @@ class VideoMixin:
             self._copyFilesIntoDir(seasonMetadataFiles, seasonDir)
 
         self._ensureSeriesMetadata(showDir, tvInfo)
+        self._ensureTvDvdIdMetadata(sourceFile, showDir, tvInfo)
 
         metadataDir = sourceSeasonDir / "metadata" if sourceHasSeasonContext else None
         episodeMetadataFile = (
@@ -1221,13 +2110,11 @@ class VideoMixin:
             )
             return
 
-        episodeRoot = self._readXmlRoot(episodeMetadataFile) or ET.Element("Item")
-        episodeRoot, changed = self._updateEpisodeMetadataRoot(episodeRoot, tvInfo)
-        if not changed and destStem == sourceFile.stem:
+        if destStem == sourceFile.stem:
             self._copyFilesIntoDir([episodeMetadataFile], destMetadataDir)
         else:
-            self._writeEpisodeMetadataFile(
-                destMetadataDir / f"{destStem}.xml", episodeRoot
+            self._copyFileIfMissing(
+                episodeMetadataFile, destMetadataDir / f"{destStem}.xml"
             )
 
         imageName = self._extractEpisodeMetadataImage(episodeMetadataFile)
@@ -1244,6 +2131,7 @@ class VideoMixin:
         defaultName: str,
         fileType: str,
         videoDirs: Optional[List[Path]] = None,
+        episodeTitle: Optional[str] = None,
     ) -> Optional[dict]:
         """
         Prompt user to confirm or correct the detected name.
@@ -1266,13 +2154,14 @@ class VideoMixin:
 
         if fileType == "tv":
             prompt = (
-                f"\nTV Show detected: '{defaultName}'\n"
-                "Is this correct?  (y/n/q/t/m or enter new name): "
+                f"  TV Show detected: {defaultName}\n"
+                f"  Episode Title:    {episodeTitle}\n"
+                "  Is this correct?  (y/n/q/t/m or enter new name): "
             )
         else:
             prompt = (
-                f"\nMovie detected: '{defaultName}'\n"
-                "Is this correct?  (y/n/q/t/m or enter new name): "
+                f"  Movie detected: '{defaultName}'\n"
+                "  Is this correct?  (y/n/q/t/m or enter new name): "
             )
 
         if self._shouldUseCursesPrompts():
@@ -1352,8 +2241,12 @@ class VideoMixin:
         Returns:
             True if successful, False otherwise
         """
-        title = movieInfo["title"]
-        year = movieInfo["year"]
+        resolvedMovieInfo = dict(movieInfo)
+        enrichedMovieInfo = self._enrichMovieMetadata(resolvedMovieInfo)
+        if enrichedMovieInfo:
+            resolvedMovieInfo = enrichedMovieInfo
+        title = resolvedMovieInfo["title"]
+        year = resolvedMovieInfo["year"]
 
         logger.value("processing movie", sourceFile.name)
 
@@ -1395,6 +2288,11 @@ class VideoMixin:
                     year = match.group(2)
                 else:
                     title = confirmedTitle
+            resolvedMovieInfo["title"] = title
+            resolvedMovieInfo["year"] = year
+
+        title = resolvedMovieInfo["title"]
+        year = resolvedMovieInfo["year"]
 
         # Find existing directory or choose storage location
         existingDir = self.findExistingMovieDir(title, year, movieDirs)
@@ -1410,20 +2308,24 @@ class VideoMixin:
 
             destDir = storage / f"{title} ({year})"
 
-        destFile = destDir / sourceFile.name
+        destFile = destDir / self._buildMovieDestinationFilename(
+            sourceFile, resolvedMovieInfo
+        )
 
-        logger.value("movie", sourceFile.name)
-        logger.value("  ->", destFile)
+        logger.action(
+            f"moving movie:\n" f"     {sourceFile.name}\n" f"     -> {destFile}"
+        )
 
         if self.dryRun:
-            logger.action(f"move to: {destFile}")
+            self._recordSummaryTransfer(sourceFile, destFile)
             return True
 
         try:
             destDir.mkdir(parents=True, exist_ok=True)
             self._moveFileWithProgress(sourceFile, destFile)
-            self._replicateMovieMetadata(sourceFile, destDir)
-            logger.action(f"movie moved successfully: {destFile}")
+            self._replicateMovieMetadata(sourceFile, destDir, resolvedMovieInfo)
+            self._recordSummaryTransfer(sourceFile, destFile)
+            logger.done("movie moved successfully")
             return True
         except Exception as e:
             logger.error(f"Failed to move movie: {e}")
@@ -1450,8 +2352,11 @@ class VideoMixin:
         Returns:
             True if successful, False otherwise
         """
+        tvInfo = dict(tvInfo)
+        metadataLookupAttempted = bool(tvInfo.pop("_tvMetadataLookupAttempted", False))
         tvInfo = self._mergeMetadata(tvInfo, self.parseTvFilename(sourceFile.name))
-        tvInfo = self._enrichTvMetadata(tvInfo) or tvInfo
+        if not metadataLookupAttempted:
+            tvInfo = self._enrichTvMetadata(tvInfo) or tvInfo
         showName = tvInfo["showName"]
         season = tvInfo["season"]
 
@@ -1464,6 +2369,7 @@ class VideoMixin:
                 showName,
                 "tv",
                 videoDirs=videoDirs,
+                episodeTitle=tvInfo.get("episodeTitle"),
             )
             if result is None:
                 logger.info(f"skipping: {sourceFile.name}")
@@ -1498,17 +2404,18 @@ class VideoMixin:
                 logger.error("No TV storage locations found")
                 return False
 
-            showDir = storage / showName
+            showDir = storage / self._buildTvShowFolderName(showName)
 
         # Create season directory
         seasonDir = showDir / f"Season {season:02d}"
         destFile = seasonDir / self._buildTvDestinationFilename(sourceFile, tvInfo)
 
-        logger.value("TV Show", sourceFile.name)
-        logger.value("  ->", destFile)
+        logger.action(
+            f"moving TV show:\n" f"     {sourceFile.name}\n" f"     -> {destFile}"
+        )
 
         if self.dryRun:
-            logger.action(f"move to: {destFile}")
+            self._recordSummaryTransfer(sourceFile, destFile)
             return True
 
         try:
@@ -1517,7 +2424,8 @@ class VideoMixin:
             self._replicateTvMetadata(
                 sourceFile, showDir, seasonDir, tvInfo, destFile=destFile
             )
-            logger.action(f"TV show moved successfully: {destFile}")
+            self._recordSummaryTransfer(sourceFile, destFile)
+            logger.done("TV show moved successfully")
             return True
         except Exception as e:
             logger.error(f"Failed to move TV show: {e}")
@@ -1544,6 +2452,41 @@ class VideoMixin:
                     continue
                 return True
         return False
+
+    def _renameExtrasFolders(self) -> None:
+        """Rename local ``Extras`` folders to ``Featurettes`` before scanning files."""
+        extrasFolders = sorted(
+            (
+                folder
+                for folder in self.sourceDir.rglob("*")
+                if folder.is_dir() and folder.name.casefold() == "extras"
+            ),
+            key=lambda folder: (len(folder.parts), str(folder)),
+            reverse=True,
+        )
+        for folder in extrasFolders:
+            destination = folder.with_name("Featurettes")
+            if destination.exists():
+                logger.warning("featurettes folder already exists: %s", destination)
+                continue
+            logger.action("rename folder: %s -> %s", folder, destination)
+            if self.dryRun:
+                continue
+            try:
+                folder.rename(destination)
+            except Exception as e:
+                logger.error("failed to rename %s: %s", folder, e)
+
+    def _shouldIgnoreLocalVideoFile(self, videoFile: Path) -> bool:
+        """Return True when *videoFile* lives inside an ignored local subfolder."""
+        try:
+            relativePath = videoFile.relative_to(self.sourceDir)
+        except ValueError:
+            relativePath = videoFile
+        return any(
+            part.casefold() in _IGNORED_LOCAL_FOLDER_NAMES
+            for part in relativePath.parts[:-1]
+        )
 
     def cleanNames(self) -> dict:
         """
@@ -1643,6 +2586,213 @@ class VideoMixin:
         logger.done(f"clean complete")
         return stats
 
+    def _updateEpisodeMetadataFile(self, metadataFile: Path, tvInfo: dict) -> None:
+        """Update or regenerate an existing episode metadata XML file."""
+        root = self._readXmlRoot(metadataFile)
+        if root is None:
+            if metadataFile.exists() and self._readXmlText(metadataFile) is not None:
+                root = self._buildEpisodeMetadataTemplateRoot(tvInfo)
+                if root is None:
+                    return
+                if self.dryRun:
+                    return
+                metadataFile.parent.mkdir(parents=True, exist_ok=True)
+                ET.ElementTree(root).write(
+                    metadataFile, encoding="utf-8", xml_declaration=True
+                )
+            return
+
+        _, changed = self._updateEpisodeMetadataRoot(root, tvInfo)
+        episodeTitle = tvInfo.get("episodeTitle")
+        episodeTitleNode = root.find("EpisodeName")
+        if episodeTitleNode is None:
+            episodeTitleNode = ET.SubElement(root, "EpisodeName")
+            changed = True
+        if (episodeTitleNode.text or "") != (episodeTitle or ""):
+            episodeTitleNode.text = episodeTitle or ""
+            changed = True
+        if not changed:
+            return
+        if self.dryRun:
+            return
+        ET.ElementTree(root).write(metadataFile, encoding="utf-8", xml_declaration=True)
+
+    def _resetTvEpisodeTitleForFile(self, videoFile: Path) -> str:
+        """Rename one stored TV episode file when better title metadata is available."""
+        parsedTvInfo = self.parseTvFilename(videoFile.name)
+        if not parsedTvInfo:
+            return "skipped"
+        parsedEpisodeTitle = parsedTvInfo.get("episodeTitle")
+        parsedEpisodeTitleNeedsCleanup = self._parsedTvEpisodeTitleNeedsCleanup(
+            videoFile.name
+        )
+        timedTitle = self._normaliseTimedTvEpisodeTitle(parsedEpisodeTitle)
+        needsCanonicalLookup = self._tvEpisodeTitleNeedsCanonicalLookup(
+            parsedEpisodeTitle
+        )
+        needsTimedTitleNormalisation = timedTitle not in (None, parsedEpisodeTitle)
+        if needsTimedTitleNormalisation:
+            parsedTvInfo = dict(parsedTvInfo)
+            parsedTvInfo["episodeTitle"] = timedTitle
+
+        sourceSeasonDir = videoFile.parent
+        showDir = (
+            sourceSeasonDir.parent
+            if re.match(r"^season\b", sourceSeasonDir.name, re.IGNORECASE)
+            and sourceSeasonDir.parent != sourceSeasonDir
+            else None
+        )
+        needsMetadataRepair = bool(
+            showDir
+            and (
+                not (showDir / "series.xml").exists()
+                or self._readFirstXmlText(
+                    self._readXmlRoot(showDir / "series.xml"),
+                    ("SeriesID", "seriesid", "id"),
+                )
+                is None
+                or not self._hasMatchingFiles(showDir, ("mcm_id__*.dvdid.xml",))
+                or any(
+                    self._readFirstXmlText(
+                        self._readXmlRoot(dvdIdFile),
+                        ("SeriesID", "seriesid", "id"),
+                    )
+                    is None
+                    for dvdIdFile in showDir.glob("mcm_id__*.dvdid.xml")
+                )
+            )
+        )
+
+        with self._suppressResetNoiseLogs():
+            mcmHints = self._readTvMcmHints(videoFile)
+            sourceTvInfo = (
+                self._applyTvMcmHints(parsedTvInfo, mcmHints, videoFile) or parsedTvInfo
+            )
+            sourceTvInfo = self._normaliseTvMetadata(sourceTvInfo)
+            if not sourceTvInfo:
+                return "skipped"
+
+            libraryMatch = self._lookupTvMetadataInLibrary(sourceTvInfo)
+            keepExistingShowName = sourceTvInfo.get("metadataSource") == "mcm"
+            resolvedTvInfo = self._applyAuthoritativeTvMetadata(
+                sourceTvInfo,
+                libraryMatch,
+                keepExistingShowName=keepExistingShowName,
+            )
+            resolvedTvInfo = self._resolveCanonicalTvShowName(
+                resolvedTvInfo,
+                libraryMatch,
+                keepExistingShowName=keepExistingShowName,
+            )
+
+            if needsCanonicalLookup or (
+                needsMetadataRepair and not resolvedTvInfo.get("seriesId")
+            ):
+                resolvedTvInfo = (
+                    self._enrichTvMetadata(resolvedTvInfo) or resolvedTvInfo
+                )
+
+        capitalisedShowName = self._capitaliseLowercaseTvShowTitle(
+            resolvedTvInfo.get("showName")
+        )
+        needsShowTitleNormalisation = capitalisedShowName != resolvedTvInfo.get(
+            "showName"
+        )
+        if needsShowTitleNormalisation:
+            resolvedTvInfo = dict(resolvedTvInfo)
+            resolvedTvInfo["showName"] = capitalisedShowName
+
+        if showDir is not None:
+            with self._suppressResetMetadataPreserveLogs():
+                self._ensureSeriesMetadata(showDir, resolvedTvInfo)
+                self._ensureTvDvdIdMetadata(videoFile, showDir, resolvedTvInfo)
+
+        sourceMetadataFile = videoFile.parent / "metadata" / f"{videoFile.stem}.xml"
+        preferSpaceStyle = (
+            needsCanonicalLookup
+            or needsTimedTitleNormalisation
+            or parsedEpisodeTitleNeedsCleanup
+        )
+        destinationName = self._buildTvDestinationFilename(
+            videoFile, resolvedTvInfo, preferSpaceStyle=preferSpaceStyle
+        )
+        if (
+            not needsCanonicalLookup
+            and not needsTimedTitleNormalisation
+            and not needsShowTitleNormalisation
+            and not parsedEpisodeTitleNeedsCleanup
+        ):
+            if sourceMetadataFile.exists():
+                self._updateEpisodeMetadataFile(sourceMetadataFile, resolvedTvInfo)
+            return "skipped"
+
+        if destinationName == videoFile.name:
+            return "skipped"
+
+        destinationPath = videoFile.with_name(destinationName)
+        if destinationPath.exists():
+            logger.error("rescan target already exists: %s", destinationPath)
+            return "errors"
+
+        companionRenames = self._iterResetEpisodeCompanionRenames(
+            videoFile, destinationPath
+        )
+        for sourcePath, companionDestination in companionRenames:
+            if companionDestination.exists():
+                logger.error("rescan target already exists: %s", companionDestination)
+                return "errors"
+
+        destinationMetadataFile = (
+            videoFile.parent / "metadata" / f"{destinationPath.stem}.xml"
+        )
+
+        logger.multiline(["renaming", videoFile.name, destinationPath.name])
+        if self.dryRun:
+            self._recordSummaryRename(videoFile, destinationPath)
+            for sourcePath, companionDestination in companionRenames:
+                self._recordSummaryRename(sourcePath, companionDestination)
+            return "renamed"
+
+        videoFile.rename(destinationPath)
+        self._recordSummaryRename(videoFile, destinationPath)
+        for sourcePath, companionDestination in companionRenames:
+            companionDestination.parent.mkdir(parents=True, exist_ok=True)
+            sourcePath.rename(companionDestination)
+            self._recordSummaryRename(sourcePath, companionDestination)
+        if destinationMetadataFile.exists():
+            self._updateEpisodeMetadataFile(destinationMetadataFile, resolvedTvInfo)
+        return "renamed"
+
+    def resetTvEpisodeTitles(self) -> dict:
+        """Retitle stored TV episodes whose filename suffix still looks noisy."""
+        stats = {"renamed": 0, "skipped": 0, "errors": 0}
+
+        with self._suppressResetNoiseLogs():
+            movieDirs, videoDirs = self.scanStorageLocations()
+            self._prepareMetadataLibrary(movieDirs, videoDirs)
+        if not videoDirs:
+            logger.error("No TV storage locations found!")
+            self._writeSummaryReport()
+            return stats
+
+        for tvDir in videoDirs:
+            self._logResetDuplicateTvShowFolders(tvDir)
+            for showName, seriesId, videoFiles in self._iterResetTvShowFiles(tvDir):
+                showName, videoFiles = self._maybeRenameResetTvShowFolder(
+                    tvDir, showName, videoFiles
+                )
+                showDisplayName = self._buildTvShowFolderName(showName)
+                showLabel = (
+                    f"{showDisplayName} [{seriesId}]" if seriesId else showDisplayName
+                )
+                logger.action(f"scanning: {showLabel}")
+                for videoFile in videoFiles:
+                    outcome = self._resetTvEpisodeTitleForFile(videoFile)
+                    stats[outcome] += 1
+
+        self._writeSummaryReport()
+        return stats
+
     def processFiles(self, interactive: bool = True):
         """
         Process all video files in the source directory.
@@ -1657,7 +2807,7 @@ class VideoMixin:
             return
 
         # Scan for storage locations
-        logger.doing("scanning for storage locations...")
+        logger.doing("scanning for storage locations")
         movieDirs, videoDirs = self.scanStorageLocations()
 
         logger.info(
@@ -1678,11 +2828,15 @@ class VideoMixin:
             logger.error("No TV storage locations found!")
             return
 
+        self._renameExtrasFolders()
+
         # Get all video files (including those in subdirectories)
         videoFiles = [
             f
             for f in self.sourceDir.rglob("*")
-            if f.is_file() and f.suffix.lower() in VIDEO_EXTENSIONS
+            if f.is_file()
+            and f.suffix.lower() in VIDEO_EXTENSIONS
+            and not self._shouldIgnoreLocalVideoFile(f)
         ]
 
         if not videoFiles:
@@ -1695,6 +2849,7 @@ class VideoMixin:
         stats = {"movies": 0, "tv": 0, "skipped": 0, "errors": 0}
 
         for videoFile in videoFiles:
+            logger.info(_FILE_PROCESS_SEPARATOR)
             mcmHints = self._readMcmHints(videoFile)
             tvInfo, movieInfo = self._classifyVideoFile(videoFile, mcmHints)
             if tvInfo and videoDirs:
@@ -1790,3 +2945,4 @@ Errors:         {stats['errors']}
 """
         drawBox(summary)
         logger.value("processing complete", stats)
+        self._writeSummaryReport()
