@@ -299,11 +299,14 @@ class VideoMixin:
         mergePrompt = (
             "Possible duplicate TV show folders detected during rescan:\n"
             + "\n".join(f"  {showName}" for showName in orderedShowNames)
-            + "\nMerge these folders? (y/n): "
+            + "\nMerge these folders? (y/n/q): "
         )
         shouldMerge = self._readMenuChoice(
-            mergePrompt, validChoices={"y", "n"}, defaultChoice="n"
+            mergePrompt, validChoices={"y", "n", "q"}, defaultChoice="n"
         )
+        if shouldMerge in {"q", "quit"}:
+            logger.info("user requested to quit")
+            sys.exit(0)
         if shouldMerge != "y":
             return None
 

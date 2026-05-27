@@ -5436,7 +5436,7 @@ def testResetTvEpisodeTitlesPromptsToMergeDuplicateFolders(
 
     assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
     assert mockMenu.call_count == 2
-    assert "Merge these folders? (y/n): " in mockMenu.call_args_list[0].args[0]
+    assert "Merge these folders? (y/n/q): " in mockMenu.call_args_list[0].args[0]
     assert "Choose the master TV show folder for the merged result:" in (
         mockMenu.call_args_list[1].args[0]
     )
@@ -5446,6 +5446,48 @@ def testResetTvEpisodeTitlesPromptsToMergeDuplicateFolders(
     assert not (tvStorage / "The Crown").exists()
     assert caplog.text.count("rescanning: Crown, The") == 1
     assert "merging TV show folders: Crown, The <- The Crown" in caplog.text
+
+
+def testResetTvEpisodeTitlesCanQuitFromDuplicateMergePrompt(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+
+    canonicalDir = tvStorage / "Crown, The" / "Season 01"
+    canonicalDir.mkdir(parents=True)
+    (canonicalDir / "The.Crown.S01E01.Wolferton.Splash.mkv").write_bytes(b"x" * 20)
+
+    duplicateDir = tvStorage / "The Crown" / "Season 02"
+    duplicateDir.mkdir(parents=True)
+    (duplicateDir / "The.Crown.S02E01.Misadventure.mkv").write_bytes(b"x" * 20)
+
+    with (
+        patch.object(
+            confirmedOrganizer,
+            "_fetchTvMetadataFromScraper",
+            side_effect=AssertionError("scraper lookup should not run"),
+        ),
+        patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ),
+        patch.object(
+            confirmedOrganizer, "_shouldPromptInteractively", return_value=True
+        ),
+        patch.object(confirmedOrganizer, "_readMenuChoice", return_value="q") as mockMenu,
+    ):
+        with caplog.at_level("INFO"):
+            with pytest.raises(SystemExit) as excInfo:
+                confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert excInfo.value.code == 0
+    assert mockMenu.call_count == 1
+    assert "Merge these folders? (y/n/q): " in mockMenu.call_args.args[0]
+    assert "user requested to quit" in caplog.text
+    assert "rescanning: Crown, The" not in caplog.text
 
 
 def testResetTvEpisodeTitlesCollectsVideoFilesAfterInteractiveMerge(
