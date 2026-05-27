@@ -145,7 +145,7 @@ class Mp4TagHelper:
         try:
             mp4File = MP4(str(filePath))
         except Exception as exc:
-            logger.warning("...failed to read tags: %s | %s", filePath, exc)
+            logger.warning("failed to read tags: %s | %s", filePath, exc)
             return {"_readError": str(exc)}
 
         if mp4File.tags is None:
@@ -284,16 +284,16 @@ class InteractivePrompter:
 
     def playVideo(self, filePath: Path | None) -> None:
         if filePath is None:
-            logger.info("...no file available to play")
+            logger.info("no file available to play")
             return
         if self.playerPath is None:
-            logger.info("...no supported video player found on PATH")
+            logger.info("no supported video player found on PATH")
             return
 
         try:
             subprocess.run([self.playerPath, str(filePath)], check=False)
         except Exception as exc:
-            logger.warning("...failed to play video: %s | %s", filePath, exc)
+            logger.warning("failed to play video: %s | %s", filePath, exc)
 
     @staticmethod
     def _findPlayer() -> str | None:
@@ -348,7 +348,7 @@ class TeamPicker:
         except UserQuitRequested:
             raise
         except Exception as exc:
-            logger.debug("...curses picker unavailable (%s), using text fallback", exc)
+            logger.debug("curses picker unavailable (%s), using text fallback", exc)
             return self._fallbackPick(label, knownTeams, context, default)
 
     # ------------------------------------------------------------------
@@ -562,7 +562,9 @@ class TeamPicker:
         if knownTeams:
             print(f"\n{label}:")
             for i, team in enumerate(knownTeams, start=1):
-                marker = " *" if default and team.casefold() == default.casefold() else ""
+                marker = (
+                    " *" if default and team.casefold() == default.casefold() else ""
+                )
                 print(f"  {i:2}. {team}{marker}")
             print()
 
@@ -584,7 +586,7 @@ class TeamPicker:
                 idx = int(response) - 1
                 if 0 <= idx < len(knownTeams):
                     return knownTeams[idx]
-                print(f"  ...invalid number, choose 1-{len(knownTeams)}")
+                print(f"  invalid number, choose 1-{len(knownTeams)}")
                 continue
             self._addToKnownTeams(response, knownTeams)
             return response
@@ -735,15 +737,15 @@ def promptForFile(
     defaultComment = getDefaultText(tags, "comment")
 
     logger.info("")
-    logger.info("...file: %s", filePath)
+    logger.info("file: %s", filePath)
     if seasonInfo:
-        logger.info("...season: %s", seasonInfo.seasonLabel)
+        logger.info("season: %s", seasonInfo.seasonLabel)
     if episode is not None:
-        logger.info("...episode: %s", episode)
-    logger.info("...score: %s", defaultComment or "")
+        logger.info("episode: %s", episode)
+    logger.info("score: %s", defaultComment or "")
 
     if defaultComment:
-        logger.info("...skipping file with existing score")
+        logger.info("skipping file with existing score")
         title = defaultTitle
         comment = defaultComment
     else:
@@ -814,9 +816,9 @@ def promptForFile(
 
     if writeChanges:
         tagHelper.writeTags(filePath, valuesToWrite)
-        logger.info("...updated tags")
+        logger.info("updated tags")
     else:
-        logger.info("...dry run values prepared")
+        logger.info("dry run values prepared")
 
     return {
         "filePath": str(filePath),
@@ -872,9 +874,9 @@ def main(argv: list[str] | None = None) -> int:
     teamPicker = TeamPicker()
     episodeMap = buildSeasonEpisodes(inputRoot)
 
-    logger.info("...building known teams from existing tags")
+    logger.info("building known teams from existing tags")
     knownTeams = buildKnownTeams(inputRoot, tagHelper, parser)
-    logger.info("...found %d known team(s)", len(knownTeams))
+    logger.info("found %d known team(s)", len(knownTeams))
 
     rows: list[dict[str, object]] = []
     try:
@@ -893,15 +895,15 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
     except UserQuitRequested:
-        logger.info("...user requested quit")
+        logger.info("user requested quit")
 
     outputCsv = Path(args.outputCsv).expanduser().resolve()
     writeCsv(outputCsv, rows)
 
     logger.info("")
-    logger.info("...files processed: %s", len(rows))
-    logger.info("...csv report: %s", outputCsv)
-    logger.info("...mode: %s", "write" if not dryRun else "dry-run")
+    logger.info("files processed: %s", len(rows))
+    logger.info("csv report: %s", outputCsv)
+    logger.info("mode: %s", "write" if not dryRun else "dry-run")
     return 0
 
 

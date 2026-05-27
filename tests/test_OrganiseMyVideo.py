@@ -4,6 +4,7 @@ import errno
 import io
 import json
 import logging
+import os
 import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -13,7 +14,11 @@ import pytest
 # conftest.py stubs organiseMyProjects before this import
 import organiseMyVideo.__main__ as omv_main
 from organiseMyVideo import VideoOrganizer
-from organiseMyVideo.video import _FILE_PROCESS_SEPARATOR, _XML_BINARY_CHECK_WINDOW
+from organiseMyVideo import video as video_module
+from organiseMyVideo.video import (
+    _FILE_PROCESS_SEPARATOR,
+    _XML_BINARY_CHECK_WINDOW,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -54,6 +59,13 @@ def testDefaultDryRunIsTrue():
 def testExplicitDryRunFalse(tmp_path: Path):
     org = VideoOrganizer(sourceDir=str(tmp_path), dryRun=False)
     assert org.dryRun is False
+
+
+def testLoggerMultilineRendersIndentedEntries(caplog: pytest.LogCaptureFixture):
+    with caplog.at_level("INFO"):
+        video_module.logger.multiline("tv show", "old.mkv", "new.mkv")
+
+    assert "...tv show:\n     old.mkv\n     new.mkv" in caplog.text
 
 
 def _savedAfterLifeMetadataLibrary() -> dict:
@@ -154,6 +166,33 @@ def testParseTvFilenameWithSpaces(organizer: VideoOrganizer):
     assert result["episode"] == 13
     assert result["episodeTitle"] == "7 00 P M (1080)"
     assert result["type"] == "tv"
+
+
+def testParseTvFilenameStripsTrailingReleaseNoise(organizer: VideoOrganizer):
+    result = organizer.parseTvFilename(
+        "The.Pitt.S02E05.Pilot.1080p.WEB.h264.successfulcrab.EZTVx.to.mkv"
+    )
+    assert result is not None
+    assert result["showName"] == "The Pitt"
+    assert result["episodeTitle"] == "Pilot"
+
+
+def testParseTvFilenameStripsTrailingBracketMetadataNoise(organizer: VideoOrganizer):
+    result = organizer.parseTvFilename(
+        "24.S08E13.Day 8 4AM-5AM[Action-Drama-Mystery][2010].avi"
+    )
+    assert result is not None
+    assert result["showName"] == "24"
+    assert result["episodeTitle"] == "Day 8 4.00am-5.00am"
+
+
+def testParseTvFilenameDropsNoiseOnlyEpisodeTitle(organizer: VideoOrganizer):
+    result = organizer.parseTvFilename(
+        "The.Pitt.S02E05.1080p.WEB.h264.successfulcrab.EZTVx.to.mkv"
+    )
+    assert result is not None
+    assert result["showName"] == "The Pitt"
+    assert result["episodeTitle"] is None
 
 
 def testParseTvFilenameReturnsNoneForMovie(organizer: VideoOrganizer):
@@ -318,6 +357,35 @@ def testReadMcmHintsInfersTvSeasonFromSeriesAndPath(
     }
 
 
+def testReadMcmHintsFallsBackToEpisodeSeriesIdWhenSeriesXmlBlank(
+    sourceDir: Path, organizer: VideoOrganizer
+):
+    showDir = sourceDir / "After Life"
+    seasonDir = showDir / "Season 1"
+    metadataDir = seasonDir / "metadata"
+    metadataDir.mkdir(parents=True)
+    videoFile = seasonDir / "episode.mkv"
+    videoFile.write_bytes(b"x" * 50)
+    (showDir / "series.xml").write_text("<Series />", encoding="utf-8")
+    (metadataDir / "episode.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Item>
+    <EpisodeID>10751471</EpisodeID>
+    <EpisodeNumber>4</EpisodeNumber>
+    <SeasonNumber>1</SeasonNumber>
+    <EpisodeName>Sic Semper Systema</EpisodeName>
+    <SeriesID>347507</SeriesID>
+</Item>
+""",
+        encoding="utf-8",
+    )
+
+    hints = organizer._readMcmHints(videoFile)
+
+    assert hints is not None
+    assert hints["seriesId"] == "347507"
+
+
 def testReadMcmHintsIgnoresBinaryEpisodeXmlWithoutWarning(
     sourceDir: Path, organizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
 ):
@@ -360,6 +428,23 @@ def testReadMcmHintsIgnoresBinaryEpisodeXmlWithoutWarning(
         },
     }
     assert "could not parse metadata XML" not in caplog.text
+
+
+def testReadTvSeriesMcmHintsFallsBackToDvdIdSeriesIdWhenSeriesXmlMissing(
+    sourceDir: Path, organizer: VideoOrganizer
+):
+    showDir = sourceDir / "Virgin River"
+    showDir.mkdir()
+    (showDir / "mcm_id__117581.dvdid.xml").write_text(
+        "<Item><SeriesID>117581</SeriesID></Item>", encoding="utf-8"
+    )
+
+    hints = organizer._readTvSeriesMcmHints(showDir)
+
+    assert hints is not None
+    assert hints["seriesId"] == "117581"
+    assert hints["mcm"]["showXmlExists"] is False
+    assert hints["mcm"]["dvdIdXmlExists"] is True
 
 
 def testReadMcmHintsDetectsMovieArtworkWithoutMovieXml(
@@ -537,6 +622,27 @@ def testFindExistingTvShowDirCaseInsensitive(tmp_path: Path, organizer: VideoOrg
     assert result is not None
 
 
+def testFindExistingTvShowDirMatchesTrailingTheFolderName(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    tvRoot = tmp_path / "TV"
+    (tvRoot / "Office, The").mkdir(parents=True)
+    result = organizer.findExistingTvShowDir("The Office", [tvRoot])
+    assert result is not None
+    assert result.name == "Office, The"
+
+
+def testFindExistingTvShowDirPrefersTrailingTheFolderNameWhenBothExist(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    tvRoot = tmp_path / "TV"
+    (tvRoot / "The Office").mkdir(parents=True)
+    (tvRoot / "Office, The").mkdir(parents=True)
+    result = organizer.findExistingTvShowDir("The Office", [tvRoot])
+    assert result is not None
+    assert result.name == "Office, The"
+
+
 def testFindExistingTvShowDirNotFound(tmp_path: Path, organizer: VideoOrganizer):
     tvRoot = tmp_path / "TV"
     tvRoot.mkdir()
@@ -555,6 +661,16 @@ def testFindBestMatchingTvShowExactMatch(tmp_path: Path, organizer: VideoOrganiz
     (tvRoot / "Breaking Bad").mkdir()
     result = organizer.findBestMatchingTvShow("Breaking Bad", [tvRoot])
     assert result == "Breaking Bad"
+
+
+def testFindBestMatchingTvShowMatchesTrailingTheFolderName(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    tvRoot = tmp_path / "TV"
+    tvRoot.mkdir()
+    (tvRoot / "Office, The").mkdir()
+    result = organizer.findBestMatchingTvShow("The Office", [tvRoot])
+    assert result == "Office, The"
 
 
 def testFindBestMatchingTvShowFuzzyMatchReturnsFolder(
@@ -804,9 +920,80 @@ def testProcessFilesFindsVideoInSubdirectory(
         ):
             confirmedOrganizer.processFiles(interactive=True)
 
-    destFile = movieStorage / "One Mile (2026)" / "One.Mile.2026.1080p.WEBRip.x264.mp4"
+    destFile = movieStorage / "One Mile (2026)" / "One Mile (2026).mp4"
     assert destFile.exists()
     assert not srcFile.exists()
+
+
+def testProcessFilesIgnoresFeaturettesSubdirectory(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    """Featurettes files are skipped during local source scanning."""
+    normalFile = confirmedOrganizer.sourceDir / "One.Mile.2026.mp4"
+    normalFile.write_bytes(b"x" * 100)
+    featurettesDir = confirmedOrganizer.sourceDir / "Featurettes"
+    featurettesDir.mkdir()
+    ignoredFile = featurettesDir / "Bonus.Feature.2026.mp4"
+    ignoredFile.write_bytes(b"x" * 100)
+
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+    tvStorage = tmp_path / "TV"
+    tvStorage.mkdir()
+
+    with patch.object(
+        confirmedOrganizer,
+        "scanStorageLocations",
+        return_value=([movieStorage], [tvStorage]),
+    ):
+        with patch.object(confirmedOrganizer, "_prepareMetadataLibrary"):
+            with patch.object(
+                confirmedOrganizer,
+                "_classifyVideoFile",
+                return_value=(
+                    None,
+                    {"title": "One Mile", "year": "2026", "extension": ".mp4"},
+                ),
+            ):
+                with patch.object(
+                    confirmedOrganizer, "moveMovie", return_value=True
+                ) as mockMoveMovie:
+                    confirmedOrganizer.processFiles(interactive=False)
+
+    assert [call.args[0] for call in mockMoveMovie.call_args_list] == [normalFile]
+    assert ignoredFile.exists()
+
+
+def testProcessFilesRenamesExtrasFolderToFeaturettes(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    """Extras folders are normalised to Featurettes before scanning source files."""
+    extrasDir = confirmedOrganizer.sourceDir / "Extras"
+    extrasDir.mkdir()
+    extraFile = extrasDir / "Bonus.Feature.2026.mp4"
+    extraFile.write_bytes(b"x" * 100)
+
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+    tvStorage = tmp_path / "TV"
+    tvStorage.mkdir()
+
+    with patch.object(
+        confirmedOrganizer,
+        "scanStorageLocations",
+        return_value=([movieStorage], [tvStorage]),
+    ):
+        with patch.object(confirmedOrganizer, "_prepareMetadataLibrary"):
+            with patch.object(
+                confirmedOrganizer, "moveMovie", return_value=True
+            ) as mockMoveMovie:
+                confirmedOrganizer.processFiles(interactive=False)
+
+    featurettesDir = confirmedOrganizer.sourceDir / "Featurettes"
+    assert not extrasDir.exists()
+    assert featurettesDir.exists()
+    assert (featurettesDir / "Bonus.Feature.2026.mp4").exists()
+    mockMoveMovie.assert_not_called()
 
 
 def testProcessFilesUsesMovieMcmHintsWhenFilenameCannotBeParsed(
@@ -838,7 +1025,7 @@ def testProcessFilesUsesMovieMcmHintsWhenFilenameCannotBeParsed(
     ):
         confirmedOrganizer.processFiles(interactive=False)
 
-    destFile = movieStorage / "3 from Hell (2019)" / "clip.mp4"
+    destFile = movieStorage / "3 from Hell (2019)" / "3 from Hell (2019).mp4"
     assert destFile.exists()
     assert not srcFile.exists()
 
@@ -1692,6 +1879,32 @@ def testProcessFilesKeepsSourceNameWhenScraperCannotFillEpisodeTitle(
     assert not srcFile.exists()
 
 
+def testProcessFilesDoesNotRefetchTvMetadataAfterClassification(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "The.Pitt.S02E05.1080p.WEB.h264-ETHEL.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    with patch.object(
+        confirmedOrganizer,
+        "scanStorageLocations",
+        return_value=([movieStorage], [tvStorage]),
+    ):
+        with patch.object(
+            confirmedOrganizer, "_fetchTvMetadataFromScraper", return_value=None
+        ) as mockFetch:
+            confirmedOrganizer.processFiles(interactive=False)
+
+    assert mockFetch.call_count == 1
+    destFile = tvStorage / "Pitt, The" / "Season 02" / "The.Pitt.S02E05.mkv"
+    assert destFile.exists()
+    assert not srcFile.exists()
+
+
 def testFetchTvMetadataFromProvidersUsesTvdbBeforeImdb(organizer: VideoOrganizer):
     tvInfo = {"showName": "Breaking Bad", "season": 1, "episode": 1, "type": "tv"}
     tvdbRecord = {"type": "tv", "episodeTitle": "Pilot", "metadataSource": "tvdb"}
@@ -1742,6 +1955,492 @@ def testFetchTvMetadataFromProvidersReturnsNoneWhenAllProvidersMiss(
     assert result is None
     tvdb.assert_called_once_with(tvInfo)
     imdb.assert_called_once_with(tvInfo)
+
+
+def testEnrichTvMetadataCallsScraperInDryRun(organizer: VideoOrganizer):
+    """Dry-run TV enrichment still fetches episode metadata for previews."""
+    tvInfo = {"showName": "Breaking Bad", "season": 1, "episode": 1, "type": "tv"}
+    scraped = {
+        "type": "tv",
+        "showName": "Breaking Bad",
+        "season": 1,
+        "episode": 1,
+        "episodeTitle": "Pilot",
+        "seriesId": "81189",
+        "episodeId": "349232",
+        "metadataSource": "tvdb",
+    }
+    emptyLibrary = organizer._newMetadataLibrary()
+    with patch.object(organizer, "_loadMetadataLibrary", return_value=emptyLibrary):
+        with patch.object(
+            organizer, "_fetchTvMetadataFromScraper", return_value=scraped
+        ) as mockScraper:
+            with patch.object(organizer, "_saveMetadataLibrary") as mockSave:
+                result = organizer._enrichTvMetadata(tvInfo)
+
+    mockScraper.assert_called_once()
+    mockSave.assert_called_once()
+    assert result is not None
+    assert result["episodeTitle"] == "Pilot"
+    assert result["seriesId"] == "81189"
+    assert emptyLibrary["tv"]["episodes"]
+
+
+def testEnrichTvMetadataReplacesParsedEpisodeTitleWithScrapedMetadata(
+    organizer: VideoOrganizer,
+):
+    """Scraped TV metadata should replace noisy filename-derived episode titles."""
+    tvInfo = {
+        "showName": "The Pitt",
+        "season": 2,
+        "episode": 5,
+        "episodeTitle": "1080p WEB h264-ETHEL[EZTVx.to]",
+        "type": "tv",
+    }
+    scraped = {
+        "type": "tv",
+        "showName": "The Pitt",
+        "season": 2,
+        "episode": 5,
+        "episodeTitle": "A Better Episode Title",
+        "seriesId": "12345",
+        "episodeId": "67890",
+        "metadataSource": "tvdb",
+    }
+    emptyLibrary = organizer._newMetadataLibrary()
+    with patch.object(organizer, "_loadMetadataLibrary", return_value=emptyLibrary):
+        with patch.object(
+            organizer, "_fetchTvMetadataFromScraper", return_value=scraped
+        ) as mockScraper:
+            with patch.object(organizer, "_saveMetadataLibrary"):
+                result = organizer._enrichTvMetadata(tvInfo)
+
+    mockScraper.assert_called_once()
+    assert result is not None
+    assert result["episodeTitle"] == "A Better Episode Title"
+    assert result["seriesId"] == "12345"
+    assert result["metadataSource"] == "tvdb"
+
+
+def testEnrichTvMetadataPrefersScrapedEpisodeTitleOverCleanParsedTitle(
+    organizer: VideoOrganizer,
+):
+    tvInfo = {
+        "showName": "Breaking Bad",
+        "season": 1,
+        "episode": 1,
+        "episodeTitle": "Pilot",
+        "type": "tv",
+    }
+    scraped = {
+        "type": "tv",
+        "showName": "Breaking Bad",
+        "season": 1,
+        "episode": 1,
+        "episodeTitle": "Cat's in the Bag...",
+        "metadataSource": "tvdb",
+    }
+    emptyLibrary = organizer._newMetadataLibrary()
+
+    with patch.object(organizer, "_loadMetadataLibrary", return_value=emptyLibrary):
+        with patch.object(
+            organizer, "_fetchTvMetadataFromScraper", return_value=scraped
+        ) as mockScraper:
+            result = organizer._enrichTvMetadata(tvInfo)
+
+    mockScraper.assert_called_once()
+    assert result is not None
+    assert result["episodeTitle"] == "Cat's in the Bag..."
+
+
+def testEnrichTvMetadataKeepsFilenameEpisodeTitleWhenScraperHasNoTitle(
+    organizer: VideoOrganizer,
+):
+    tvInfo = {
+        "showName": "Breaking Bad",
+        "season": 1,
+        "episode": 1,
+        "episodeTitle": "Pilot",
+        "type": "tv",
+    }
+    emptyLibrary = organizer._newMetadataLibrary()
+
+    with patch.object(organizer, "_loadMetadataLibrary", return_value=emptyLibrary):
+        with patch.object(
+            organizer, "_fetchTvMetadataFromScraper", return_value=None
+        ) as mockScraper:
+            result = organizer._enrichTvMetadata(tvInfo)
+
+    mockScraper.assert_called_once()
+    assert result is not None
+    assert result["episodeTitle"] == "Pilot"
+
+
+def testGetTvdbTokenPromptsForApiKeyWhenMissing(organizer: VideoOrganizer):
+    organizer.tvdbApiKeyPrompt = MagicMock(return_value="prompted-key")
+
+    with patch.dict("os.environ", {}, clear=True):
+        with patch.object(
+            organizer, "_requestJson", return_value={"data": {"token": "token-123"}}
+        ) as mockRequest:
+            token = organizer._getTvdbToken()
+
+    assert token == "token-123"
+    organizer.tvdbApiKeyPrompt.assert_called_once_with()
+    mockRequest.assert_called_once_with(
+        "https://api4.thetvdb.com/v4/login",
+        method="POST",
+        payload={"apikey": "prompted-key"},
+        headers={},
+    )
+
+
+def testFetchTvdbMetadataUsesEpisodeListEndpointForSeriesLookup(
+    organizer: VideoOrganizer,
+):
+    tvInfo = {
+        "showName": "Virgin River",
+        "seriesId": "117581",
+        "season": 6,
+        "episode": 1,
+        "type": "tv",
+    }
+    payload = {
+        "data": {
+            "episodes": [
+                {
+                    "id": "9999",
+                    "seriesId": "117581",
+                    "seriesName": "Virgin River",
+                    "seasonNumber": 6,
+                    "number": 1,
+                    "name": "The Beginning",
+                }
+            ]
+        }
+    }
+    with patch.object(organizer, "_getTvdbToken", return_value="token-123"):
+        with patch.object(
+            organizer, "_requestJson", return_value=payload
+        ) as mockRequest:
+            result = organizer._fetchTvdbMetadata(tvInfo)
+
+    assert result is not None
+    assert result["episodeTitle"] == "The Beginning"
+    assert result["seriesId"] == "117581"
+    mockRequest.assert_called_once_with(
+        "https://api4.thetvdb.com/v4/series/117581/episodes/default?page=0",
+        headers={"Authorization": "Bearer token-123"},
+    )
+
+
+def testFetchTvdbMetadataUsesEpisodeListEndpointForSearchResults(
+    organizer: VideoOrganizer,
+):
+    tvInfo = {"showName": "The Office", "season": 1, "episode": 6, "type": "tv"}
+
+    def requestJson(url, headers=None, **kwargs):
+        if url == "https://api4.thetvdb.com/v4/search?query=The+Office&type=series":
+            return {"data": [{"tvdb_id": "78565"}]}
+        if url == "https://api4.thetvdb.com/v4/series/78565/episodes/default?page=0":
+            return {
+                "data": {
+                    "episodes": [
+                        {
+                            "id": "456",
+                            "seriesId": "78565",
+                            "seriesName": "The Office",
+                            "seasonNumber": 1,
+                            "number": 6,
+                            "name": "Hot Girl",
+                        }
+                    ]
+                }
+            }
+        raise AssertionError(f"unexpected URL: {url}")
+
+    with patch.object(organizer, "_getTvdbToken", return_value="token-123"):
+        with patch.object(
+            organizer, "_requestJson", side_effect=requestJson
+        ) as mockRequest:
+            result = organizer._fetchTvdbMetadata(tvInfo)
+
+    assert result is not None
+    assert result["episodeTitle"] == "Hot Girl"
+    assert result["seriesId"] == "78565"
+    assert mockRequest.call_count == 2
+
+
+def testFetchTvdbMetadataPrefersExactTvdbSearchMatchBeforeBroaderResults(
+    organizer: VideoOrganizer,
+):
+    tvInfo = {"showName": "The Pitt", "season": 1, "episode": 9, "type": "tv"}
+
+    def requestJson(url, headers=None, **kwargs):
+        if url == "https://api4.thetvdb.com/v4/search?query=The+Pitt&type=series":
+            return {
+                "data": [
+                    {"tvdb_id": "111", "name": "The Pittsburgh Steelers Select"},
+                    {"tvdb_id": "54321", "name": "The Pitt"},
+                ]
+            }
+        if url == "https://api4.thetvdb.com/v4/series/54321/episodes/default?page=0":
+            return {
+                "data": {
+                    "episodes": [
+                        {
+                            "id": "999",
+                            "seriesId": "54321",
+                            "seriesName": "The Pitt",
+                            "seasonNumber": 1,
+                            "number": 9,
+                            "name": "3:00 P.M.",
+                        }
+                    ]
+                }
+            }
+        raise AssertionError(f"unexpected URL: {url}")
+
+    with patch.object(organizer, "_getTvdbToken", return_value="token-123"):
+        with patch.object(
+            organizer, "_requestJson", side_effect=requestJson
+        ) as mockRequest:
+            result = organizer._fetchTvdbMetadata(tvInfo)
+
+    assert result is not None
+    assert result["episodeTitle"] == "3.00pm"
+    assert result["seriesId"] == "54321"
+    assert mockRequest.call_count == 2
+
+
+def testFetchTvdbMetadataUsesEpisodeTitleWhenSeriesNameMissingFromEpisodeList(
+    organizer: VideoOrganizer,
+):
+    tvInfo = {"showName": "The Pitt", "season": 1, "episode": 9, "type": "tv"}
+
+    def requestJson(url, headers=None, **kwargs):
+        if url == "https://api4.thetvdb.com/v4/search?query=The+Pitt&type=series":
+            return {"data": [{"tvdb_id": "54321"}]}
+        if url == "https://api4.thetvdb.com/v4/series/54321/episodes/default?page=0":
+            return {
+                "data": {
+                    "episodes": [
+                        {
+                            "id": "999",
+                            "seriesId": "54321",
+                            "seasonNumber": 1,
+                            "number": 9,
+                            "name": "3:00 P.M.",
+                        }
+                    ]
+                }
+            }
+        raise AssertionError(f"unexpected URL: {url}")
+
+    with patch.object(organizer, "_getTvdbToken", return_value="token-123"):
+        with patch.object(
+            organizer, "_requestJson", side_effect=requestJson
+        ) as mockRequest:
+            result = organizer._fetchTvdbMetadata(tvInfo)
+
+    assert result is not None
+    assert result["showName"] is None
+    assert result["episodeTitle"] == "3.00pm"
+    assert result["seriesId"] == "54321"
+    assert mockRequest.call_count == 2
+
+
+def testFetchTvdbMetadataFindsThePittTitleViaPagedSearchFallback(
+    organizer: VideoOrganizer,
+):
+    tvInfo = {"showName": "The Pitt", "season": 2, "episode": 5, "type": "tv"}
+
+    def requestJson(url, headers=None, **kwargs):
+        if url == "https://api4.thetvdb.com/v4/search?query=The+Pitt&type=series":
+            return {"data": [{"tvdb_id": "54321"}]}
+        if url == "https://api4.thetvdb.com/v4/series/54321/episodes/default?page=0":
+            return {
+                "data": {
+                    "episodes": [
+                        {
+                            "id": "111",
+                            "seriesId": "54321",
+                            "seriesName": "The Pitt",
+                            "seasonNumber": 2,
+                            "number": 4,
+                            "name": "1:00 P.M.",
+                        }
+                    ]
+                },
+                "links": {"next": "?page=1"},
+            }
+        if url == "https://api4.thetvdb.com/v4/series/54321/episodes/default?page=1":
+            return {
+                "data": {
+                    "episodes": [
+                        {
+                            "id": "222",
+                            "seriesId": "54321",
+                            "seriesName": "The Pitt",
+                            "seasonNumber": 2,
+                            "number": 5,
+                            "name": "2:00 P.M.",
+                        }
+                    ]
+                }
+            }
+        raise AssertionError(f"unexpected URL: {url}")
+
+    with patch.object(organizer, "_getTvdbToken", return_value="token-123"):
+        with patch.object(
+            organizer, "_requestJson", side_effect=requestJson
+        ) as mockRequest:
+            result = organizer._fetchTvdbMetadata(tvInfo)
+
+    assert result is not None
+    assert result["episodeTitle"] == "2.00pm"
+    assert result["seriesId"] == "54321"
+    assert mockRequest.call_count == 3
+
+
+def testFetchTvdbMetadataFetchesMatchedEpisodeByIdWhenListHasNoTitle(
+    organizer: VideoOrganizer,
+):
+    tvInfo = {"showName": "The Pitt", "season": 2, "episode": 5, "type": "tv"}
+
+    def requestJson(url, headers=None, **kwargs):
+        if url == "https://api4.thetvdb.com/v4/search?query=The+Pitt&type=series":
+            return {"data": [{"tvdb_id": "54321"}]}
+        if url == "https://api4.thetvdb.com/v4/series/54321/episodes/default?page=0":
+            return {
+                "data": {
+                    "episodes": [
+                        {
+                            "id": "222",
+                            "seriesId": "54321",
+                            "seriesName": "The Pitt",
+                            "seasonNumber": 2,
+                            "number": 5,
+                        }
+                    ]
+                }
+            }
+        if url == "https://api4.thetvdb.com/v4/episodes/222/extended":
+            return {
+                "data": {
+                    "id": "222",
+                    "seriesId": "54321",
+                    "seriesName": "The Pitt",
+                    "seasonNumber": 2,
+                    "number": 5,
+                    "name": "2:00 P.M.",
+                }
+            }
+        raise AssertionError(f"unexpected URL: {url}")
+
+    with patch.object(organizer, "_getTvdbToken", return_value="token-123"):
+        with patch.object(
+            organizer, "_requestJson", side_effect=requestJson
+        ) as mockRequest:
+            result = organizer._fetchTvdbMetadata(tvInfo)
+
+    assert result is not None
+    assert result["episodeTitle"] == "2.00pm"
+    assert result["seriesId"] == "54321"
+    assert mockRequest.call_count == 3
+
+
+def testFetchTvdbMetadataLogsTvdbTitlePayloads(
+    organizer: VideoOrganizer,
+):
+    tvInfo = {"showName": "The Pitt", "season": 1, "episode": 9, "type": "tv"}
+
+    def requestJson(url, headers=None, **kwargs):
+        if url == "https://api4.thetvdb.com/v4/search?query=The+Pitt&type=series":
+            return {"data": [{"tvdb_id": "54321"}]}
+        if url == "https://api4.thetvdb.com/v4/series/54321/episodes/default?page=0":
+            return {
+                "data": {
+                    "episodes": [
+                        {
+                            "id": "999",
+                            "seriesId": "54321",
+                            "seriesName": "The Pitt",
+                            "seasonNumber": 1,
+                            "number": 9,
+                        }
+                    ]
+                }
+            }
+        if url == "https://api4.thetvdb.com/v4/episodes/999/extended":
+            return {
+                "data": {
+                    "id": "999",
+                    "seriesId": "54321",
+                    "seriesName": "The Pitt",
+                    "seasonNumber": 1,
+                    "number": 9,
+                    "name": None,
+                }
+            }
+        raise AssertionError(f"unexpected URL: {url}")
+
+    with patch.object(organizer, "_getTvdbToken", return_value="token-123"):
+        with patch.object(organizer, "_requestJson", side_effect=requestJson):
+            with patch("organiseMyVideo.metadata.logger.debug") as mockDebug:
+                result = organizer._fetchTvdbMetadata(tvInfo)
+
+    assert result is None
+    debugCalls = [call.args for call in mockDebug.call_args_list]
+    assert (
+        "TVDB title payload: show=%r season=%s episode=%s episodeId=%r rawTitle=%r resolvedTitle=%r",
+        "The Pitt",
+        1,
+        9,
+        "999",
+        None,
+        None,
+    ) in debugCalls
+
+
+def testPromptForTvdbApiKeyIfNeededReturnsNoneForBlankPrompt(
+    organizer: VideoOrganizer,
+):
+    organizer.tvdbApiKeyPrompt = MagicMock(return_value="   ")
+
+    with patch.dict("os.environ", {}, clear=True):
+        result = organizer._promptForTvdbApiKeyIfNeeded()
+
+    assert result is None
+    organizer.tvdbApiKeyPrompt.assert_called_once_with()
+
+
+def testPromptForTvdbApiKeyIfNeededReturnsNoneForNonStringPrompt(
+    organizer: VideoOrganizer,
+):
+    organizer.tvdbApiKeyPrompt = MagicMock(return_value=123)
+
+    with patch.dict("os.environ", {}, clear=True):
+        result = organizer._promptForTvdbApiKeyIfNeeded()
+
+    assert result is None
+    organizer.tvdbApiKeyPrompt.assert_called_once_with()
+
+
+def testPromptForTvdbApiKeyIfNeededUsesEnvValueSavedByPrompt(
+    organizer: VideoOrganizer,
+):
+    def persistKey():
+        os.environ["ORGANISEMYVIDEO_TVDB_API_KEY"] = "saved-by-prompt"
+        return None
+
+    organizer.tvdbApiKeyPrompt = MagicMock(side_effect=persistKey)
+
+    with patch.dict("os.environ", {}, clear=True):
+        result = organizer._promptForTvdbApiKeyIfNeeded()
+
+    assert result == "saved-by-prompt"
+    organizer.tvdbApiKeyPrompt.assert_called_once_with()
 
 
 def testProcessFilesCachesImdbFallbackEpisodeTitleForLaterRuns(tmp_path: Path):
@@ -2230,9 +2929,7 @@ def testEnrichMovieMetadataSkipsScraperWhenBothIdsPresent(organizer: VideoOrgani
         "tmdbId": "27205",
         "type": "movie",
     }
-    with patch.object(
-        organizer, "_fetchMovieMetadataFromScraper"
-    ) as mockScraper:
+    with patch.object(organizer, "_fetchMovieMetadataFromScraper") as mockScraper:
         result = organizer._enrichMovieMetadata(movieInfo)
 
     mockScraper.assert_not_called()
@@ -2241,21 +2938,37 @@ def testEnrichMovieMetadataSkipsScraperWhenBothIdsPresent(organizer: VideoOrgani
     assert result["tmdbId"] == "27205"
 
 
-def testEnrichMovieMetadataSkipsScraperInDryRun(organizer: VideoOrganizer):
-    """In dry-run mode enrichment logs but does not call the scraper."""
+def testEnrichMovieMetadataCallsScraperInDryRun(organizer: VideoOrganizer):
+    """Dry-run enrichment still fetches metadata so previews use enriched values."""
     movieInfo = {
         "title": "Inception",
         "year": "2010",
         "imdbId": None,
+        "tmdbId": None,
         "type": "movie",
     }
-    with patch.object(
-        organizer, "_fetchMovieMetadataFromScraper"
-    ) as mockScraper:
-        result = organizer._enrichMovieMetadata(movieInfo)
+    scraped = {
+        "type": "movie",
+        "title": "Inception",
+        "year": "2010",
+        "imdbId": "tt1375666",
+        "tmdbId": "27205",
+        "metadataSource": "tmdb",
+    }
+    emptyLibrary = organizer._newMetadataLibrary()
+    with patch.object(organizer, "_loadMetadataLibrary", return_value=emptyLibrary):
+        with patch.object(
+            organizer, "_fetchMovieMetadataFromScraper", return_value=scraped
+        ) as mockScraper:
+            with patch.object(organizer, "_saveMetadataLibrary") as mockSave:
+                result = organizer._enrichMovieMetadata(movieInfo)
 
-    mockScraper.assert_not_called()
+    mockScraper.assert_called_once()
+    mockSave.assert_called_once()
     assert result is not None
+    assert result["imdbId"] == "tt1375666"
+    assert result["tmdbId"] == "27205"
+    assert emptyLibrary["movies"]
 
 
 def testEnrichMovieMetadataCallsScraperWhenIdsMissing(organizer: VideoOrganizer):
@@ -2432,9 +3145,7 @@ def testDownloadArtworkFilePreservesExistingFile(
     assert dest.read_bytes() == b"existing"
 
 
-def testDownloadArtworkFileRejectsNonHttps(
-    tmp_path: Path, organizer: VideoOrganizer
-):
+def testDownloadArtworkFileRejectsNonHttps(tmp_path: Path, organizer: VideoOrganizer):
     dest = tmp_path / "folder.jpg"
     result = organizer._downloadArtworkFile("http://example.com/img.jpg", dest)
     assert result is False
@@ -2501,7 +3212,9 @@ def testFetchMovieArtworkFallsBackToOmdbPosterUrl(
     ) as mockDownload:
         confirmedOrganizer._fetchMovieArtwork(movieInfo, tmp_path)
 
-    posterCall = [c for c in mockDownload.call_args_list if "folder.jpg" in str(c.args[1])]
+    posterCall = [
+        c for c in mockDownload.call_args_list if "folder.jpg" in str(c.args[1])
+    ]
     assert posterCall
     assert posterCall[0].args[0] == "https://example.com/omdb-poster.jpg"
 
@@ -2536,9 +3249,7 @@ def testMoveMovieFetchesArtworkViaEnrichedMetadata(
         "type": "movie",
     }
 
-    with patch.object(
-        confirmedOrganizer, "_fetchMovieArtwork"
-    ) as mockArtwork:
+    with patch.object(confirmedOrganizer, "_fetchMovieArtwork") as mockArtwork:
         result = confirmedOrganizer.moveMovie(
             srcFile, movieInfo, [movieStorage], interactive=False
         )
@@ -2553,7 +3264,7 @@ def testMoveMovieFetchesArtworkViaEnrichedMetadata(
 
 
 def testMoveTvShowDryRunReturnsTrueWithoutMoving(
-    tmp_path: Path, organizer: VideoOrganizer
+    tmp_path: Path, organizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
 ):
     srcFile = organizer.sourceDir / "Breaking.Bad.S01E01.Pilot.mkv"
     srcFile.write_bytes(b"x" * 100)
@@ -2570,11 +3281,22 @@ def testMoveTvShowDryRunReturnsTrueWithoutMoving(
     }
 
     with patch.object(organizer, "_moveFileWithProgress") as mockMove:
-        result = organizer.moveTvShow(srcFile, tvInfo, [tvStorage], interactive=False)
+        with caplog.at_level("INFO"):
+            result = organizer.moveTvShow(
+                srcFile, tvInfo, [tvStorage], interactive=False
+            )
 
     assert result is True
     mockMove.assert_not_called()
     assert srcFile.exists()
+    expectedDest = (
+        tvStorage / "Breaking Bad" / "Season 01" / "Breaking.Bad.S01E01.Pilot.mkv"
+    )
+    assert (
+        f"...moving TV show:\n"
+        f"     Breaking.Bad.S01E01.Pilot.mkv\n"
+        f"     -> {expectedDest}"
+    ) in caplog.text
 
 
 class _FakeTtyStream(io.StringIO):
@@ -2993,6 +3715,44 @@ def testMoveTvShowPreservesExistingSeriesXmlWithoutOverwriting(
     assert "<IMDB_ID>" not in seriesText
 
 
+def testMoveTvShowBackfillsExistingIncompleteShowMetadata(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "Virgin.River.S06E01.mkv"
+    srcFile.write_bytes(b"x" * 100)
+    tvStorage = tmp_path / "video1" / "TV"
+    showDestDir = tvStorage / "Virgin River"
+    showDestDir.mkdir(parents=True)
+    (showDestDir / "series.xml").write_text(
+        "<Series><SeriesName>Virgin River</SeriesName></Series>", encoding="utf-8"
+    )
+    (showDestDir / "mcm_id__existing.dvdid.xml").write_text(
+        "<Item><IMDB_ID>tt9077530</IMDB_ID></Item>", encoding="utf-8"
+    )
+
+    tvInfo = {
+        "showName": "Virgin River",
+        "season": 6,
+        "episode": 1,
+        "seriesId": "117581",
+        "imdbId": "tt9077530",
+        "extension": ".mkv",
+        "type": "tv",
+    }
+
+    result = confirmedOrganizer.moveTvShow(
+        srcFile, tvInfo, [tvStorage], interactive=False
+    )
+
+    assert result is True
+    assert "<SeriesID>117581</SeriesID>" in (showDestDir / "series.xml").read_text(
+        encoding="utf-8"
+    )
+    assert "<SeriesID>117581</SeriesID>" in (
+        showDestDir / "mcm_id__existing.dvdid.xml"
+    ).read_text(encoding="utf-8")
+
+
 def testMoveTvShowUsesCanonicalEpisodeTitleFilename(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer
 ):
@@ -3020,6 +3780,123 @@ def testMoveTvShowUsesCanonicalEpisodeTitleFilename(
         / "Law & Order: SVU"
         / "Season 03"
         / "Law.Order.SVU.S03E02.Whats.Next.Finale.mkv"
+    )
+    assert destFile.exists()
+    assert not srcFile.exists()
+
+
+def testMoveTvShowUsesNormalisedTimeRangeEpisodeTitleFilename(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "episode.avi"
+    srcFile.write_bytes(b"x" * 100)
+
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    tvInfo = {
+        "showName": "24",
+        "season": 8,
+        "episode": 13,
+        "episodeTitle": "Day 8: 4:00 A.M.-5:00 A.M.",
+        "extension": ".avi",
+        "type": "tv",
+    }
+    result = confirmedOrganizer.moveTvShow(
+        srcFile, tvInfo, [tvStorage], interactive=False
+    )
+
+    assert result is True
+    destFile = tvStorage / "24" / "Season 08" / "24.S08E13.Day 8 4.00am-5.00am.avi"
+    assert destFile.exists()
+    assert not srcFile.exists()
+
+
+def testMoveTvShowUsesNormalisedScrapedTimeRangeEpisodeTitleFilename(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "episode.mkv"
+    srcFile.write_bytes(b"x" * 100)
+
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    scraped = {
+        "showName": "24",
+        "season": 8,
+        "episode": 13,
+        "episodeTitle": "Day 8 4AM-5AM",
+        "seriesId": "12345",
+        "episodeId": "67890",
+        "extension": ".mkv",
+        "type": "tv",
+        "metadataSource": "tvdb",
+    }
+    emptyLibrary = confirmedOrganizer._newMetadataLibrary()
+    with patch.object(
+        confirmedOrganizer, "_loadMetadataLibrary", return_value=emptyLibrary
+    ):
+        with patch.object(confirmedOrganizer, "_saveMetadataLibrary"):
+            with patch.object(
+                confirmedOrganizer, "_fetchTvMetadataFromScraper", return_value=scraped
+            ):
+                result = confirmedOrganizer.moveTvShow(
+                    srcFile,
+                    {"showName": "24", "season": 8, "episode": 13, "type": "tv"},
+                    [tvStorage],
+                    interactive=False,
+                )
+
+    assert result is True
+    destFile = tvStorage / "24" / "Season 08" / "24.S08E13.Day 8 4.00am-5.00am.mkv"
+    assert destFile.exists()
+    assert not srcFile.exists()
+
+
+def testMoveTvShowUsesScrapedEpisodeTitleToRenameNoisyFilename(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = (
+        confirmedOrganizer.sourceDir
+        / "The.Pitt.S02E05.1080p.WEB.h264-ETHEL[EZTVx.to].mkv"
+    )
+    srcFile.write_bytes(b"x" * 100)
+
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    scraped = {
+        "showName": "The Pitt",
+        "season": 2,
+        "episode": 5,
+        "episodeTitle": "A Better Episode Title",
+        "seriesId": "12345",
+        "episodeId": "67890",
+        "extension": ".mkv",
+        "type": "tv",
+        "metadataSource": "tvdb",
+    }
+    emptyLibrary = confirmedOrganizer._newMetadataLibrary()
+    with patch.object(
+        confirmedOrganizer, "_loadMetadataLibrary", return_value=emptyLibrary
+    ):
+        with patch.object(confirmedOrganizer, "_saveMetadataLibrary"):
+            with patch.object(
+                confirmedOrganizer, "_fetchTvMetadataFromScraper", return_value=scraped
+            ):
+                result = confirmedOrganizer.moveTvShow(
+                    srcFile,
+                    {"showName": "The Pitt", "season": 2, "episode": 5, "type": "tv"},
+                    [tvStorage],
+                    interactive=False,
+                )
+
+    assert result is True
+    destFile = (
+        tvStorage
+        / "Pitt, The"
+        / "Season 02"
+        / "The.Pitt.S02E05.A.Better.Episode.Title.mkv"
     )
     assert destFile.exists()
     assert not srcFile.exists()
@@ -3168,21 +4045,15 @@ def testPromptUserConfirmationMDefaultsToCurrentName(organizer: VideoOrganizer):
     assert result == {"name": "Breaking Bad", "type": "movie"}
 
 
-def testPromptUserConfirmationPrintsLegendOnFirstCall(organizer: VideoOrganizer):
-    """Key legend is printed exactly once, on the first call."""
+def testPromptUserConfirmationDoesNotPrintLegend(organizer: VideoOrganizer):
+    """Text prompts render inline without a separate legend banner."""
     with (
         patch("builtins.input", return_value="y"),
         patch("builtins.print") as mockPrint,
     ):
         result = organizer.promptUserConfirmation("file.mkv", "My Show", "tv")
     assert result == {"name": "My Show", "type": "tv"}
-    assert mockPrint.call_count == 1
-    printed = mockPrint.call_args[0][0]
-    assert "y" in printed
-    assert "n" in printed
-    assert "t" in printed
-    assert "m" in printed
-    assert "q" in printed
+    mockPrint.assert_not_called()
 
 
 def testPromptUserConfirmationLegendNotPrintedOnSecondCall(organizer: VideoOrganizer):
@@ -3214,7 +4085,34 @@ def testPromptUserConfirmationWritesTextPromptToStderrWhenInteractive(
 
     assert result == {"name": "My Show", "type": "tv"}
     mockInput.assert_called_once_with()
-    assert "\nTV Show detected: 'My Show'\n" in fakeStderr.getvalue()
+    assert "  TV Show detected: My Show\n" in fakeStderr.getvalue()
+    assert "  Episode Title:    None\n" in fakeStderr.getvalue()
+    assert "Is this correct?  (y/n/q/t/m or enter new name): " in fakeStderr.getvalue()
+    assert fakeStdout.getvalue() == ""
+
+
+def testPromptUserConfirmationShowsEpisodeTitleWhenAvailable(
+    organizer: VideoOrganizer,
+):
+    organizer._promptHelpDisplayed = True
+    fakeStderr = _FakeTtyStream(interactive=True)
+    fakeStdout = io.StringIO()
+
+    with (
+        patch("sys.stderr", fakeStderr),
+        patch("sys.stdout", fakeStdout),
+        patch("builtins.input", return_value="y"),
+    ):
+        result = organizer.promptUserConfirmation(
+            "file.mkv",
+            "The Pitt",
+            "tv",
+            episodeTitle="Pilot",
+        )
+
+    assert result == {"name": "The Pitt", "type": "tv"}
+    assert "  TV Show detected: The Pitt\n" in fakeStderr.getvalue()
+    assert "  Episode Title:    Pilot\n" in fakeStderr.getvalue()
     assert "Is this correct?  (y/n/q/t/m or enter new name): " in fakeStderr.getvalue()
     assert fakeStdout.getvalue() == ""
 
@@ -3243,6 +4141,7 @@ def testPromptUserConfirmationDoesNotReuseMovieChoices(organizer: VideoOrganizer
 
 def testPromptUserConfirmationUsesCursesMenuWhenEnabled(organizer: VideoOrganizer):
     organizer.useCurses = True
+    organizer._promptHelpDisplayed = True
     with (
         patch.object(organizer, "_shouldUseCursesPrompts", return_value=True),
         patch.object(organizer, "_readCursesMenuChoice", return_value="y") as mockMenu,
@@ -3251,7 +4150,9 @@ def testPromptUserConfirmationUsesCursesMenuWhenEnabled(organizer: VideoOrganize
         result = organizer.promptUserConfirmation("file.mkv", "My Show", "tv")
     assert result == {"name": "My Show", "type": "tv"}
     mockMenu.assert_called_once_with(
-        "\nTV Show detected: 'My Show'\nIs this correct?  (y/n/q/t/m or enter new name): ",
+        "  TV Show detected: My Show\n"
+        "  Episode Title:    None\n"
+        "  Is this correct?  (y/n/q/t/m or enter new name): ",
         validChoices={"y", "n", "q", "t", "m"},
         defaultChoice="y",
     )
@@ -3414,7 +4315,7 @@ def testMoveTvShowSwitchesToMovie(tmp_path: Path, confirmedOrganizer: VideoOrgan
         )
     assert result is True
     destFile = (
-        movieStorage / "Breaking Bad Movie (2013)" / "Breaking.Bad.S01E01.Pilot.mkv"
+        movieStorage / "Breaking Bad Movie (2013)" / "Breaking Bad Movie (2013).mkv"
     )
     assert destFile.exists()
     assert not srcFile.exists()
@@ -3455,8 +4356,10 @@ def testMoveTvShowReusesConfirmedChoiceWithoutSecondPrompt(
     assert firstResult is True
     assert secondResult is True
     assert mockInput.call_count == 1
-    assert (tvStorage / "The Pitt" / "Season 01" / "The.Pitt.S01E13.Pilot.mkv").exists()
-    assert (tvStorage / "The Pitt" / "Season 02" / "The.Pitt.S02E07.Hour.mkv").exists()
+    assert (
+        tvStorage / "Pitt, The" / "Season 01" / "The.Pitt.S01E13.Pilot.mkv"
+    ).exists()
+    assert (tvStorage / "Pitt, The" / "Season 02" / "The.Pitt.S02E07.Hour.mkv").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -3665,7 +4568,7 @@ def testRemoveTorrentsInLibraryConfirmDeletesTvTorrent(tmp_path: Path):
     torrentFile.write_bytes(b"torrent data")
 
     tvRoot = tmp_path / "TV"
-    (tvRoot / "The Office").mkdir(parents=True)
+    (tvRoot / "Office, The").mkdir(parents=True)
 
     org = VideoOrganizer(sourceDir=str(tmp_path / "source"), dryRun=False)
     with patch.object(org, "scanStorageLocations", return_value=([], [tvRoot])):
@@ -3904,6 +4807,626 @@ def testCleanTorrentNamesScansSubdirectories(tmp_path: Path):
     assert stats["renamed"] == 1
 
 
+def testResetTvEpisodeTitlesRenamesNoisyStoredEpisodes(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    seasonDir = tvStorage / "After Life" / "Season 01"
+    metadataDir = seasonDir / "metadata"
+    metadataDir.mkdir(parents=True)
+    episodeFile = seasonDir / "After.Life.S01E04.1080p.WEB.h264.mkv"
+    episodeFile.write_bytes(b"x" * 20)
+    episodeSidecarXml = seasonDir / "After.Life.S01E04.1080p.WEB.h264.xml"
+    episodeSidecarXml.write_text("<Item />", encoding="utf-8")
+    episodeSidecarJpg = seasonDir / "After.Life.S01E04.1080p.WEB.h264.jpg"
+    episodeSidecarJpg.write_bytes(b"cover")
+    episodeMetadataFile = metadataDir / "After.Life.S01E04.1080p.WEB.h264.xml"
+    episodeMetadataFile.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Item>
+    <EpisodeName>1080p WEB h264</EpisodeName>
+    <EpisodeNumber>4</EpisodeNumber>
+    <SeasonNumber>1</SeasonNumber>
+</Item>
+""",
+        encoding="utf-8",
+    )
+    episodeMetadataJpg = metadataDir / "After.Life.S01E04.1080p.WEB.h264.jpg"
+    episodeMetadataJpg.write_bytes(b"thumb")
+
+    libraryPath = tmp_path / "metadataLibrary.json"
+    libraryPath.write_text(
+        json.dumps(_savedAfterLifeMetadataLibrary()), encoding="utf-8"
+    )
+
+    with patch.object(
+        confirmedOrganizer,
+        "scanStorageLocations",
+        return_value=([], [tvStorage]),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "_getMetadataLibraryPath",
+            return_value=libraryPath,
+        ):
+            stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    renamedEpisode = metadataDir.parent / "After Life.S01E04.Sic Semper Systema.mkv"
+    renamedEpisodeSidecarXml = seasonDir / "After Life.S01E04.Sic Semper Systema.xml"
+    renamedEpisodeSidecarJpg = seasonDir / "After Life.S01E04.Sic Semper Systema.jpg"
+    renamedMetadata = metadataDir / "After Life.S01E04.Sic Semper Systema.xml"
+    renamedMetadataJpg = metadataDir / "After Life.S01E04.Sic Semper Systema.jpg"
+    assert stats == {"renamed": 1, "skipped": 0, "errors": 0}
+    assert renamedEpisode.exists()
+    assert not episodeFile.exists()
+    assert renamedEpisodeSidecarXml.exists()
+    assert not episodeSidecarXml.exists()
+    assert renamedEpisodeSidecarJpg.exists()
+    assert not episodeSidecarJpg.exists()
+    assert renamedMetadata.exists()
+    assert not episodeMetadataFile.exists()
+    assert renamedMetadataJpg.exists()
+    assert not episodeMetadataJpg.exists()
+    assert "<EpisodeName>Sic Semper Systema</EpisodeName>" in renamedMetadata.read_text(
+        encoding="utf-8"
+    )
+
+
+def testResetTvEpisodeTitlesSkipsCleanStoredEpisodesWithoutScraperLookup(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    seasonDir = tvStorage / "After Life" / "Season 01"
+    seasonDir.mkdir(parents=True)
+    episodeFile = seasonDir / "After.Life.S01E04.Sic.Semper.Systema.mkv"
+    episodeFile.write_bytes(b"x" * 20)
+
+    confirmedOrganizer._tvMetadataFetcher = MagicMock(
+        side_effect=AssertionError("scraper lookup should not run")
+    )
+
+    with patch.object(
+        confirmedOrganizer,
+        "scanStorageLocations",
+        return_value=([], [tvStorage]),
+    ):
+        stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
+    assert episodeFile.exists()
+
+
+def testResetTvEpisodeTitlesCapitalisesLowercaseShowNames(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    seasonDir = tvStorage / "after life" / "Season 01"
+    seasonDir.mkdir(parents=True)
+    episodeFile = seasonDir / "after.life.S01E04.Sic.Semper.Systema.mkv"
+    episodeFile.write_bytes(b"x" * 20)
+
+    with patch.object(
+        confirmedOrganizer,
+        "_fetchTvMetadataFromScraper",
+        side_effect=AssertionError("scraper lookup should not run"),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ):
+            with caplog.at_level("INFO"):
+                stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 1, "skipped": 0, "errors": 0}
+    assert not episodeFile.exists()
+    renamedSeasonDir = tvStorage / "After Life" / "Season 01"
+    assert renamedSeasonDir.exists()
+    assert (renamedSeasonDir / "After.Life.S01E04.Sic.Semper.Systema.mkv").exists()
+    assert "renaming TV Show: After Life (from after life)" in caplog.text
+
+
+def testResetTvEpisodeTitlesPreservesMixedCaseShowNamesFromEpisodes(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    seasonDir = tvStorage / "izombie" / "Season 01"
+    seasonDir.mkdir(parents=True)
+    episodeFile = seasonDir / "iZombie.S01E01.Pilot.mkv"
+    episodeFile.write_bytes(b"x" * 20)
+
+    with patch.object(
+        confirmedOrganizer,
+        "_fetchTvMetadataFromScraper",
+        side_effect=AssertionError("scraper lookup should not run"),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ):
+            with caplog.at_level("INFO"):
+                stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    renamedSeasonDir = tvStorage / "iZombie" / "Season 01"
+    assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
+    assert renamedSeasonDir.exists()
+    assert (renamedSeasonDir / "iZombie.S01E01.Pilot.mkv").exists()
+    assert not episodeFile.exists()
+    assert "renaming TV Show: iZombie (from izombie)" in caplog.text
+
+
+def testResetTvEpisodeTitlesPreservesMixedCaseShowNamesFromSeriesMetadata(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    showDir = tvStorage / "izombie"
+    seasonDir = showDir / "Season 01"
+    seasonDir.mkdir(parents=True)
+    (showDir / "series.xml").write_text(
+        "<Series><SeriesName>iZombie</SeriesName></Series>", encoding="utf-8"
+    )
+    episodeFile = seasonDir / "izombie.S01E01.Pilot.mkv"
+    episodeFile.write_bytes(b"x" * 20)
+
+    with patch.object(
+        confirmedOrganizer,
+        "_fetchTvMetadataFromScraper",
+        side_effect=AssertionError("scraper lookup should not run"),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ):
+            with caplog.at_level("INFO"):
+                stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    renamedSeasonDir = tvStorage / "iZombie" / "Season 01"
+    assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
+    assert renamedSeasonDir.exists()
+    assert (renamedSeasonDir / "izombie.S01E01.Pilot.mkv").exists()
+    assert not episodeFile.exists()
+    assert "renaming TV Show: iZombie (from izombie)" in caplog.text
+
+
+def testResetTvEpisodeTitlesRegeneratesCorruptEpisodeMetadataXml(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    seasonDir = tvStorage / "After Life" / "Season 01"
+    metadataDir = seasonDir / "metadata"
+    metadataDir.mkdir(parents=True)
+    episodeFile = seasonDir / "After.Life.S01E04.Sic.Semper.Systema.mkv"
+    episodeFile.write_bytes(b"x" * 20)
+    metadataFile = metadataDir / "After.Life.S01E04.Sic.Semper.Systema.xml"
+    metadataFile.write_text(
+        "<Item><EpisodeName>Sic & Semper Systema</EpisodeName></Item>"
+    )
+
+    libraryPath = tmp_path / "metadataLibrary.json"
+    libraryPath.write_text(
+        json.dumps(_savedAfterLifeMetadataLibrary()), encoding="utf-8"
+    )
+
+    with patch.object(
+        confirmedOrganizer,
+        "scanStorageLocations",
+        return_value=([], [tvStorage]),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "_getMetadataLibraryPath",
+            return_value=libraryPath,
+        ):
+            with caplog.at_level("WARNING"):
+                stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
+    assert "could not parse metadata XML" in caplog.text
+    regenerated = metadataFile.read_text(encoding="utf-8")
+    assert "<EpisodeName>Sic Semper Systema</EpisodeName>" in regenerated
+    assert "<seriesid>" in regenerated
+
+
+def testResetTvEpisodeTitlesSkipsCleanStoredEpisodesWithSpacesAndApostrophes(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    seasonDir = tvStorage / "Code Black" / "Season 03"
+    seasonDir.mkdir(parents=True)
+    episodeFile = seasonDir / "Code Black.S03E12.As Night Comes and I’m Breathing.mkv"
+    episodeFile.write_bytes(b"x" * 20)
+
+    with patch.object(
+        confirmedOrganizer,
+        "_fetchTvMetadataFromScraper",
+        side_effect=AssertionError("scraper lookup should not run"),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ):
+            stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
+    assert episodeFile.exists()
+
+
+def testResetTvEpisodeTitlesNormalisesHourOnlyTimedEpisodeTitles(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    seasonDir = tvStorage / "24" / "Season 08"
+    seasonDir.mkdir(parents=True)
+    episodeFile = seasonDir / "24.S08E13.Day 8 4AM-5AM[Action-Drama-Mystery][2010].avi"
+    episodeFile.write_bytes(b"x" * 20)
+
+    with patch.object(
+        confirmedOrganizer,
+        "_fetchTvMetadataFromScraper",
+        side_effect=AssertionError("scraper lookup should not run"),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ):
+            stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    renamedEpisode = seasonDir / "24.S08E13.Day 8 4.00am-5.00am.avi"
+    assert stats == {"renamed": 1, "skipped": 0, "errors": 0}
+    assert renamedEpisode.exists()
+    assert not episodeFile.exists()
+
+
+def testResetTvEpisodeTitlesNormalisesTimedEpisodeTitles(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    seasonDir = tvStorage / "24" / "Season 08"
+    seasonDir.mkdir(parents=True)
+    episodeFile = seasonDir / "24.S08E13.Day.8.4.00.A.M.5.00.A.M.avi"
+    episodeFile.write_bytes(b"x" * 20)
+
+    with patch.object(
+        confirmedOrganizer,
+        "_fetchTvMetadataFromScraper",
+        side_effect=AssertionError("scraper lookup should not run"),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ):
+            stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    renamedEpisode = seasonDir / "24.S08E13.Day 8 4.00am 5.00am.avi"
+    assert stats == {"renamed": 1, "skipped": 0, "errors": 0}
+    assert renamedEpisode.exists()
+    assert not episodeFile.exists()
+
+
+def testResetTvEpisodeTitlesPreservesSpacesWhenRetitlingSpacedEpisodeNames(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    seasonDir = tvStorage / "Percy Jackson and the Olympians" / "Season 01"
+    seasonDir.mkdir(parents=True)
+    episodeFile = (
+        seasonDir
+        / "Percy Jackson and the Olympians.S01E01.I Accidentally Vaporize My Teacher.mkv"
+    )
+    episodeFile.write_bytes(b"x" * 20)
+
+    with patch.object(
+        confirmedOrganizer,
+        "_tvEpisodeTitleNeedsCanonicalLookup",
+        return_value=True,
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "_enrichTvMetadata",
+            return_value={
+                "showName": "Percy Jackson and the Olympians",
+                "season": 1,
+                "episode": 1,
+                "episodeTitle": "I Accidentally Vaporize My Pre-Algebra Teacher",
+                "seriesId": "415151",
+                "extension": "mkv",
+                "type": "tv",
+            },
+        ):
+            with patch.object(
+                confirmedOrganizer,
+                "scanStorageLocations",
+                return_value=([], [tvStorage]),
+            ):
+                stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    renamedEpisode = (
+        seasonDir
+        / "Percy Jackson and the Olympians.S01E01.I Accidentally Vaporize My Pre-Algebra Teacher.mkv"
+    )
+    assert stats == {"renamed": 1, "skipped": 0, "errors": 0}
+    assert renamedEpisode.exists()
+    assert not episodeFile.exists()
+
+
+def testResetTvEpisodeTitlesLogsShowNamesAndOnlyRenameChanges(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+
+    afterLifeSeasonDir = tvStorage / "After Life" / "Season 01"
+    afterLifeSeasonDir.mkdir(parents=True)
+    (afterLifeSeasonDir.parent / "series.xml").write_text(
+        "<Series><SeriesID>361563</SeriesID></Series>", encoding="utf-8"
+    )
+    (afterLifeSeasonDir.parent / "mcm_id__361563.dvdid.xml").write_text(
+        "<Item><SeriesID>361563</SeriesID></Item>", encoding="utf-8"
+    )
+    noisyEpisode = afterLifeSeasonDir / "After.Life.S01E04.1080p.WEB.h264.mkv"
+    noisyEpisode.write_bytes(b"x" * 20)
+
+    anotherShowSeasonDir = tvStorage / "Another Show" / "Season 01"
+    anotherShowSeasonDir.mkdir(parents=True)
+    (anotherShowSeasonDir.parent / "series.xml").write_text(
+        "<Series><SeriesID>999999</SeriesID></Series>", encoding="utf-8"
+    )
+    (anotherShowSeasonDir.parent / "mcm_id__999999.dvdid.xml").write_text(
+        "<Item><SeriesID>999999</SeriesID></Item>", encoding="utf-8"
+    )
+    cleanEpisode = anotherShowSeasonDir / "Another.Show.S01E01.Opening.Night.mkv"
+    cleanEpisode.write_bytes(b"x" * 20)
+
+    libraryPath = tmp_path / "metadataLibrary.json"
+    libraryPath.write_text(
+        json.dumps(_savedAfterLifeMetadataLibrary()), encoding="utf-8"
+    )
+
+    with patch.object(
+        confirmedOrganizer,
+        "scanStorageLocations",
+        return_value=([], [tvStorage]),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "_getMetadataLibraryPath",
+            return_value=libraryPath,
+        ):
+            with caplog.at_level("INFO"):
+                stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 1, "skipped": 1, "errors": 0}
+    assert "scanning: After Life [361563]" in caplog.text
+    assert "scanning: Another Show [999999]" in caplog.text
+    assert (
+        "...renaming:\n"
+        "     After.Life.S01E04.1080p.WEB.h264.mkv\n"
+        "     After Life.S01E04.Sic Semper Systema.mkv"
+    ) in caplog.text
+    assert "...renaming:\n     Another.Show.S01E01.Opening.Night.mkv" not in caplog.text
+    assert (afterLifeSeasonDir / "After Life.S01E04.Sic Semper Systema.mkv").exists()
+    assert cleanEpisode.exists()
+    assert not noisyEpisode.exists()
+    assert "starting TV episode title reset" not in caplog.text
+    assert "scanning for storage locations" not in caplog.text
+    assert "using saved metadata library" not in caplog.text
+    assert "fetch TV metadata" not in caplog.text
+    assert "TV episode title reset complete" not in caplog.text
+    assert "preserving existing metadata files" not in caplog.text
+    assert "preserving existing metadata" not in caplog.text
+
+
+def testResetTvEpisodeTitlesWarnsWhenSeriesIdMatchesAcrossShowFolders(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+
+    grimmDir = tvStorage / "Grimm" / "Season 01"
+    grimmDir.mkdir(parents=True)
+    (grimmDir.parent / "series.xml").write_text(
+        "<Series><SeriesID>777</SeriesID></Series>", encoding="utf-8"
+    )
+    (grimmDir / "Grimm.S01E01.Pilot.mkv").write_bytes(b"x" * 20)
+
+    grimmYearDir = tvStorage / "Grimm (2011)" / "Season 01"
+    grimmYearDir.mkdir(parents=True)
+    (grimmYearDir.parent / "series.xml").write_text(
+        "<Series><SeriesID>777</SeriesID></Series>", encoding="utf-8"
+    )
+    (grimmYearDir / "Grimm.S01E02.Bears.Will.Be.Bears.mkv").write_bytes(b"x" * 20)
+
+    with patch.object(
+        confirmedOrganizer,
+        "_fetchTvMetadataFromScraper",
+        side_effect=AssertionError("scraper lookup should not run"),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ):
+            with caplog.at_level("INFO"):
+                stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
+    assert (
+        "...rescan found possible duplicate TV show folders for: 777:\n"
+        "     Grimm\n"
+        "     Grimm (2011)"
+    ) in caplog.text
+
+
+def testResetTvEpisodeTitlesWarnsWhenTrailingTheFoldersDuplicate(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+
+    canonicalDir = tvStorage / "Crown, The" / "Season 01"
+    canonicalDir.mkdir(parents=True)
+    (canonicalDir / "The.Crown.S01E01.Wolferton.Splash.mkv").write_bytes(b"x" * 20)
+
+    leadingArticleDir = tvStorage / "The Crown" / "Season 01"
+    leadingArticleDir.mkdir(parents=True)
+    (leadingArticleDir / "The.Crown.S01E02.Hyde.Park.Corner.mkv").write_bytes(b"x" * 20)
+
+    with patch.object(
+        confirmedOrganizer,
+        "_fetchTvMetadataFromScraper",
+        side_effect=AssertionError("scraper lookup should not run"),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ):
+            with caplog.at_level("INFO"):
+                stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
+    assert (
+        "...rescan found possible duplicate TV show folders for: Crown, The:\n"
+        "     Crown, The\n"
+        "     The Crown"
+    ) in caplog.text
+    assert "scanning: The Crown" not in caplog.text
+    assert caplog.text.count("scanning: Crown, The") == 2
+
+
+def testResetTvEpisodeTitlesWarnsWhenNormalizedNamesDuplicate(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+
+    for showName, filename in (
+        ("Grimm", "Grimm.S01E01.Pilot.mkv"),
+        ("Grimm (2011)", "Grimm.S01E02.Bears.Will.Be.Bears.mkv"),
+        ("Hijack [419254]", "Hijack.S01E01.Final.Call.mkv"),
+        ("Hijack 2023", "Hijack.S01E02.3.Joules.mkv"),
+        ("Hijak", "Hijack.S01E03.Draw.a.Blank.mkv"),
+        ("Homestead", "Homestead.S01E01.Homecoming.mkv"),
+        ("Homestead The Series", "Homestead.S01E02.Threshold.mkv"),
+    ):
+        seasonDir = tvStorage / showName / "Season 01"
+        seasonDir.mkdir(parents=True)
+        (seasonDir / filename).write_bytes(b"x" * 20)
+
+    (tvStorage / "Hijack [419254]" / "series.xml").write_text(
+        "<Series><SeriesID>419254</SeriesID></Series>", encoding="utf-8"
+    )
+
+    with patch.object(
+        confirmedOrganizer,
+        "_fetchTvMetadataFromScraper",
+        side_effect=AssertionError("scraper lookup should not run"),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ):
+            with caplog.at_level("INFO"):
+                stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 7, "errors": 0}
+    assert (
+        "...rescan found possible duplicate TV show folders for: Grimm:\n"
+        "     Grimm\n"
+        "     Grimm (2011)"
+    ) in caplog.text
+    assert (
+        "...rescan found possible duplicate TV show folders for: Hijack:\n"
+        "     Hijack 2023\n"
+        "     Hijack [419254]\n"
+        "     Hijak"
+    ) in caplog.text
+    assert (
+        "...rescan found possible duplicate TV show folders for: Homestead:\n"
+        "     Homestead\n"
+        "     Homestead The Series"
+    ) in caplog.text
+
+
+def testResetTvEpisodeTitlesRepairsIncompleteShowMetadata(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    seasonDir = tvStorage / "After Life" / "Season 01"
+    metadataDir = seasonDir / "metadata"
+    metadataDir.mkdir(parents=True)
+    (seasonDir.parent / "series.xml").write_text(
+        "<Series><SeriesName>After Life</SeriesName></Series>", encoding="utf-8"
+    )
+    (seasonDir.parent / "mcm_id__broken.dvdid.xml").write_text(
+        "<Item />", encoding="utf-8"
+    )
+    (metadataDir / "After.Life.S01E04.Sic.Semper.Systema.xml").write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<Item>
+    <EpisodeID>10751471</EpisodeID>
+    <EpisodeNumber>4</EpisodeNumber>
+    <SeasonNumber>1</SeasonNumber>
+    <EpisodeName>Sic Semper Systema</EpisodeName>
+    <SeriesID>361563</SeriesID>
+</Item>
+""",
+        encoding="utf-8",
+    )
+    episodeFile = seasonDir / "After.Life.S01E04.Sic.Semper.Systema.mkv"
+    episodeFile.write_bytes(b"x" * 20)
+
+    with patch.object(
+        confirmedOrganizer,
+        "_fetchTvMetadataFromScraper",
+        side_effect=AssertionError("scraper lookup should not run"),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ):
+            with patch.object(
+                confirmedOrganizer,
+                "_getMetadataLibraryPath",
+                return_value=tmp_path / "metadataLibrary.json",
+            ):
+                with caplog.at_level("INFO"):
+                    stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
+    assert "<SeriesID>361563</SeriesID>" in (seasonDir.parent / "series.xml").read_text(
+        encoding="utf-8"
+    )
+    assert "<SeriesID>361563</SeriesID>" in (
+        seasonDir.parent / "mcm_id__broken.dvdid.xml"
+    ).read_text(encoding="utf-8")
+    assert f"update metadata: {seasonDir.parent / 'series.xml'}" in caplog.text
+    assert (
+        f"update metadata: {seasonDir.parent / 'mcm_id__broken.dvdid.xml'}"
+        in caplog.text
+    )
+    assert "preserving existing metadata" not in caplog.text
+
+
 def testVideoOrganizerDoesNotExposeGrokMethods(organizer: VideoOrganizer):
     """Grok helpers are retained separately and no longer exposed on VideoOrganizer."""
     assert not hasattr(organizer, "importFirefoxSession")
@@ -3918,7 +5441,7 @@ def testGrokModuleRemainsImportableForFutureReuse():
     assert hasattr(grok_module, "GrokMixin")
 
 
-@pytest.mark.parametrize("flag", ["--grok", "--reset", "--import-firefox-session"])
+@pytest.mark.parametrize("flag", ["--grok", "--import-firefox-session"])
 def testMainRejectsRemovedGrokOptions(flag: str, capsys):
     """The CLI no longer accepts the removed Grok integration flags."""
     with patch("sys.argv", ["organiseMyVideo", flag]):
@@ -3983,6 +5506,94 @@ def testMainPassesRefreshAndNoCursesFlagsToOrganizer():
     )
 
 
+def testMainAutoModeDisablesPromptsAndSetsSummaryPath():
+    organizerInstance = MagicMock()
+
+    with patch(
+        "organiseMyVideo.VideoOrganizer", return_value=organizerInstance
+    ) as mockOrganizer:
+        with patch(
+            "sys.argv",
+            ["organiseMyVideo", "--source", "/tmp/source", "--auto"],
+        ):
+            omv_main.main()
+
+    mockOrganizer.assert_called_once_with(
+        sourceDir="/tmp/source",
+        dryRun=True,
+        refreshMetadataLibrary=False,
+        useCurses=True,
+    )
+    assert organizerInstance.summaryReportPath == Path(
+        "/tmp/source/organiseMyVideo-auto-summary.txt"
+    )
+    organizerInstance.processFiles.assert_called_once_with(interactive=False)
+
+
+def testGetSummaryReportPathAddsIncrementWhenAutoSummaryExists(tmp_path: Path):
+    sourceDir = tmp_path / "source"
+    sourceDir.mkdir()
+    (sourceDir / "organiseMyVideo-auto-summary.txt").write_text(
+        "existing", encoding="utf-8"
+    )
+
+    assert omv_main._getSummaryReportPath(str(sourceDir), "process") == (
+        sourceDir / "organiseMyVideo-auto-summary.01.txt"
+    )
+
+
+def testGetSummaryReportPathSkipsUsedAutoSummaryIncrements(tmp_path: Path):
+    sourceDir = tmp_path / "source"
+    sourceDir.mkdir()
+    (sourceDir / "organiseMyVideo-auto-summary.txt").write_text(
+        "existing", encoding="utf-8"
+    )
+    (sourceDir / "organiseMyVideo-auto-summary.01.txt").write_text(
+        "existing", encoding="utf-8"
+    )
+
+    assert omv_main._getSummaryReportPath(str(sourceDir), "process") == (
+        sourceDir / "organiseMyVideo-auto-summary.02.txt"
+    )
+
+
+def testMainRescanModeCallsResetTvEpisodeTitlesAndSetsSummaryPath():
+    organizerInstance = MagicMock()
+
+    with patch(
+        "organiseMyVideo.VideoOrganizer", return_value=organizerInstance
+    ) as mockOrganizer:
+        with patch(
+            "sys.argv",
+            ["organiseMyVideo", "--source", "/tmp/source", "--rescan"],
+        ):
+            omv_main.main()
+
+    mockOrganizer.assert_called_once_with(
+        sourceDir="/tmp/source",
+        dryRun=True,
+        refreshMetadataLibrary=False,
+        useCurses=True,
+    )
+    assert organizerInstance.summaryReportPath == Path(
+        "/tmp/source/organiseMyVideo-rescan-summary.txt"
+    )
+    organizerInstance.resetTvEpisodeTitles.assert_called_once_with()
+    organizerInstance.processFiles.assert_not_called()
+
+
+def testGetSummaryReportPathAddsIncrementWhenRescanSummaryExists(tmp_path: Path):
+    sourceDir = tmp_path / "source"
+    sourceDir.mkdir()
+    (sourceDir / "organiseMyVideo-rescan-summary.txt").write_text(
+        "existing", encoding="utf-8"
+    )
+
+    assert omv_main._getSummaryReportPath(str(sourceDir), "rescan") == (
+        sourceDir / "organiseMyVideo-rescan-summary.01.txt"
+    )
+
+
 def testMainConfiguresConsoleTimestampWithoutMilliseconds():
     organizerInstance = MagicMock()
 
@@ -4001,3 +5612,20 @@ def testMainConfiguresConsoleTimestampWithoutMilliseconds():
         and handler.formatter.datefmt == "%Y-%m-%d %H:%M:%S"
         for handler in consoleHandlers
     )
+
+
+def testMainEnablesDebugLogging():
+    organizerInstance = MagicMock()
+    previousLevel = omv_main.logger.logger.level
+
+    try:
+        with patch("organiseMyVideo.VideoOrganizer", return_value=organizerInstance):
+            with patch(
+                "sys.argv",
+                ["organiseMyVideo", "--source", "/tmp/source", "--debug"],
+            ):
+                omv_main.main()
+
+        assert omv_main.logger.logger.level == logging.DEBUG
+    finally:
+        omv_main.logger.logger.setLevel(previousLevel)

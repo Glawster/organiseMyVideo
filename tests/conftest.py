@@ -50,6 +50,27 @@ class _StubLogger:
         """Only method that carries the [] dry-run prefix."""
         self._log.info(f"...{self._prefix}{message}", *args, **kwargs)
 
+    def multiline(
+        self, message: str | list[str] | tuple[str, ...], *lines: str
+    ) -> None:
+        # Support both logger.multiline("header", "line1", ...) and
+        # logger.multiline(["header", "line1", ...]) call styles.
+        if lines:
+            header = str(message)
+            bodyLines = [str(line) for line in lines]
+        elif isinstance(message, (list, tuple)):
+            if not message:
+                return
+            header = str(message[0])
+            bodyLines = [str(line) for line in message[1:]]
+        else:
+            header = str(message)
+            bodyLines = []
+
+        formattedLines = [f"...{self._prefix}{header}:"]
+        formattedLines.extend(f"     {line}" for line in bodyLines)
+        self._log.info("\n".join(formattedLines))
+
     def warning(self, msg: str, *args, **kwargs) -> None:
         self._log.warning(msg, *args, **kwargs)
 

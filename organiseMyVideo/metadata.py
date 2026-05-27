@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -11,7 +12,12 @@ from typing import Callable, Optional
 
 from organiseMyProjects.logUtils import getLogger  # type: ignore
 
-from .constants import METADATA_LIBRARY_FILE, TMDB_API_BASE_URL, TMDB_IMAGE_BASE_URL, TVDB_API_BASE_URL
+from .constants import (
+    METADATA_LIBRARY_FILE,
+    TMDB_API_BASE_URL,
+    TMDB_IMAGE_BASE_URL,
+    TVDB_API_BASE_URL,
+)
 
 logger = getLogger()
 _METADATA_SCAN_PLACEHOLDER_FILENAME = "__metadata_scan__.mkv"
@@ -26,6 +32,37 @@ _MAX_ARTWORK_SIZE_BYTES = 20_000_000
 
 class MetadataMixin:
     """Methods for caching local metadata and enriching TV episode details."""
+
+    def _promptForTvdbApiKeyIfNeeded(self) -> Optional[str]:
+        """Prompt once for a TVDB API key when no credentials are configured."""
+        apiKey = os.environ.get("ORGANISEMYVIDEO_TVDB_API_KEY")
+        if apiKey:
+            return apiKey
+
+        if self._tvdbApiKeyPromptAttempted:
+            return None
+
+        prompt = getattr(self, "tvdbApiKeyPrompt", None)
+        if not callable(prompt):
+            return None
+
+        self._tvdbApiKeyPromptAttempted = True
+        try:
+            prompted = prompt()
+        except Exception as error:
+            logger.warning("TVDB API key prompt failed: %s", error)
+            return None
+
+        if isinstance(prompted, str):
+            apiKey = prompted.strip()
+            if apiKey:
+                os.environ["ORGANISEMYVIDEO_TVDB_API_KEY"] = apiKey
+                return apiKey
+
+        # The CLI prompt in ``organiseMyVideo.__main__`` persists the key to
+        # ``os.environ`` as a side effect and may return ``None`` here.
+        apiKey = os.environ.get("ORGANISEMYVIDEO_TVDB_API_KEY")
+        return apiKey.strip() if apiKey else None
 
     def _logMetadataLibraryAddition(self, mediaType: str, name: str) -> None:
         """Log a grouped metadata-library addition header followed by ``name``."""
@@ -130,6 +167,55 @@ class MetadataMixin:
         collapsed = "".join(ch.lower() for ch in value if ch.isalnum())
         return collapsed or None
 
+    def _tvdbSearchResultNames(self, result: Optional[dict]) -> list[str]:
+        """Return comparable series-name candidates from a TVDB search result."""
+        if not isinstance(result, dict):
+            return []
+
+        names: list[str] = []
+        for key in ("name", "seriesName", "slug"):
+            value = result.get(key)
+            if isinstance(value, str) and value.strip():
+                names.append(value)
+
+        aliases = result.get("aliases")
+        if isinstance(aliases, list):
+            for alias in aliases:
+                if isinstance(alias, str) and alias.strip():
+                    names.append(alias)
+                elif isinstance(alias, dict):
+                    value = alias.get("name")
+                    if isinstance(value, str) and value.strip():
+                        names.append(value)
+
+        seen = set()
+        deduped = []
+        for name in names:
+            if name not in seen:
+                deduped.append(name)
+                seen.add(name)
+        return deduped
+
+    def _filterTvdbSearchResults(
+        self, showName: Optional[str], searchResults: list[dict]
+    ) -> list[dict]:
+        """Prefer exact TVDB search matches before broader fallback results."""
+        showKey = self._normaliseLookupText(showName)
+        if not showKey:
+            return searchResults
+
+        exactMatches = []
+        for result in searchResults:
+            resultKeys = {
+                self._normaliseLookupText(name)
+                for name in self._tvdbSearchResultNames(result)
+            }
+            resultKeys.discard(None)
+            if showKey in resultKeys:
+                exactMatches.append(result)
+
+        return exactMatches or searchResults
+
     def _normaliseEpisodeValue(self, value) -> Optional[int]:
         """Return *value* as an integer episode/season number when possible."""
         if value in (None, ""):
@@ -155,7 +241,8 @@ class MetadataMixin:
         normalised["showName"] = normalised.get("showName") or None
         normalised["season"] = self._normaliseEpisodeValue(normalised.get("season"))
         normalised["episode"] = self._normaliseEpisodeValue(normalised.get("episode"))
-        normalised["episodeTitle"] = normalised.get("episodeTitle") or None
+        episodeTitle = self._normaliseTimedTvEpisodeTitle(normalised.get("episodeTitle"))
+        normalised["episodeTitle"] = episodeTitle or None
         normalised["imdbId"] = normalised.get("imdbId") or None
         normalised["seriesId"] = self._normaliseIdValue(normalised.get("seriesId"))
         normalised["episodeId"] = self._normaliseIdValue(normalised.get("episodeId"))
@@ -334,24 +421,27 @@ class MetadataMixin:
         seriesRoot = self._readXmlRoot(seriesFile)
         showName = self._readFirstXmlText(seriesRoot, ("LocalTitle", "SeriesName"))
         imdbId = self._readFirstXmlText(seriesRoot, ("IMDB_ID", "IMDbId"))
-        seriesId = self._readFirstXmlText(seriesRoot, ("SeriesID", "id"))
+        seriesId = self._readTvShowSeriesId(showDir)
         try:
             seasonMetadataDirs = [
-                item
-                for item in showDir.glob("Season*/metadata")
-                if item.is_dir()
+                item for item in showDir.glob("Season*/metadata") if item.is_dir()
             ]
         except OSError as error:
-            logger.warning("could not inspect show metadata folders %s: %s", showDir, error)
+            logger.warning(
+                "could not inspect show metadata folders %s: %s", showDir, error
+            )
             seasonMetadataDirs = []
 
         mcmPresence = {
             "showXmlExists": seriesFile.exists(),
             "dvdIdXmlExists": self._hasMatchingFiles(showDir, ("mcm_id__*.dvdid.xml",)),
             "seasonMetadataFolderExists": bool(seasonMetadataDirs),
-            "episodeXmlExists": self._hasMatchingFiles(showDir, ("Season*/metadata/*.xml",)),
+            "episodeXmlExists": self._hasMatchingFiles(
+                showDir, ("Season*/metadata/*.xml",)
+            ),
             "artworkExists": self._hasMatchingFiles(
-                showDir, ("folder.jpg", "banner.jpg", "backdrop*.jpg", "Season*/folder.jpg")
+                showDir,
+                ("folder.jpg", "banner.jpg", "backdrop*.jpg", "Season*/folder.jpg"),
             ),
         }
 
@@ -464,6 +554,51 @@ class MetadataMixin:
             resolved["showName"] = canonicalShowName
         return resolved
 
+    def _tvEpisodeTitleNeedsCanonicalLookup(self, episodeTitle: Optional[str]) -> bool:
+        """Return ``True`` when a parsed episode title looks like release noise."""
+        if not episodeTitle:
+            return True
+
+        lowered = episodeTitle.lower()
+        if any(token in lowered for token in ("[", "]", "eztv", "ethel")):
+            return True
+
+        noisePattern = (
+            r"\b(?:720p|1080p|2160p|web(?:-dl|rip)?|hdtv|bluray|brrip|x264|x265|"
+            r"h\.?264|hevc|ddp?|aac|amzn|nf|hulu|proper|repack)\b"
+        )
+        return re.search(noisePattern, lowered, re.IGNORECASE) is not None
+
+    def _applyAuthoritativeTvMetadata(
+        self,
+        resolved: dict,
+        authoritative: Optional[dict],
+        *,
+        keepExistingShowName: bool = False,
+    ) -> dict:
+        """Overlay authoritative TV metadata onto filename-derived values."""
+        normalised = self._normaliseTvMetadata(authoritative)
+        if normalised is None:
+            return resolved
+
+        merged = dict(resolved)
+        for key in (
+            "season",
+            "episode",
+            "episodeTitle",
+            "imdbId",
+            "seriesId",
+            "episodeId",
+            "metadataSource",
+            "metadataUpdatedAt",
+        ):
+            if normalised.get(key) not in (None, ""):
+                merged[key] = normalised[key]
+
+        if not keepExistingShowName and normalised.get("showName"):
+            merged["showName"] = normalised["showName"]
+        return merged
+
     def _enrichTvMetadata(self, tvInfo: Optional[dict]) -> Optional[dict]:
         """Resolve TV metadata from local hints, library cache, and optional scraper data."""
         resolved = self._normaliseTvMetadata(tvInfo)
@@ -478,11 +613,10 @@ class MetadataMixin:
             libraryMatch,
             keepExistingShowName=sourceIsMcm,
         )
-        if (
-            resolved.get("episodeTitle")
-            or resolved.get("season") is None
-            or resolved.get("episode") is None
-        ):
+        if resolved.get("season") is None or resolved.get("episode") is None:
+            return resolved
+
+        if resolved.get("episodeTitle") and resolved.get("metadataSource"):
             return resolved
 
         logger.action(
@@ -491,14 +625,15 @@ class MetadataMixin:
             resolved["season"],
             resolved["episode"],
         )
-        if self.dryRun:
-            return resolved
-
         scraped = self._fetchTvMetadataFromScraper(resolved)
         if not scraped:
             return resolved
 
-        resolved = self._mergeMetadata(resolved, self._normaliseTvMetadata(scraped))
+        resolved = self._applyAuthoritativeTvMetadata(
+            resolved,
+            scraped,
+            keepExistingShowName=sourceIsMcm,
+        )
         resolved = self._resolveCanonicalTvShowName(
             resolved,
             self._lookupTvMetadataInLibrary(resolved),
@@ -544,7 +679,9 @@ class MetadataMixin:
 
         apiKey = os.environ.get("ORGANISEMYVIDEO_TVDB_API_KEY")
         if not apiKey:
-            return None
+            apiKey = self._promptForTvdbApiKeyIfNeeded()
+            if not apiKey:
+                return None
 
         payload = {"apikey": apiKey}
         pin = os.environ.get("ORGANISEMYVIDEO_TVDB_PIN")
@@ -642,19 +779,33 @@ class MetadataMixin:
             or data.get("airedEpisodeNumber")
             or data.get("episode")
         )
-        showName = data.get("seriesName") or data.get("series") or data.get("name")
-        if isinstance(showName, dict):
-            showName = showName.get("name")
+        showName = data.get("seriesName") or data.get("showName")
+        if showName in (None, ""):
+            series = data.get("series")
+            if isinstance(series, dict):
+                showName = series.get("name") or series.get("seriesName")
+            elif isinstance(series, str):
+                showName = series
 
         seriesId = data.get("seriesId")
         if seriesId is None and isinstance(data.get("series"), dict):
             seriesId = data["series"].get("id")
 
-        episodeTitle = data.get("episodeName") or data.get("name")
+        rawEpisodeTitle = data.get("episodeName") or data.get("name")
+        episodeTitle = rawEpisodeTitle
         if self._normaliseLookupText(episodeTitle) == self._normaliseLookupText(
             showName
         ):
             episodeTitle = None
+        logger.debug(
+            "TVDB title payload: show=%r season=%s episode=%s episodeId=%r rawTitle=%r resolvedTitle=%r",
+            showName,
+            season,
+            episode,
+            data.get("id"),
+            rawEpisodeTitle,
+            episodeTitle,
+        )
 
         return self._normaliseTvMetadata(
             {
@@ -670,6 +821,70 @@ class MetadataMixin:
                 "metadataUpdatedAt": self._metadataUpdatedAt(),
             }
         )
+
+    def _fetchTvdbEpisodeBySeriesOrder(
+        self, seriesId: str, season: int, episode: int, headers: dict
+    ) -> Optional[dict]:
+        """Return a TVDB episode by iterating the aired-order episode list."""
+        page = 0
+        while True:
+            payload = self._requestJson(
+                f"{TVDB_API_BASE_URL}/series/{seriesId}/episodes/default?page={page}",
+                headers=headers,
+            )
+            if not isinstance(payload, dict):
+                return None
+
+            data = payload.get("data", payload)
+            if not isinstance(data, dict):
+                return None
+
+            episodes = data.get("episodes")
+            if not isinstance(episodes, list) or not episodes:
+                return None
+
+            for item in episodes:
+                record = self._tvdbEpisodeRecord(item)
+                if not record:
+                    continue
+                if record.get("season") == season and record.get("episode") == episode:
+                    if not record.get("episodeTitle") and record.get("episodeId"):
+                        extended = self._tvdbEpisodeRecord(
+                            self._requestJson(
+                                f"{TVDB_API_BASE_URL}/episodes/{record['episodeId']}/extended",
+                                headers=headers,
+                            )
+                        )
+                        if extended:
+                            record = self._normaliseTvMetadata(
+                                {
+                                    **record,
+                                    **extended,
+                                    "showName": extended.get("showName")
+                                    or record.get("showName"),
+                                    "season": extended.get("season")
+                                    or record.get("season"),
+                                    "episode": extended.get("episode")
+                                    or record.get("episode"),
+                                    "seriesId": extended.get("seriesId")
+                                    or record.get("seriesId")
+                                    or str(seriesId),
+                                    "episodeId": extended.get("episodeId")
+                                    or record.get("episodeId"),
+                                }
+                            )
+                    record["seriesId"] = record.get("seriesId") or str(seriesId)
+                    return self._normaliseTvMetadata(record)
+
+            links = payload.get("links")
+            if isinstance(links, dict) and links.get("next"):
+                page += 1
+                continue
+
+            if len(episodes) < 500:
+                return None
+
+            page += 1
 
     def _fetchTvdbMetadata(self, tvInfo: dict) -> Optional[dict]:
         """Fetch TV metadata from TVDB when configuration is available."""
@@ -697,11 +912,11 @@ class MetadataMixin:
         season = tvInfo.get("season")
         episode = tvInfo.get("episode")
         if seriesId and season is not None and episode is not None:
-            record = self._tvdbEpisodeRecord(
-                self._requestJson(
-                    f"{TVDB_API_BASE_URL}/series/{seriesId}/episodes/default/{season}/{episode}",
-                    headers=headers,
-                )
+            record = self._fetchTvdbEpisodeBySeriesOrder(
+                str(seriesId),
+                season,
+                episode,
+                headers,
             )
             if record and record.get("episodeTitle"):
                 return record
@@ -715,18 +930,19 @@ class MetadataMixin:
             f"{TVDB_API_BASE_URL}/search?{query}",
             headers=headers,
         )
-        searchResults = (
-            searchPayload.get("data", []) if isinstance(searchPayload, dict) else []
+        searchResults = self._filterTvdbSearchResults(
+            showName,
+            searchPayload.get("data", []) if isinstance(searchPayload, dict) else [],
         )
         for result in searchResults:
             resultId = result.get("tvdb_id") or result.get("id")
             if not resultId or season is None or episode is None:
                 continue
-            record = self._tvdbEpisodeRecord(
-                self._requestJson(
-                    f"{TVDB_API_BASE_URL}/series/{resultId}/episodes/default/{season}/{episode}",
-                    headers=headers,
-                )
+            record = self._fetchTvdbEpisodeBySeriesOrder(
+                str(resultId),
+                season,
+                episode,
+                headers,
             )
             if record and record.get("episodeTitle"):
                 return record
@@ -836,9 +1052,6 @@ class MetadataMixin:
             resolved.get("title") or "unknown title",
             resolved.get("year") or "unknown year",
         )
-        if self.dryRun:
-            return resolved
-
         scraped = self._fetchMovieMetadataFromScraper(resolved)
         if not scraped:
             return resolved
@@ -887,9 +1100,7 @@ class MetadataMixin:
                 )
             else:
                 params = urllib.parse.urlencode({"api_key": apiKey})
-                data = self._requestJson(
-                    f"{TMDB_API_BASE_URL}/movie/{tmdbId}?{params}"
-                )
+                data = self._requestJson(f"{TMDB_API_BASE_URL}/movie/{tmdbId}?{params}")
             if data and isinstance(data, dict) and not data.get("status_code"):
                 return self._tmdbMovieRecord(data)
 

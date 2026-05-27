@@ -32,6 +32,7 @@ GROK_CREDENTIALS_FILE = (
 METADATA_LIBRARY_FILE = (
     Path.home() / ".config" / "organiseMyVideo" / "metadataLibrary.json"
 )
+APP_CONFIG_FILE = Path.home() / ".config" / "organiseMyVideo" / "config.json"
 TVDB_API_BASE_URL = "https://api4.thetvdb.com/v4"
 TMDB_API_BASE_URL = "https://api.themoviedb.org/3"
 TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/original"
