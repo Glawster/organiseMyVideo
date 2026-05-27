@@ -222,7 +222,7 @@ class VideoMixin:
                 continue
             logger.multiline(
                 [
-                    f"rescan found possible duplicate TV show folders for: {seriesId}",
+                    f"possible duplicate TV show folders: {seriesId}",
                     # display each element of uniqueShowNames on a separate line for readability when there are many
                     *uniqueShowNames,
                 ]
@@ -236,7 +236,7 @@ class VideoMixin:
                 continue
             logger.multiline(
                 [
-                    f"rescan found possible duplicate TV show folders for: {group['canonicalName']}",
+                    f"possible duplicate TV show folders: {group['canonicalName']}",
                     # display each element of uniqueShowNames on a separate line for readability when there are many
                     *uniqueShowNames,
                 ]
@@ -317,7 +317,7 @@ class VideoMixin:
             selectedMaster = self._readTextResponse(prompt).strip() or defaultMaster
             if selectedMaster not in orderedShowNames:
                 logger.warning(
-                    "rescan merge skipped: unknown master TV show folder %s",
+                    "skipping rescan merge; unknown master TV show folder: %s",
                     selectedMaster,
                 )
                 return None
@@ -360,11 +360,12 @@ class VideoMixin:
                         pass
                     continue
                 logger.warning(
-                    "rescan merge skipped existing path: %s", destinationPath
+                    "skipping rescan merge; destination already exists: %s",
+                    destinationPath,
                 )
                 continue
             logger.action(
-                "merge TV show folder item: %s -> %s", sourcePath, destinationPath
+                "merging TV show folder item: %s -> %s", sourcePath, destinationPath
             )
             shutil.move(str(sourcePath), str(destinationPath))
 
@@ -408,7 +409,7 @@ class VideoMixin:
                 sourceDir = tvDir / showName
                 destinationDir = tvDir / masterShowName
                 logger.action(
-                    "merge TV show folders: %s <- %s", masterShowName, showName
+                    "merging TV show folders: %s <- %s", masterShowName, showName
                 )
                 if self.dryRun:
                     continue
@@ -1996,7 +1997,7 @@ class VideoMixin:
             return showName, videoFiles
 
         logger.action(
-            "renaming TV Show: %s (from %s)", destinationDir.name, showDir.name
+            "renaming TV show: %s (from %s)", destinationDir.name, showDir.name
         )
         if self.dryRun:
             return capitalisedShowName, videoFiles
@@ -3062,7 +3063,7 @@ class VideoMixin:
                 showLabel = (
                     f"{showDisplayName} [{seriesId}]" if seriesId else showDisplayName
                 )
-                logger.action(f"scanning: {showLabel}")
+                logger.action(f"rescanning: {showLabel}")
                 for videoFile in videoFiles:
                     outcome = self._resetTvEpisodeTitleForFile(videoFile)
                     stats[outcome] += 1

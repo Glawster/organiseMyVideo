@@ -4925,7 +4925,7 @@ def testResetTvEpisodeTitlesCapitalisesLowercaseShowNames(
     renamedSeasonDir = tvStorage / "After Life" / "Season 01"
     assert renamedSeasonDir.exists()
     assert (renamedSeasonDir / "After.Life.S01E04.Sic.Semper.Systema.mkv").exists()
-    assert "renaming TV Show: After Life (from after life)" in caplog.text
+    assert "renaming TV show: After Life (from after life)" in caplog.text
 
 
 def testResetTvEpisodeTitlesPreservesMixedCaseShowNamesFromEpisodes(
@@ -4957,7 +4957,7 @@ def testResetTvEpisodeTitlesPreservesMixedCaseShowNamesFromEpisodes(
     assert renamedSeasonDir.exists()
     assert (renamedSeasonDir / "iZombie.S01E01.Pilot.mkv").exists()
     assert not episodeFile.exists()
-    assert "renaming TV Show: iZombie (from izombie)" in caplog.text
+    assert "renaming TV show: iZombie (from izombie)" in caplog.text
 
 
 def testResetTvEpisodeTitlesPreservesMixedCaseShowNamesFromSeriesMetadata(
@@ -4993,7 +4993,7 @@ def testResetTvEpisodeTitlesPreservesMixedCaseShowNamesFromSeriesMetadata(
     assert renamedSeasonDir.exists()
     assert (renamedSeasonDir / "izombie.S01E01.Pilot.mkv").exists()
     assert not episodeFile.exists()
-    assert "renaming TV Show: iZombie (from izombie)" in caplog.text
+    assert "renaming TV show: iZombie (from izombie)" in caplog.text
 
 
 def testResetTvEpisodeTitlesRegeneratesCorruptEpisodeMetadataXml(
@@ -5208,8 +5208,8 @@ def testResetTvEpisodeTitlesLogsShowNamesAndOnlyRenameChanges(
                 stats = confirmedOrganizer.resetTvEpisodeTitles()
 
     assert stats == {"renamed": 1, "skipped": 1, "errors": 0}
-    assert "scanning: After Life [361563]" in caplog.text
-    assert "scanning: Another Show [999999]" in caplog.text
+    assert "rescanning: After Life [361563]" in caplog.text
+    assert "rescanning: Another Show [999999]" in caplog.text
     assert (
         "...renaming:\n"
         "     After.Life.S01E04.1080p.WEB.h264.mkv\n"
@@ -5314,7 +5314,7 @@ def testResetTvEpisodeTitlesWarnsWhenSeriesIdMatchesAcrossShowFolders(
 
     assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
     assert (
-        "...rescan found possible duplicate TV show folders for: 777:\n"
+        "...possible duplicate TV show folders: 777:\n"
         "     Grimm\n"
         "     Grimm (2011)"
     ) in caplog.text
@@ -5350,12 +5350,12 @@ def testResetTvEpisodeTitlesWarnsWhenTrailingTheFoldersDuplicate(
 
     assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
     assert (
-        "...rescan found possible duplicate TV show folders for: Crown, The:\n"
+        "...possible duplicate TV show folders: Crown, The:\n"
         "     Crown, The\n"
         "     The Crown"
     ) in caplog.text
-    assert "scanning: The Crown" not in caplog.text
-    assert caplog.text.count("scanning: Crown, The") == 2
+    assert "rescanning: The Crown" not in caplog.text
+    assert caplog.text.count("rescanning: Crown, The") == 2
 
 
 def testResetTvEpisodeTitlesDetectsNameDuplicatesWithoutEpisodeMetadataScan(
@@ -5390,7 +5390,7 @@ def testResetTvEpisodeTitlesDetectsNameDuplicatesWithoutEpisodeMetadataScan(
             confirmedOrganizer._logResetDuplicateTvShowFolders(tvStorage)
 
     assert (
-        "...rescan found possible duplicate TV show folders for: Crown, The:\n"
+        "...possible duplicate TV show folders: Crown, The:\n"
         "     Crown, The\n"
         "     The Crown"
     ) in caplog.text
@@ -5444,8 +5444,8 @@ def testResetTvEpisodeTitlesPromptsToMergeDuplicateFolders(
     assert "2) The Crown" in mockMenu.call_args_list[1].args[0]
     assert (tvStorage / "Crown, The" / "Season 02" / duplicateEpisode.name).exists()
     assert not (tvStorage / "The Crown").exists()
-    assert caplog.text.count("scanning: Crown, The") == 1
-    assert "merge TV show folders: Crown, The <- The Crown" in caplog.text
+    assert caplog.text.count("rescanning: Crown, The") == 1
+    assert "merging TV show folders: Crown, The <- The Crown" in caplog.text
 
 
 def testResetTvEpisodeTitlesCollectsVideoFilesAfterInteractiveMerge(
@@ -5573,18 +5573,18 @@ def testResetTvEpisodeTitlesWarnsWhenNormalizedNamesDuplicate(
 
     assert stats == {"renamed": 0, "skipped": 7, "errors": 0}
     assert (
-        "...rescan found possible duplicate TV show folders for: Grimm:\n"
+        "...possible duplicate TV show folders: Grimm:\n"
         "     Grimm\n"
         "     Grimm (2011)"
     ) in caplog.text
     assert (
-        "...rescan found possible duplicate TV show folders for: Hijack:\n"
+        "...possible duplicate TV show folders: Hijack:\n"
         "     Hijack 2023\n"
         "     Hijack [419254]\n"
         "     Hijak"
     ) in caplog.text
     assert (
-        "...rescan found possible duplicate TV show folders for: Homestead:\n"
+        "...possible duplicate TV show folders: Homestead:\n"
         "     Homestead\n"
         "     Homestead The Series"
     ) in caplog.text
