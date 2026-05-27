@@ -5448,6 +5448,67 @@ def testResetTvEpisodeTitlesPromptsToMergeDuplicateFolders(
     assert "merging TV show folders: Crown, The <- The Crown" in caplog.text
 
 
+def testResetTvEpisodeTitlesPromptsImmediatelyAfterEachDuplicateWarning(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+
+    for showName, filename in (
+        ("Crown, The", "The.Crown.S01E01.Wolferton.Splash.mkv"),
+        ("The Crown", "The.Crown.S01E02.Hyde.Park.Corner.mkv"),
+        ("Hijack", "Hijack.S01E01.Final.Call.mkv"),
+        ("Hijack 2023", "Hijack.S01E02.3.Joules.mkv"),
+        ("Hijak", "Hijack.S01E03.Draw.a.Blank.mkv"),
+    ):
+        seasonDir = tvStorage / showName / "Season 01"
+        seasonDir.mkdir(parents=True)
+        (seasonDir / filename).write_bytes(b"x" * 20)
+
+    expectedWarnings = [
+        "...possible duplicate TV show folders: Crown, The:\n"
+        "     Crown, The\n"
+        "     The Crown",
+        "...possible duplicate TV show folders: Hijack:\n"
+        "     Hijack\n"
+        "     Hijack 2023\n"
+        "     Hijak",
+    ]
+
+    def _readChoice(prompt: str, *args, **kwargs) -> str:
+        callIndex = _readChoice.callCount
+        assert expectedWarnings[callIndex] in caplog.text
+        for laterWarning in expectedWarnings[callIndex + 1 :]:
+            assert laterWarning not in caplog.text
+        _readChoice.callCount += 1
+        return "n"
+
+    _readChoice.callCount = 0
+
+    with (
+        patch.object(
+            confirmedOrganizer,
+            "_fetchTvMetadataFromScraper",
+            side_effect=AssertionError("scraper lookup should not run"),
+        ),
+        patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ),
+        patch.object(
+            confirmedOrganizer, "_shouldPromptInteractively", return_value=True
+        ),
+        patch.object(confirmedOrganizer, "_readMenuChoice", side_effect=_readChoice),
+    ):
+        with caplog.at_level("INFO"):
+            stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 5, "errors": 0}
+    assert _readChoice.callCount == 2
+
+
 def testResetTvEpisodeTitlesCanQuitFromDuplicateMergePrompt(
     tmp_path: Path,
     confirmedOrganizer: VideoOrganizer,
@@ -5477,7 +5538,9 @@ def testResetTvEpisodeTitlesCanQuitFromDuplicateMergePrompt(
         patch.object(
             confirmedOrganizer, "_shouldPromptInteractively", return_value=True
         ),
-        patch.object(confirmedOrganizer, "_readMenuChoice", return_value="q") as mockMenu,
+        patch.object(
+            confirmedOrganizer, "_readMenuChoice", return_value="q"
+        ) as mockMenu,
     ):
         with caplog.at_level("INFO"):
             with pytest.raises(SystemExit) as excInfo:
