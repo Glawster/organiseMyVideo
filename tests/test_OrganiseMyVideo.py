@@ -15,6 +15,9 @@ import pytest
 import organiseMyVideo.__main__ as omv_main
 from organiseMyVideo import VideoOrganizer
 from organiseMyVideo import video as video_module
+from organiseMyVideo.video import VideoMixin
+from organiseMyVideo.video_move import VideoMoveMixin
+from organiseMyVideo.video_rescan import VideoRescanMixin
 from organiseMyVideo.video import (
     _FILE_PROCESS_SEPARATOR,
     _XML_BINARY_CHECK_WINDOW,
@@ -124,6 +127,11 @@ def testOptionalFlagsDefaults():
     org = VideoOrganizer()
     assert org.refreshMetadataLibrary is False
     assert org.useCurses is True
+
+
+def testVideoMixinComposesWorkflowMixins():
+    assert issubclass(VideoMixin, VideoMoveMixin)
+    assert issubclass(VideoMixin, VideoRescanMixin)
 
 
 # ---------------------------------------------------------------------------
