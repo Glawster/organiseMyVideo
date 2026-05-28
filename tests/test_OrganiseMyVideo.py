@@ -15,6 +15,9 @@ import pytest
 import organiseMyVideo.__main__ as omv_main
 from organiseMyVideo import VideoOrganizer
 from organiseMyVideo import video as video_module
+from organiseMyVideo.video import VideoMixin
+from organiseMyVideo.video_move import VideoMoveMixin
+from organiseMyVideo.video_rescan import VideoRescanMixin
 from organiseMyVideo.video import (
     _FILE_PROCESS_SEPARATOR,
     _XML_BINARY_CHECK_WINDOW,
@@ -124,6 +127,11 @@ def testOptionalFlagsDefaults():
     org = VideoOrganizer()
     assert org.refreshMetadataLibrary is False
     assert org.useCurses is True
+
+
+def testVideoMixinComposesWorkflowMixins():
+    assert issubclass(VideoMixin, VideoMoveMixin)
+    assert issubclass(VideoMixin, VideoRescanMixin)
 
 
 # ---------------------------------------------------------------------------
@@ -4925,7 +4933,7 @@ def testResetTvEpisodeTitlesCapitalisesLowercaseShowNames(
     renamedSeasonDir = tvStorage / "After Life" / "Season 01"
     assert renamedSeasonDir.exists()
     assert (renamedSeasonDir / "After.Life.S01E04.Sic.Semper.Systema.mkv").exists()
-    assert "renaming TV Show: After Life (from after life)" in caplog.text
+    assert "renaming TV show: After Life (from after life)" in caplog.text
 
 
 def testResetTvEpisodeTitlesPreservesMixedCaseShowNamesFromEpisodes(
@@ -4957,7 +4965,7 @@ def testResetTvEpisodeTitlesPreservesMixedCaseShowNamesFromEpisodes(
     assert renamedSeasonDir.exists()
     assert (renamedSeasonDir / "iZombie.S01E01.Pilot.mkv").exists()
     assert not episodeFile.exists()
-    assert "renaming TV Show: iZombie (from izombie)" in caplog.text
+    assert "renaming TV show: iZombie (from izombie)" in caplog.text
 
 
 def testResetTvEpisodeTitlesPreservesMixedCaseShowNamesFromSeriesMetadata(
@@ -4993,7 +5001,41 @@ def testResetTvEpisodeTitlesPreservesMixedCaseShowNamesFromSeriesMetadata(
     assert renamedSeasonDir.exists()
     assert (renamedSeasonDir / "izombie.S01E01.Pilot.mkv").exists()
     assert not episodeFile.exists()
-    assert "renaming TV Show: iZombie (from izombie)" in caplog.text
+    assert "renaming TV show: iZombie (from izombie)" in caplog.text
+
+
+def testResetTvEpisodeTitlesIgnoresAllCapsSeriesMetadataForMixedCaseFolder(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    showDir = tvStorage / "Outlander"
+    seasonDir = showDir / "Season 01"
+    seasonDir.mkdir(parents=True)
+    (showDir / "series.xml").write_text(
+        "<Series><SeriesName>OUTLANDER</SeriesName></Series>", encoding="utf-8"
+    )
+    episodeFile = seasonDir / "Outlander.S01E01.Sassenach.mkv"
+    episodeFile.write_bytes(b"x" * 20)
+
+    with patch.object(
+        confirmedOrganizer,
+        "_fetchTvMetadataFromScraper",
+        side_effect=AssertionError("scraper lookup should not run"),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ):
+            with caplog.at_level("INFO"):
+                stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
+    assert (tvStorage / "Outlander" / "Season 01" / episodeFile.name).exists()
+    assert not (tvStorage / "OUTLANDER").exists()
+    assert "renaming TV show: OUTLANDER (from Outlander)" not in caplog.text
 
 
 def testResetTvEpisodeTitlesRegeneratesCorruptEpisodeMetadataXml(
@@ -5208,8 +5250,8 @@ def testResetTvEpisodeTitlesLogsShowNamesAndOnlyRenameChanges(
                 stats = confirmedOrganizer.resetTvEpisodeTitles()
 
     assert stats == {"renamed": 1, "skipped": 1, "errors": 0}
-    assert "scanning: After Life [361563]" in caplog.text
-    assert "scanning: Another Show [999999]" in caplog.text
+    assert "rescanning: After Life [361563]" in caplog.text
+    assert "rescanning: Another Show [999999]" in caplog.text
     assert (
         "...renaming:\n"
         "     After.Life.S01E04.1080p.WEB.h264.mkv\n"
@@ -5226,6 +5268,56 @@ def testResetTvEpisodeTitlesLogsShowNamesAndOnlyRenameChanges(
     assert "TV episode title reset complete" not in caplog.text
     assert "preserving existing metadata files" not in caplog.text
     assert "preserving existing metadata" not in caplog.text
+
+
+def testResetTvEpisodeTitlesRenamesMalformedIncorrectEpisodeTitles(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+
+    seasonDir = tvStorage / "After Life" / "Season 01"
+    seasonDir.mkdir(parents=True)
+    (seasonDir.parent / "series.xml").write_text(
+        "<Series><SeriesID>347507</SeriesID></Series>", encoding="utf-8"
+    )
+    wrongTitleEpisode = seasonDir / "After.Life.S01E04.Wrong.Title.mkv"
+    wrongTitleEpisode.write_bytes(b"x" * 20)
+
+    libraryPath = tmp_path / "metadataLibrary.json"
+    libraryPath.write_text(
+        json.dumps(_savedAfterLifeMetadataLibrary()), encoding="utf-8"
+    )
+
+    with (
+        patch.object(
+            confirmedOrganizer,
+            "_fetchTvMetadataFromScraper",
+            side_effect=AssertionError("scraper lookup should not run"),
+        ),
+        patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ),
+        patch.object(
+            confirmedOrganizer,
+            "_getMetadataLibraryPath",
+            return_value=libraryPath,
+        ),
+    ):
+        with caplog.at_level("INFO"):
+            stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 1, "skipped": 0, "errors": 0}
+    assert (seasonDir / "After Life.S01E04.Sic Semper Systema.mkv").exists()
+    assert not wrongTitleEpisode.exists()
+    assert (
+        "...renaming:\n"
+        "     After.Life.S01E04.Wrong.Title.mkv\n"
+        "     After Life.S01E04.Sic Semper Systema.mkv"
+    ) in caplog.text
 
 
 def testResetTvEpisodeTitlesWarnsWhenSeriesIdMatchesAcrossShowFolders(
@@ -5264,7 +5356,7 @@ def testResetTvEpisodeTitlesWarnsWhenSeriesIdMatchesAcrossShowFolders(
 
     assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
     assert (
-        "...rescan found possible duplicate TV show folders for: 777:\n"
+        "...possible duplicate TV show folders: 777:\n"
         "     Grimm\n"
         "     Grimm (2011)"
     ) in caplog.text
@@ -5300,12 +5392,400 @@ def testResetTvEpisodeTitlesWarnsWhenTrailingTheFoldersDuplicate(
 
     assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
     assert (
-        "...rescan found possible duplicate TV show folders for: Crown, The:\n"
+        "...possible duplicate TV show folders: Crown, The:\n"
         "     Crown, The\n"
         "     The Crown"
     ) in caplog.text
-    assert "scanning: The Crown" not in caplog.text
-    assert caplog.text.count("scanning: Crown, The") == 2
+    assert "rescanning: The Crown" not in caplog.text
+    assert caplog.text.count("rescanning: Crown, The") == 2
+
+
+def testResetTvEpisodeTitlesDetectsNameDuplicatesWithoutEpisodeMetadataScan(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+
+    canonicalDir = tvStorage / "Crown, The" / "Season 01"
+    canonicalMetadataDir = canonicalDir / "metadata"
+    canonicalMetadataDir.mkdir(parents=True)
+    (canonicalDir / "The.Crown.S01E01.Wolferton.Splash.mkv").write_bytes(b"x" * 20)
+    (canonicalMetadataDir / "The.Crown.S01E01.Wolferton.Splash.xml").write_text(
+        "<Item><SeriesID>123</SeriesID></Item>", encoding="utf-8"
+    )
+
+    leadingArticleDir = tvStorage / "The Crown" / "Season 01"
+    leadingArticleMetadataDir = leadingArticleDir / "metadata"
+    leadingArticleMetadataDir.mkdir(parents=True)
+    (leadingArticleDir / "The.Crown.S01E02.Hyde.Park.Corner.mkv").write_bytes(b"x" * 20)
+    (leadingArticleMetadataDir / "The.Crown.S01E02.Hyde.Park.Corner.xml").write_text(
+        "<Item><SeriesID>123</SeriesID></Item>", encoding="utf-8"
+    )
+
+    with patch.object(
+        confirmedOrganizer,
+        "_readTvSeasonMetadataSeriesId",
+        side_effect=AssertionError("duplicate checks should not scan episode XML"),
+    ):
+        with caplog.at_level("INFO"):
+            confirmedOrganizer._logResetDuplicateTvShowFolders(tvStorage)
+
+    assert (
+        "...possible duplicate TV show folders: Crown, The:\n"
+        "     Crown, The\n"
+        "     The Crown"
+    ) in caplog.text
+
+
+def testResetTvEpisodeTitlesPromptsToMergeDuplicateFolders(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+
+    canonicalDir = tvStorage / "Crown, The" / "Season 01"
+    canonicalDir.mkdir(parents=True)
+    canonicalEpisode = canonicalDir / "The.Crown.S01E01.Wolferton.Splash.mkv"
+    canonicalEpisode.write_bytes(b"x" * 20)
+
+    duplicateDir = tvStorage / "The Crown" / "Season 02"
+    duplicateDir.mkdir(parents=True)
+    duplicateEpisode = duplicateDir / "The.Crown.S02E01.Misadventure.mkv"
+    duplicateEpisode.write_bytes(b"x" * 20)
+
+    with (
+        patch.object(
+            confirmedOrganizer,
+            "_fetchTvMetadataFromScraper",
+            side_effect=AssertionError("scraper lookup should not run"),
+        ),
+        patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ),
+        patch.object(
+            confirmedOrganizer, "_shouldPromptInteractively", return_value=True
+        ),
+        patch.object(
+            confirmedOrganizer, "_readMenuChoice", side_effect=["y", "1"]
+        ) as mockMenu,
+    ):
+        with caplog.at_level("INFO"):
+            stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
+    assert mockMenu.call_count == 2
+    assert mockMenu.call_args_list[0].args[0] == "Merge these folders? (y/n/q): "
+    assert "Choose the master TV show folder for the merged result:" in (
+        mockMenu.call_args_list[1].args[0]
+    )
+    assert "1) Crown, The" in mockMenu.call_args_list[1].args[0]
+    assert "2) The Crown" in mockMenu.call_args_list[1].args[0]
+    assert (tvStorage / "Crown, The" / "Season 02" / duplicateEpisode.name).exists()
+    assert not (tvStorage / "The Crown").exists()
+    assert caplog.text.count("rescanning: Crown, The") == 1
+    assert (
+        "...merging TV show folders:\n" "     Crown, The\n" "     The Crown"
+    ) in caplog.text
+
+
+def testResetTvEpisodeTitlesPromptsSeriesIdDuplicateOnlyOnce(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+
+    primaryDir = tvStorage / "Grimm" / "Season 01"
+    primaryDir.mkdir(parents=True)
+    (primaryDir.parent / "series.xml").write_text(
+        "<Series><SeriesID>777</SeriesID></Series>", encoding="utf-8"
+    )
+    (primaryDir / "Grimm.S01E01.Pilot.mkv").write_bytes(b"x" * 20)
+
+    duplicateDir = tvStorage / "Grimm (2011)" / "Season 01"
+    duplicateDir.mkdir(parents=True)
+    (duplicateDir.parent / "series.xml").write_text(
+        "<Series><SeriesID>777</SeriesID></Series>", encoding="utf-8"
+    )
+    (duplicateDir / "Grimm.S01E02.Bears.Will.Be.Bears.mkv").write_bytes(b"x" * 20)
+
+    with (
+        patch.object(
+            confirmedOrganizer,
+            "_fetchTvMetadataFromScraper",
+            side_effect=AssertionError("scraper lookup should not run"),
+        ),
+        patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ),
+        patch.object(
+            confirmedOrganizer, "_shouldPromptInteractively", return_value=True
+        ),
+        patch.object(
+            confirmedOrganizer, "_readMenuChoice", return_value="n"
+        ) as mockMenu,
+    ):
+        with caplog.at_level("INFO"):
+            stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
+    assert mockMenu.call_count == 1
+    assert caplog.text.count("possible duplicate TV show folders") == 1
+    assert (
+        "...possible duplicate TV show folders: 777:\n     Grimm\n     Grimm (2011)"
+        in caplog.text
+    )
+
+
+def testResetTvEpisodeTitlesLogsCleanupWhenMergeLeavesConflictsBehind(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+
+    primaryDir = tvStorage / "Grimm" / "Season 01"
+    primaryDir.mkdir(parents=True)
+    (primaryDir.parent / "series.xml").write_text(
+        "<Series><SeriesID>777</SeriesID></Series>", encoding="utf-8"
+    )
+    (primaryDir / "Grimm.S01E01.Pilot.mkv").write_bytes(b"x" * 20)
+
+    duplicateShowDir = tvStorage / "Grimm (2011)"
+    duplicateDir = duplicateShowDir / "Season 01"
+    duplicateDir.mkdir(parents=True)
+    (duplicateShowDir / "series.xml").write_text(
+        "<Series><SeriesID>777</SeriesID></Series>", encoding="utf-8"
+    )
+    (duplicateDir / "Grimm.S01E02.Bears.Will.Be.Bears.mkv").write_bytes(b"x" * 20)
+
+    with (
+        patch.object(
+            confirmedOrganizer,
+            "_fetchTvMetadataFromScraper",
+            side_effect=AssertionError("scraper lookup should not run"),
+        ),
+        patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ),
+        patch.object(
+            confirmedOrganizer, "_shouldPromptInteractively", return_value=True
+        ),
+        patch.object(confirmedOrganizer, "_readMenuChoice", side_effect=["y", "1"]),
+    ):
+        with caplog.at_level("INFO"):
+            stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
+    assert duplicateShowDir.exists()
+    assert (
+        "skipping rescan merge; destination already exists: "
+        f"{tvStorage / 'Grimm' / 'series.xml'}"
+    ) in caplog.text
+    assert (
+        "...rescan merge cleanup still needed:\n" f"     {duplicateShowDir}"
+    ) in caplog.text
+    assert caplog.text.count("possible duplicate TV show folders") == 1
+
+
+def testResetTvEpisodeTitlesPromptsImmediatelyAfterEachDuplicateWarning(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+
+    for showName, filename in (
+        ("Crown, The", "The.Crown.S01E01.Wolferton.Splash.mkv"),
+        ("The Crown", "The.Crown.S01E02.Hyde.Park.Corner.mkv"),
+        ("Hijack", "Hijack.S01E01.Final.Call.mkv"),
+        ("Hijack 2023", "Hijack.S01E02.3.Joules.mkv"),
+        ("Hijak", "Hijack.S01E03.Draw.a.Blank.mkv"),
+    ):
+        seasonDir = tvStorage / showName / "Season 01"
+        seasonDir.mkdir(parents=True)
+        (seasonDir / filename).write_bytes(b"x" * 20)
+
+    expectedWarnings = [
+        "...possible duplicate TV show folders: Crown, The:\n"
+        "     Crown, The\n"
+        "     The Crown",
+        "...possible duplicate TV show folders: Hijack:\n"
+        "     Hijack\n"
+        "     Hijack 2023\n"
+        "     Hijak",
+    ]
+
+    def _readChoice(prompt: str, *args, **kwargs) -> str:
+        callIndex = _readChoice.callCount
+        assert expectedWarnings[callIndex] in caplog.text
+        for laterWarning in expectedWarnings[callIndex + 1 :]:
+            assert laterWarning not in caplog.text
+        assert prompt == "Merge these folders? (y/n/q): "
+        _readChoice.callCount += 1
+        return "n"
+
+    _readChoice.callCount = 0
+
+    with (
+        patch.object(
+            confirmedOrganizer,
+            "_fetchTvMetadataFromScraper",
+            side_effect=AssertionError("scraper lookup should not run"),
+        ),
+        patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ),
+        patch.object(
+            confirmedOrganizer, "_shouldPromptInteractively", return_value=True
+        ),
+        patch.object(confirmedOrganizer, "_readMenuChoice", side_effect=_readChoice),
+    ):
+        with caplog.at_level("INFO"):
+            stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 5, "errors": 0}
+    assert _readChoice.callCount == 2
+
+
+def testResetTvEpisodeTitlesCanQuitFromDuplicateMergePrompt(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+
+    canonicalDir = tvStorage / "Crown, The" / "Season 01"
+    canonicalDir.mkdir(parents=True)
+    (canonicalDir / "The.Crown.S01E01.Wolferton.Splash.mkv").write_bytes(b"x" * 20)
+
+    duplicateDir = tvStorage / "The Crown" / "Season 02"
+    duplicateDir.mkdir(parents=True)
+    (duplicateDir / "The.Crown.S02E01.Misadventure.mkv").write_bytes(b"x" * 20)
+
+    with (
+        patch.object(
+            confirmedOrganizer,
+            "_fetchTvMetadataFromScraper",
+            side_effect=AssertionError("scraper lookup should not run"),
+        ),
+        patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ),
+        patch.object(
+            confirmedOrganizer, "_shouldPromptInteractively", return_value=True
+        ),
+        patch.object(
+            confirmedOrganizer, "_readMenuChoice", return_value="q"
+        ) as mockMenu,
+    ):
+        with caplog.at_level("INFO"):
+            with pytest.raises(SystemExit) as excInfo:
+                confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert excInfo.value.code == 0
+    assert mockMenu.call_count == 1
+    assert mockMenu.call_args.args[0] == "Merge these folders? (y/n/q): "
+    assert "user requested to quit" in caplog.text
+    assert "rescanning: Crown, The" not in caplog.text
+
+
+def testResetTvEpisodeTitlesCollectsVideoFilesAfterInteractiveMerge(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+
+    canonicalDir = tvStorage / "Crown, The" / "Season 01"
+    canonicalDir.mkdir(parents=True)
+    (canonicalDir / "The.Crown.S01E01.Wolferton.Splash.mkv").write_bytes(b"x" * 20)
+
+    duplicateRoot = tvStorage / "The Crown"
+    duplicateDir = duplicateRoot / "Season 02"
+    duplicateDir.mkdir(parents=True)
+    (duplicateDir / "The.Crown.S02E01.Misadventure.mkv").write_bytes(b"x" * 20)
+
+    originalIterResetTvShowFiles = confirmedOrganizer._iterResetTvShowFiles
+
+    def wrappedIterResetTvShowFiles(tvDir: Path):
+        assert not duplicateRoot.exists()
+        return originalIterResetTvShowFiles(tvDir)
+
+    with (
+        patch.object(
+            confirmedOrganizer,
+            "_fetchTvMetadataFromScraper",
+            side_effect=AssertionError("scraper lookup should not run"),
+        ),
+        patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ),
+        patch.object(
+            confirmedOrganizer, "_shouldPromptInteractively", return_value=True
+        ),
+        patch.object(confirmedOrganizer, "_readMenuChoice", side_effect=["y", "1"]),
+        patch.object(
+            confirmedOrganizer,
+            "_iterResetTvShowFiles",
+            side_effect=wrappedIterResetTvShowFiles,
+        ),
+    ):
+        stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
+
+
+def testResetTvEpisodeTitlesSkipsMergePreparationWhenNotInteractive(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+
+    canonicalDir = tvStorage / "Crown, The" / "Season 01"
+    canonicalDir.mkdir(parents=True)
+    (canonicalDir / "The.Crown.S01E01.Wolferton.Splash.mkv").write_bytes(b"x" * 20)
+
+    duplicateDir = tvStorage / "The Crown" / "Season 02"
+    duplicateDir.mkdir(parents=True)
+    (duplicateDir / "The.Crown.S02E01.Misadventure.mkv").write_bytes(b"x" * 20)
+
+    with (
+        patch.object(
+            confirmedOrganizer,
+            "_fetchTvMetadataFromScraper",
+            side_effect=AssertionError("scraper lookup should not run"),
+        ),
+        patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ),
+        patch.object(
+            confirmedOrganizer, "_shouldPromptInteractively", return_value=False
+        ),
+        patch.object(
+            confirmedOrganizer,
+            "_mergeResetDuplicateTvShowFolders",
+            side_effect=AssertionError("non-interactive rescans should stream"),
+        ),
+    ):
+        stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
 
 
 def testResetTvEpisodeTitlesWarnsWhenNormalizedNamesDuplicate(
@@ -5347,18 +5827,18 @@ def testResetTvEpisodeTitlesWarnsWhenNormalizedNamesDuplicate(
 
     assert stats == {"renamed": 0, "skipped": 7, "errors": 0}
     assert (
-        "...rescan found possible duplicate TV show folders for: Grimm:\n"
+        "...possible duplicate TV show folders: Grimm:\n"
         "     Grimm\n"
         "     Grimm (2011)"
     ) in caplog.text
     assert (
-        "...rescan found possible duplicate TV show folders for: Hijack:\n"
+        "...possible duplicate TV show folders: Hijack:\n"
         "     Hijack 2023\n"
         "     Hijack [419254]\n"
         "     Hijak"
     ) in caplog.text
     assert (
-        "...rescan found possible duplicate TV show folders for: Homestead:\n"
+        "...possible duplicate TV show folders: Homestead:\n"
         "     Homestead\n"
         "     Homestead The Series"
     ) in caplog.text

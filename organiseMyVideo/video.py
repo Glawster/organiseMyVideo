@@ -1,6 +1,5 @@
 """Core video-file organisation: scan storage, parse filenames, move files, clean names."""
 
-from contextlib import contextmanager
 import errno
 import difflib
 import os
@@ -17,6 +16,8 @@ from typing import Iterable, List, Tuple, Optional, TextIO
 from organiseMyProjects.logUtils import getLogger  # type: ignore
 
 from .constants import VIDEO_EXTENSIONS, _PREFIX_REGEX
+from .video_move import VideoMoveMixin
+from .video_rescan import VideoRescanMixin
 
 logger = getLogger()
 UNKNOWN_YEAR = "Unknown"
@@ -31,7 +32,7 @@ _FILE_PROCESS_SEPARATOR = "-" * 72
 _IGNORED_LOCAL_FOLDER_NAMES = {"featurettes", "extras"}
 
 
-class VideoMixin:
+class VideoMixin(VideoRescanMixin, VideoMoveMixin):
     """Methods for parsing, locating, moving and cleaning video files."""
 
     _MOVIE_MCM_PATTERNS = (
@@ -52,168 +53,6 @@ class VideoMixin:
     _MOVIE_ARTWORK_PATTERNS = ("folder.jpg", "banner.jpg", "backdrop*.jpg")
     _TV_SHOW_ARTWORK_PATTERNS = ("folder.jpg", "banner.jpg", "backdrop*.jpg")
     _TV_SEASON_ARTWORK_PATTERNS = ("folder.jpg",)
-
-    @contextmanager
-    def _suppressResetNoiseLogs(self):
-        """Temporarily silence noisy info/action logging during reset scans."""
-        from . import metadata as metadata_module
-
-        targets = (logger, metadata_module.logger)
-        methodNames = ("doing", "done", "info", "value", "action")
-        originals = {
-            target: {name: getattr(target, name) for name in methodNames}
-            for target in targets
-        }
-
-        try:
-            for target in targets:
-                for name in methodNames:
-                    setattr(target, name, lambda *args, **kwargs: None)
-            yield
-        finally:
-            for target, methods in originals.items():
-                for name, method in methods.items():
-                    setattr(target, name, method)
-
-    @contextmanager
-    def _suppressResetMetadataPreserveLogs(self):
-        """Hide no-op metadata preservation logs while keeping real update logs."""
-        from . import metadata as metadata_module
-
-        targets = (logger, metadata_module.logger)
-        originals = {target: target.value for target in targets}
-
-        def _wrapValue(original):
-            def _value(label, *args, **kwargs):
-                if label in {
-                    "preserving existing metadata",
-                    "preserving existing metadata files",
-                }:
-                    return None
-                return original(label, *args, **kwargs)
-
-            return _value
-
-        try:
-            for target in targets:
-                target.value = _wrapValue(target.value)
-            yield
-        finally:
-            for target, original in originals.items():
-                target.value = original
-
-    def _iterResetTvShowFiles(self, tvDir: Path):
-        """Yield grouped reset candidates by top-level TV show folder."""
-        showFiles = {}
-        for videoFile in sorted(tvDir.rglob("*")):
-            if (
-                not videoFile.is_file()
-                or videoFile.suffix.lower() not in VIDEO_EXTENSIONS
-            ):
-                continue
-            relativePath = videoFile.relative_to(tvDir)
-            showName = (
-                relativePath.parts[0] if len(relativePath.parts) > 1 else tvDir.name
-            )
-            showFiles.setdefault(showName, []).append(videoFile)
-
-        for showName, videoFiles in showFiles.items():
-            showDir = tvDir / showName
-            seriesId = (
-                self._readResetTvShowSeriesId(showDir) if showDir.is_dir() else None
-            )
-            yield showName, seriesId, videoFiles
-
-    def _iterResetTvShowDirs(self, tvDir: Path) -> Iterable[Path]:
-        """Yield top-level TV show directories for reset scans."""
-        try:
-            showDirs = sorted(
-                showDir for showDir in tvDir.iterdir() if showDir.is_dir()
-            )
-        except OSError as error:
-            logger.warning("could not inspect TV storage %s: %s", tvDir, error)
-            return
-        yield from showDirs
-
-    def _readResetTvShowSeriesId(self, showDir: Path) -> Optional[str]:
-        """Return the best available series ID for a stored TV show folder."""
-        return self._readTvShowSeriesId(showDir)
-
-    def _logResetDuplicateTvShowFolders(self, tvDir: Path) -> None:
-        """Warn when multiple stored TV show folders share the same series ID."""
-        showDirsBySeriesId = {}
-        canonicalNameGroups = []
-        for showDir in self._iterResetTvShowDirs(tvDir):
-            seriesId = self._readResetTvShowSeriesId(showDir)
-            if seriesId:
-                showDirsBySeriesId.setdefault(seriesId, []).append(showDir.name)
-            canonicalName = self._stripResetTvShowDuplicateSuffixes(showDir.name)
-            duplicateKey = self._buildResetTvShowDuplicateKey(showDir.name)
-            group = self._findResetDuplicateCanonicalNameGroup(
-                duplicateKey, canonicalNameGroups
-            )
-            if group is None:
-                canonicalNameGroups.append(
-                    {
-                        "key": duplicateKey,
-                        "canonicalName": canonicalName,
-                        "showNames": [showDir.name],
-                    }
-                )
-                continue
-            group["showNames"].append(showDir.name)
-
-        for seriesId, showNames in sorted(showDirsBySeriesId.items()):
-            uniqueShowNames = sorted(set(showNames), key=str.casefold)
-            if len(uniqueShowNames) < 2:
-                continue
-            logger.multiline(
-                [
-                    f"rescan found possible duplicate TV show folders for: {seriesId}",
-                    # display each element of uniqueShowNames on a separate line for readability when there are many
-                    *uniqueShowNames
-                ]
-            )
-
-        for group in sorted(
-            canonicalNameGroups, key=lambda item: item["canonicalName"].casefold()
-        ):
-            uniqueShowNames = sorted(set(group["showNames"]), key=str.casefold)
-            if len(uniqueShowNames) < 2:
-                continue
-            logger.multiline(
-                [
-                    f"rescan found possible duplicate TV show folders for: {group['canonicalName']}",
-                    # display each element of uniqueShowNames on a separate line for readability when there are many
-                    *uniqueShowNames
-                ]
-            )
-
-    def _iterResetEpisodeCompanionRenames(
-        self, videoFile: Path, destinationPath: Path
-    ) -> list[tuple[Path, Path]]:
-        """Return existing same-stem XML/JPG companion files that should be renamed."""
-        candidates = []
-        sameDir = videoFile.parent
-        metadataDir = sameDir / "metadata"
-        for baseDir in (sameDir, metadataDir):
-            for suffix in (".xml", ".jpg"):
-                candidates.append(
-                    (
-                        baseDir / f"{videoFile.stem}{suffix}",
-                        baseDir / f"{destinationPath.stem}{suffix}",
-                    )
-                )
-
-        renames = []
-        seen = set()
-        for sourcePath, destPath in candidates:
-            if sourcePath in seen:
-                continue
-            seen.add(sourcePath)
-            if sourcePath.exists() and sourcePath != destPath:
-                renames.append((sourcePath, destPath))
-        return renames
 
     def scanStorageLocations(self) -> Tuple[List[Path], List[Path]]:
         """
@@ -516,18 +355,34 @@ class VideoMixin:
             if ch.isalnum()
         )
 
+    def _canReachResetDuplicateKeyMatchThreshold(
+        self, leftKey: str, rightKey: str, threshold: float
+    ) -> bool:
+        """Return whether two keys could reach *threshold* before fuzzy matching."""
+        minLength = min(len(leftKey), len(rightKey))
+        maxPossibleRatio = (2 * minLength) / (len(leftKey) + len(rightKey))
+        return maxPossibleRatio >= threshold
+
     def _findResetDuplicateCanonicalNameGroup(
-        self, duplicateKey: str, groups: list[dict]
+        self, duplicateKey: str, groups: list[dict], groupsByKey: dict[str, dict]
     ) -> Optional[dict]:
         """Return an existing duplicate-name group close enough to *duplicateKey*."""
+        if duplicateKey in groupsByKey:
+            return groupsByKey[duplicateKey]
+
+        ratioThreshold = 0.9
         bestGroup = None
         bestRatio = 0.0
         for group in groups:
+            if not self._canReachResetDuplicateKeyMatchThreshold(
+                duplicateKey, group["key"], ratioThreshold
+            ):
+                continue
             ratio = difflib.SequenceMatcher(None, duplicateKey, group["key"]).ratio()
             if ratio > bestRatio:
                 bestGroup = group
                 bestRatio = ratio
-        return bestGroup if bestRatio >= 0.9 else None
+        return bestGroup if bestRatio >= ratioThreshold else None
 
     def _makePromptCacheKey(self, defaultName: str, fileType: str) -> tuple[str, str]:
         """
@@ -1624,10 +1479,12 @@ class VideoMixin:
         """Return a filesystem-safe TV episode title fragment."""
         timedTitle = self._normaliseTimedTvEpisodeTitle(value)
         if timedTitle and re.search(r"\b\d{1,2}(?:\.\d{2})?[ap]m\b", timedTitle):
-            return self._sanitiseTvFilenamePart(timedTitle)
-        if preserveInternalSpaces:
-            return self._sanitiseTvFilenamePart(value)
-        return self._sanitiseFilenamePart(value)
+            sanitised = self._sanitiseTvFilenamePart(timedTitle)
+        elif preserveInternalSpaces:
+            sanitised = self._sanitiseTvFilenamePart(value)
+        else:
+            sanitised = self._sanitiseFilenamePart(value)
+        return sanitised.rstrip(".")
 
     def _capitaliseLowercaseTvShowTitle(self, showName: Optional[str]) -> Optional[str]:
         """Return *showName* with word initials capitalised when it is all lowercase."""
@@ -1642,6 +1499,26 @@ class VideoMixin:
             lambda match: f"{match.group(1)}{match.group(2).upper()}",
             normalised,
         )
+
+    def _normaliseTvShowCaseOnlyVariant(
+        self, candidateName: str, currentName: str
+    ) -> str:
+        """Prefer readable case when a metadata candidate only differs by casing."""
+        candidate = re.sub(r"\s+", " ", candidateName).strip()
+        current = re.sub(r"\s+", " ", currentName).strip()
+        candidateLetters = [character for character in candidate if character.isalpha()]
+        if candidateLetters and all(
+            character.isupper() for character in candidateLetters
+        ):
+            if len(candidateLetters) <= 4:
+                return candidate
+            currentLetters = [character for character in current if character.isalpha()]
+            if currentLetters and all(
+                character.islower() for character in currentLetters
+            ):
+                return self._capitaliseLowercaseTvShowTitle(current) or current
+            return current
+        return candidate
 
     def _resolveStoredTvShowFolderName(
         self, showDir: Path, showName: str, videoFiles: list[Path]
@@ -1663,8 +1540,13 @@ class VideoMixin:
             if not candidate:
                 continue
             candidate = re.sub(r"\s+", " ", candidate).strip()
-            if candidate.casefold() == normalised.casefold() and candidate != normalised:
-                return candidate
+            if (
+                candidate.casefold() == normalised.casefold()
+                and candidate != normalised
+            ):
+                candidate = self._normaliseTvShowCaseOnlyVariant(candidate, normalised)
+                if candidate != normalised:
+                    return candidate
 
         return self._capitaliseLowercaseTvShowTitle(normalised) or showName
 
@@ -1744,7 +1626,7 @@ class VideoMixin:
             return showName, videoFiles
 
         logger.action(
-            "renaming TV Show: %s (from %s)", destinationDir.name, showDir.name
+            "renaming TV show: %s (from %s)", destinationDir.name, showDir.name
         )
         if self.dryRun:
             return capitalisedShowName, videoFiles
@@ -2125,312 +2007,6 @@ class VideoMixin:
         if imagePath.exists():
             self._copyFilesIntoDir([imagePath], destMetadataDir)
 
-    def promptUserConfirmation(
-        self,
-        filename: str,
-        defaultName: str,
-        fileType: str,
-        videoDirs: Optional[List[Path]] = None,
-        episodeTitle: Optional[str] = None,
-    ) -> Optional[dict]:
-        """
-        Prompt user to confirm or correct the detected name.
-
-        Args:
-            filename: Original filename
-            defaultName:  Detected name to confirm
-            fileType: Type of file ('tv' or 'movie')
-            videoDirs: Optional list of TV storage directories used to suggest
-                       an existing show name when the user switches to TV mode.
-
-        Returns:
-            dict with 'name' and 'type' keys, or None to skip this item.
-            'type' may differ from fileType when the user switches category.
-        """
-        cachedResult = self._getCachedPromptDecision(defaultName, fileType)
-        if cachedResult is not None:
-            logger.value("reusing confirmed TV show", cachedResult["name"])
-            return cachedResult
-
-        if fileType == "tv":
-            prompt = (
-                f"  TV Show detected: {defaultName}\n"
-                f"  Episode Title:    {episodeTitle}\n"
-                "  Is this correct?  (y/n/q/t/m or enter new name): "
-            )
-        else:
-            prompt = (
-                f"  Movie detected: '{defaultName}'\n"
-                "  Is this correct?  (y/n/q/t/m or enter new name): "
-            )
-
-        if self._shouldUseCursesPrompts():
-            response = self._readMenuChoice(
-                prompt,
-                validChoices={"y", "n", "q", "t", "m"},
-                defaultChoice="y",
-            )
-        else:
-            response = self._readTextResponse(prompt)
-
-        if response.lower() in ["y", "yes", ""]:
-            result = {"name": defaultName, "type": fileType}
-            self._cachePromptDecision(defaultName, fileType, result)
-            return result
-        elif response.lower() in ["n", "no"]:
-            rawName = self._readTextResponse(
-                "Enter new name (blank to keep default, 'quit' to skip): "
-            )
-            if not rawName:
-                result = {"name": defaultName, "type": fileType}
-                self._cachePromptDecision(defaultName, fileType, result)
-                return result
-            if rawName.strip().lower() == "quit":
-                return None
-            strippedName = rawName.strip()
-            if not strippedName:
-                result = {"name": defaultName, "type": fileType}
-                self._cachePromptDecision(defaultName, fileType, result)
-                return result
-            result = {"name": strippedName, "type": fileType}
-            self._cachePromptDecision(defaultName, fileType, result)
-            return result
-        elif response.lower() in ["q", "quit"]:
-            logger.info("user requested to quit")
-            sys.exit(0)
-        elif response.lower() == "t":
-            tvDefault = defaultName
-            if videoDirs:
-                tvParsed = self.parseTvFilename(filename)
-                parsedShowName = tvParsed["showName"] if tvParsed else defaultName
-                bestMatch = self.findBestMatchingTvShow(parsedShowName, videoDirs)
-                if bestMatch:
-                    tvDefault = bestMatch
-            showName = self._readTextResponse(
-                f"  Enter show name (default: {tvDefault}): "
-            )
-            return {"name": showName if showName else tvDefault, "type": "tv"}
-        elif response.lower() == "m":
-            title = self._readTextResponse(
-                f"  Enter movie title (default: {defaultName}): "
-            )
-            return {"name": title if title else defaultName, "type": "movie"}
-        else:
-            result = {"name": response, "type": fileType}
-            self._cachePromptDecision(defaultName, fileType, result)
-            return result
-
-    def moveMovie(
-        self,
-        sourceFile: Path,
-        movieInfo: dict,
-        movieDirs: List[Path],
-        videoDirs: Optional[List[Path]] = None,
-        interactive: bool = True,
-    ) -> bool:
-        """
-        Move movie file to appropriate location.
-
-        Args:
-            sourceFile: Source file path
-            movieInfo:  Parsed movie information
-            movieDirs: List of movie storage directories
-            videoDirs: Optional list of TV storage directories (used when switching type)
-            interactive: Whether to prompt user for confirmation
-
-        Returns:
-            True if successful, False otherwise
-        """
-        resolvedMovieInfo = dict(movieInfo)
-        enrichedMovieInfo = self._enrichMovieMetadata(resolvedMovieInfo)
-        if enrichedMovieInfo:
-            resolvedMovieInfo = enrichedMovieInfo
-        title = resolvedMovieInfo["title"]
-        year = resolvedMovieInfo["year"]
-
-        logger.value("processing movie", sourceFile.name)
-
-        # Check if user confirmation needed
-        if interactive:
-            result = self.promptUserConfirmation(
-                sourceFile.name,
-                f"{title} ({year})",
-                "movie",
-                videoDirs=videoDirs,
-            )
-            if result is None:
-                logger.info(f"skipping: {sourceFile.name}")
-                return False
-            if result["type"] == "tv":
-                # User wants to process as TV show instead
-                season = self._readTextResponse("  Season number (default 1): ")
-                season = int(season) if season.isdigit() else 1
-                tvInfo = {
-                    "showName": result["name"],
-                    "season": season,
-                    "episode": None,
-                    "extension": sourceFile.suffix,
-                    "type": "tv",
-                }
-                if videoDirs:
-                    return self.moveTvShow(
-                        sourceFile, tvInfo, videoDirs, interactive=False
-                    )
-                logger.error("no TV storage locations available for type switch")
-                return False
-            confirmedTitle = result["name"]
-            # Re-parse if user provided different input
-            if confirmedTitle != f"{title} ({year})":
-                # Try to extract year from new input
-                match = re.match(r"^(.+?)\s*[\(\[]\s*(\d{4})\s*[\)\]]", confirmedTitle)
-                if match:
-                    title = match.group(1).strip()
-                    year = match.group(2)
-                else:
-                    title = confirmedTitle
-            resolvedMovieInfo["title"] = title
-            resolvedMovieInfo["year"] = year
-
-        title = resolvedMovieInfo["title"]
-        year = resolvedMovieInfo["year"]
-
-        # Find existing directory or choose storage location
-        existingDir = self.findExistingMovieDir(title, year, movieDirs)
-
-        if existingDir:
-            destDir = existingDir
-        else:
-            # Create new directory in storage with most space
-            storage = self.getStorageWithMostSpace(movieDirs)
-            if not storage:
-                logger.error("No movie storage locations found")
-                return False
-
-            destDir = storage / f"{title} ({year})"
-
-        destFile = destDir / self._buildMovieDestinationFilename(
-            sourceFile, resolvedMovieInfo
-        )
-
-        logger.action(
-            f"moving movie:\n" f"     {sourceFile.name}\n" f"     -> {destFile}"
-        )
-
-        if self.dryRun:
-            self._recordSummaryTransfer(sourceFile, destFile)
-            return True
-
-        try:
-            destDir.mkdir(parents=True, exist_ok=True)
-            self._moveFileWithProgress(sourceFile, destFile)
-            self._replicateMovieMetadata(sourceFile, destDir, resolvedMovieInfo)
-            self._recordSummaryTransfer(sourceFile, destFile)
-            logger.done("movie moved successfully")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to move movie: {e}")
-            return False
-
-    def moveTvShow(
-        self,
-        sourceFile: Path,
-        tvInfo: dict,
-        videoDirs: List[Path],
-        movieDirs: Optional[List[Path]] = None,
-        interactive: bool = True,
-    ) -> bool:
-        """
-        Move TV show file to appropriate location.
-
-        Args:
-            sourceFile: Source file path
-            tvInfo: Parsed TV show information
-            videoDirs: List of TV storage directories
-            movieDirs: Optional list of movie storage directories (used when switching type)
-            interactive:  Whether to prompt user for confirmation
-
-        Returns:
-            True if successful, False otherwise
-        """
-        tvInfo = dict(tvInfo)
-        metadataLookupAttempted = bool(tvInfo.pop("_tvMetadataLookupAttempted", False))
-        tvInfo = self._mergeMetadata(tvInfo, self.parseTvFilename(sourceFile.name))
-        if not metadataLookupAttempted:
-            tvInfo = self._enrichTvMetadata(tvInfo) or tvInfo
-        showName = tvInfo["showName"]
-        season = tvInfo["season"]
-
-        logger.value("processing TV show", sourceFile.name)
-
-        # Check if user confirmation needed
-        if interactive:
-            result = self.promptUserConfirmation(
-                sourceFile.name,
-                showName,
-                "tv",
-                videoDirs=videoDirs,
-                episodeTitle=tvInfo.get("episodeTitle"),
-            )
-            if result is None:
-                logger.info(f"skipping: {sourceFile.name}")
-                return False
-            if result["type"] == "movie":
-                # User wants to process as movie instead
-                year = self._readTextResponse("  Year (e.g. 2020): ")
-                movieInfo = {
-                    "title": result["name"],
-                    "year": year if year else "Unknown",
-                    "extension": sourceFile.suffix,
-                    "type": "movie",
-                }
-                if movieDirs:
-                    return self.moveMovie(
-                        sourceFile, movieInfo, movieDirs, interactive=False
-                    )
-                logger.error("no movie storage locations available for type switch")
-                return False
-            showName = result["name"]
-            tvInfo["showName"] = showName
-
-        # Find existing show directory or choose storage location
-        existingShowDir = self.findExistingTvShowDir(showName, videoDirs)
-
-        if existingShowDir:
-            showDir = existingShowDir
-        else:
-            # Create new show directory in storage with most space
-            storage = self.getStorageWithMostSpace(videoDirs)
-            if not storage:
-                logger.error("No TV storage locations found")
-                return False
-
-            showDir = storage / self._buildTvShowFolderName(showName)
-
-        # Create season directory
-        seasonDir = showDir / f"Season {season:02d}"
-        destFile = seasonDir / self._buildTvDestinationFilename(sourceFile, tvInfo)
-
-        logger.action(
-            f"moving TV show:\n" f"     {sourceFile.name}\n" f"     -> {destFile}"
-        )
-
-        if self.dryRun:
-            self._recordSummaryTransfer(sourceFile, destFile)
-            return True
-
-        try:
-            seasonDir.mkdir(parents=True, exist_ok=True)
-            self._moveFileWithProgress(sourceFile, destFile)
-            self._replicateTvMetadata(
-                sourceFile, showDir, seasonDir, tvInfo, destFile=destFile
-            )
-            self._recordSummaryTransfer(sourceFile, destFile)
-            logger.done("TV show moved successfully")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to move TV show: {e}")
-            return False
-
     def _isSampleLikeFolder(self, path: Path) -> bool:
         """Return True if the folder name indicates it is a sample/extras folder."""
         return "sample" in path.name.lower()
@@ -2585,364 +2161,3 @@ class VideoMixin:
 
         logger.done(f"clean complete")
         return stats
-
-    def _updateEpisodeMetadataFile(self, metadataFile: Path, tvInfo: dict) -> None:
-        """Update or regenerate an existing episode metadata XML file."""
-        root = self._readXmlRoot(metadataFile)
-        if root is None:
-            if metadataFile.exists() and self._readXmlText(metadataFile) is not None:
-                root = self._buildEpisodeMetadataTemplateRoot(tvInfo)
-                if root is None:
-                    return
-                if self.dryRun:
-                    return
-                metadataFile.parent.mkdir(parents=True, exist_ok=True)
-                ET.ElementTree(root).write(
-                    metadataFile, encoding="utf-8", xml_declaration=True
-                )
-            return
-
-        _, changed = self._updateEpisodeMetadataRoot(root, tvInfo)
-        episodeTitle = tvInfo.get("episodeTitle")
-        episodeTitleNode = root.find("EpisodeName")
-        if episodeTitleNode is None:
-            episodeTitleNode = ET.SubElement(root, "EpisodeName")
-            changed = True
-        if (episodeTitleNode.text or "") != (episodeTitle or ""):
-            episodeTitleNode.text = episodeTitle or ""
-            changed = True
-        if not changed:
-            return
-        if self.dryRun:
-            return
-        ET.ElementTree(root).write(metadataFile, encoding="utf-8", xml_declaration=True)
-
-    def _resetTvEpisodeTitleForFile(self, videoFile: Path) -> str:
-        """Rename one stored TV episode file when better title metadata is available."""
-        parsedTvInfo = self.parseTvFilename(videoFile.name)
-        if not parsedTvInfo:
-            return "skipped"
-        parsedEpisodeTitle = parsedTvInfo.get("episodeTitle")
-        parsedEpisodeTitleNeedsCleanup = self._parsedTvEpisodeTitleNeedsCleanup(
-            videoFile.name
-        )
-        timedTitle = self._normaliseTimedTvEpisodeTitle(parsedEpisodeTitle)
-        needsCanonicalLookup = self._tvEpisodeTitleNeedsCanonicalLookup(
-            parsedEpisodeTitle
-        )
-        needsTimedTitleNormalisation = timedTitle not in (None, parsedEpisodeTitle)
-        if needsTimedTitleNormalisation:
-            parsedTvInfo = dict(parsedTvInfo)
-            parsedTvInfo["episodeTitle"] = timedTitle
-
-        sourceSeasonDir = videoFile.parent
-        showDir = (
-            sourceSeasonDir.parent
-            if re.match(r"^season\b", sourceSeasonDir.name, re.IGNORECASE)
-            and sourceSeasonDir.parent != sourceSeasonDir
-            else None
-        )
-        needsMetadataRepair = bool(
-            showDir
-            and (
-                not (showDir / "series.xml").exists()
-                or self._readFirstXmlText(
-                    self._readXmlRoot(showDir / "series.xml"),
-                    ("SeriesID", "seriesid", "id"),
-                )
-                is None
-                or not self._hasMatchingFiles(showDir, ("mcm_id__*.dvdid.xml",))
-                or any(
-                    self._readFirstXmlText(
-                        self._readXmlRoot(dvdIdFile),
-                        ("SeriesID", "seriesid", "id"),
-                    )
-                    is None
-                    for dvdIdFile in showDir.glob("mcm_id__*.dvdid.xml")
-                )
-            )
-        )
-
-        with self._suppressResetNoiseLogs():
-            mcmHints = self._readTvMcmHints(videoFile)
-            sourceTvInfo = (
-                self._applyTvMcmHints(parsedTvInfo, mcmHints, videoFile) or parsedTvInfo
-            )
-            sourceTvInfo = self._normaliseTvMetadata(sourceTvInfo)
-            if not sourceTvInfo:
-                return "skipped"
-
-            libraryMatch = self._lookupTvMetadataInLibrary(sourceTvInfo)
-            keepExistingShowName = sourceTvInfo.get("metadataSource") == "mcm"
-            resolvedTvInfo = self._applyAuthoritativeTvMetadata(
-                sourceTvInfo,
-                libraryMatch,
-                keepExistingShowName=keepExistingShowName,
-            )
-            resolvedTvInfo = self._resolveCanonicalTvShowName(
-                resolvedTvInfo,
-                libraryMatch,
-                keepExistingShowName=keepExistingShowName,
-            )
-
-            if needsCanonicalLookup or (
-                needsMetadataRepair and not resolvedTvInfo.get("seriesId")
-            ):
-                resolvedTvInfo = (
-                    self._enrichTvMetadata(resolvedTvInfo) or resolvedTvInfo
-                )
-
-        capitalisedShowName = self._capitaliseLowercaseTvShowTitle(
-            resolvedTvInfo.get("showName")
-        )
-        needsShowTitleNormalisation = capitalisedShowName != resolvedTvInfo.get(
-            "showName"
-        )
-        if needsShowTitleNormalisation:
-            resolvedTvInfo = dict(resolvedTvInfo)
-            resolvedTvInfo["showName"] = capitalisedShowName
-
-        if showDir is not None:
-            with self._suppressResetMetadataPreserveLogs():
-                self._ensureSeriesMetadata(showDir, resolvedTvInfo)
-                self._ensureTvDvdIdMetadata(videoFile, showDir, resolvedTvInfo)
-
-        sourceMetadataFile = videoFile.parent / "metadata" / f"{videoFile.stem}.xml"
-        preferSpaceStyle = (
-            needsCanonicalLookup
-            or needsTimedTitleNormalisation
-            or parsedEpisodeTitleNeedsCleanup
-        )
-        destinationName = self._buildTvDestinationFilename(
-            videoFile, resolvedTvInfo, preferSpaceStyle=preferSpaceStyle
-        )
-        if (
-            not needsCanonicalLookup
-            and not needsTimedTitleNormalisation
-            and not needsShowTitleNormalisation
-            and not parsedEpisodeTitleNeedsCleanup
-        ):
-            if sourceMetadataFile.exists():
-                self._updateEpisodeMetadataFile(sourceMetadataFile, resolvedTvInfo)
-            return "skipped"
-
-        if destinationName == videoFile.name:
-            return "skipped"
-
-        destinationPath = videoFile.with_name(destinationName)
-        if destinationPath.exists():
-            logger.error("rescan target already exists: %s", destinationPath)
-            return "errors"
-
-        companionRenames = self._iterResetEpisodeCompanionRenames(
-            videoFile, destinationPath
-        )
-        for sourcePath, companionDestination in companionRenames:
-            if companionDestination.exists():
-                logger.error("rescan target already exists: %s", companionDestination)
-                return "errors"
-
-        destinationMetadataFile = (
-            videoFile.parent / "metadata" / f"{destinationPath.stem}.xml"
-        )
-
-        logger.multiline(["renaming", videoFile.name, destinationPath.name])
-        if self.dryRun:
-            self._recordSummaryRename(videoFile, destinationPath)
-            for sourcePath, companionDestination in companionRenames:
-                self._recordSummaryRename(sourcePath, companionDestination)
-            return "renamed"
-
-        videoFile.rename(destinationPath)
-        self._recordSummaryRename(videoFile, destinationPath)
-        for sourcePath, companionDestination in companionRenames:
-            companionDestination.parent.mkdir(parents=True, exist_ok=True)
-            sourcePath.rename(companionDestination)
-            self._recordSummaryRename(sourcePath, companionDestination)
-        if destinationMetadataFile.exists():
-            self._updateEpisodeMetadataFile(destinationMetadataFile, resolvedTvInfo)
-        return "renamed"
-
-    def resetTvEpisodeTitles(self) -> dict:
-        """Retitle stored TV episodes whose filename suffix still looks noisy."""
-        stats = {"renamed": 0, "skipped": 0, "errors": 0}
-
-        with self._suppressResetNoiseLogs():
-            movieDirs, videoDirs = self.scanStorageLocations()
-            self._prepareMetadataLibrary(movieDirs, videoDirs)
-        if not videoDirs:
-            logger.error("No TV storage locations found!")
-            self._writeSummaryReport()
-            return stats
-
-        for tvDir in videoDirs:
-            self._logResetDuplicateTvShowFolders(tvDir)
-            for showName, seriesId, videoFiles in self._iterResetTvShowFiles(tvDir):
-                showName, videoFiles = self._maybeRenameResetTvShowFolder(
-                    tvDir, showName, videoFiles
-                )
-                showDisplayName = self._buildTvShowFolderName(showName)
-                showLabel = (
-                    f"{showDisplayName} [{seriesId}]" if seriesId else showDisplayName
-                )
-                logger.action(f"scanning: {showLabel}")
-                for videoFile in videoFiles:
-                    outcome = self._resetTvEpisodeTitleForFile(videoFile)
-                    stats[outcome] += 1
-
-        self._writeSummaryReport()
-        return stats
-
-    def processFiles(self, interactive: bool = True):
-        """
-        Process all video files in the source directory.
-
-        Args:
-            interactive:  Whether to prompt user for ambiguous files
-        """
-        logger.doing("starting file processing")
-
-        if not self.sourceDir.exists():
-            logger.error(f"Source directory does not exist: {self.sourceDir}")
-            return
-
-        # Scan for storage locations
-        logger.doing("scanning for storage locations")
-        movieDirs, videoDirs = self.scanStorageLocations()
-
-        logger.info(
-            f"found {len(movieDirs)} movie storage location(s) and {len(videoDirs)} TV storage location(s)"
-        )
-        for d in movieDirs:
-            logger.value("  - ", d)
-
-        logger.info(f"found {len(videoDirs)} TV storage location(s):")
-        for d in videoDirs:
-            logger.value("  - ", d)
-
-        self._prepareMetadataLibrary(movieDirs, videoDirs)
-
-        if not movieDirs:
-            logger.error("No Movie storage locations found")
-        if not videoDirs:
-            logger.error("No TV storage locations found!")
-            return
-
-        self._renameExtrasFolders()
-
-        # Get all video files (including those in subdirectories)
-        videoFiles = [
-            f
-            for f in self.sourceDir.rglob("*")
-            if f.is_file()
-            and f.suffix.lower() in VIDEO_EXTENSIONS
-            and not self._shouldIgnoreLocalVideoFile(f)
-        ]
-
-        if not videoFiles:
-            logger.value("no video files found in", self.sourceDir)
-            return
-
-        logger.info(f"found {len(videoFiles)} video file(s) to process")
-
-        # Process each file
-        stats = {"movies": 0, "tv": 0, "skipped": 0, "errors": 0}
-
-        for videoFile in videoFiles:
-            logger.info(_FILE_PROCESS_SEPARATOR)
-            mcmHints = self._readMcmHints(videoFile)
-            tvInfo, movieInfo = self._classifyVideoFile(videoFile, mcmHints)
-            if tvInfo and videoDirs:
-                if self.moveTvShow(
-                    videoFile,
-                    tvInfo,
-                    videoDirs,
-                    movieDirs=movieDirs,
-                    interactive=interactive,
-                ):
-                    stats["tv"] += 1
-                else:
-                    stats["errors"] += 1
-                continue
-
-            if movieInfo and movieDirs:
-                if self.moveMovie(
-                    videoFile,
-                    movieInfo,
-                    movieDirs,
-                    videoDirs=videoDirs,
-                    interactive=interactive,
-                ):
-                    stats["movies"] += 1
-                else:
-                    stats["errors"] += 1
-                continue
-
-            # Could not determine type
-            logger.warning(f"could not parse filename: {videoFile.name}")
-            logger.value("skipped:", videoFile.name)
-            logger.info("could not determine if movie or TV show")
-
-            if interactive:
-                fileType = self._readMenuChoice(
-                    "Could not determine type.\nPress m for movie, t for TV show, or s to skip.",
-                    validChoices={"m", "t", "s"},
-                )
-
-                if fileType == "m" and movieDirs:
-                    # Prompt for movie info
-                    title = self._readTextResponse(
-                        f"  Movie title (default: {videoFile.stem}): "
-                    )
-                    title = title if title else videoFile.stem
-                    year = self._readTextResponse("  Year:  ")
-
-                    if year:
-                        movieInfo = {
-                            "title": title,
-                            "year": year,
-                            "extension": videoFile.suffix,
-                            "type": "movie",
-                        }
-                        if self.moveMovie(videoFile, movieInfo, movieDirs, False):
-                            stats["movies"] += 1
-                        else:
-                            stats["errors"] += 1
-                        continue
-
-                elif fileType == "t" and videoDirs:
-                    # Prompt for TV show info
-                    show = self._readTextResponse(
-                        f"  Show name (default: {videoFile.stem}): "
-                    )
-                    show = show if show else videoFile.stem
-                    season = self._readTextResponse("  Season number: ")
-
-                    if season and season.isdigit():
-                        tvInfo = {
-                            "showName": show,
-                            "season": int(season),
-                            "episode": 0,
-                            "extension": videoFile.suffix,
-                            "type": "tv",
-                        }
-                        if self.moveTvShow(videoFile, tvInfo, videoDirs, False):
-                            stats["tv"] += 1
-                        else:
-                            stats["errors"] += 1
-                        continue
-
-            stats["skipped"] += 1
-
-        # Print summary
-        from organiseMyProjects.logUtils import drawBox  # type: ignore
-
-        summary = f"""SUMMARY
-Movies moved:   {stats['movies']}
-TV shows moved: {stats['tv']}
-Skipped:        {stats['skipped']}
-Errors:         {stats['errors']}
-"""
-        drawBox(summary)
-        logger.value("processing complete", stats)
-        self._writeSummaryReport()
