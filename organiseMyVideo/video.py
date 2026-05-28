@@ -372,9 +372,11 @@ class VideoMixin:
                     destinationPath,
                 )
                 continue
-            logger.action(
-                "merging TV show folder item: %s -> %s", sourcePath, destinationPath
-            )
+            logger.multiline([
+                "merging TV show folder item",
+                sourcePath,
+                destinationPath
+            ])
             shutil.move(str(sourcePath), str(destinationPath))
 
         try:
@@ -428,9 +430,11 @@ class VideoMixin:
                     continue
                 sourceDir = tvDir / showName
                 destinationDir = tvDir / masterShowName
-                logger.action(
-                    "merging TV show folders: %s <- %s", masterShowName, showName
-                )
+                logger.multiline([
+                    "merging TV show folders",
+                    sourceDir,
+                    destinationDir
+                ])
                 if self.dryRun:
                     continue
 
