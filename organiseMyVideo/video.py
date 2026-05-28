@@ -1500,6 +1500,26 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
             normalised,
         )
 
+    def _normaliseTvShowCaseOnlyVariant(
+        self, candidateName: str, currentName: str
+    ) -> str:
+        """Prefer readable case when a metadata candidate only differs by casing."""
+        candidate = re.sub(r"\s+", " ", candidateName).strip()
+        current = re.sub(r"\s+", " ", currentName).strip()
+        candidateLetters = [character for character in candidate if character.isalpha()]
+        if candidateLetters and all(
+            character.isupper() for character in candidateLetters
+        ):
+            if len(candidateLetters) <= 4:
+                return candidate
+            currentLetters = [character for character in current if character.isalpha()]
+            if currentLetters and all(
+                character.islower() for character in currentLetters
+            ):
+                return self._capitaliseLowercaseTvShowTitle(current) or current
+            return current
+        return candidate
+
     def _resolveStoredTvShowFolderName(
         self, showDir: Path, showName: str, videoFiles: list[Path]
     ) -> str:
@@ -1524,7 +1544,9 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
                 candidate.casefold() == normalised.casefold()
                 and candidate != normalised
             ):
-                return candidate
+                candidate = self._normaliseTvShowCaseOnlyVariant(candidate, normalised)
+                if candidate != normalised:
+                    return candidate
 
         return self._capitaliseLowercaseTvShowTitle(normalised) or showName
 

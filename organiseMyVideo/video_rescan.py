@@ -337,11 +337,9 @@ class VideoRescanMixin:
                     destinationPath,
                 )
                 continue
-            logger.multiline([
-                "merging TV show folder item",
-                sourcePath,
-                destinationPath
-            ])
+            logger.multiline(
+                ["merging TV show folder item", sourcePath, destinationPath]
+            )
             shutil.move(str(sourcePath), str(destinationPath))
 
         try:
@@ -374,6 +372,7 @@ class VideoRescanMixin:
             tuple(self._sortResetDuplicateShowNames(group)): set(group)
             for group in duplicateGroups
         }
+        leftoverMergedDirs = set()
 
         if showDirsBySeriesId is None:
             showDirsBySeriesId = {}
@@ -395,15 +394,13 @@ class VideoRescanMixin:
                     continue
                 sourceDir = tvDir / showName
                 destinationDir = tvDir / masterShowName
-                logger.multiline([
-                    "merging TV show folders",
-                    masterShowName,
-                    showName
-                ])
+                logger.multiline(["merging TV show folders", masterShowName, showName])
                 if self.dryRun:
                     continue
 
                 self._mergeResetTvShowFolderContents(sourceDir, destinationDir)
+                if sourceDir.exists():
+                    leftoverMergedDirs.add(sourceDir)
                 if not masterEntry.get("seriesId") and sourceEntry.get("seriesId"):
                     masterEntry["seriesId"] = sourceEntry["seriesId"]
                 sourceEntry["_mergedInto"] = masterShowName
@@ -424,6 +421,12 @@ class VideoRescanMixin:
         for warning in self._iterResetDuplicateTvShowWarnings(
             showDirsBySeriesId, canonicalNameGroups
         ):
+            warningShowNames = set(warning["showNames"])
+            if not any(
+                warningShowNames.issubset(groupShowNames)
+                for groupShowNames in unpromptedGroups.values()
+            ):
+                continue
             logger.multiline([warning["label"], *warning["showNames"]])
             _promptMatchingGroup(warning["showNames"])
 
@@ -434,6 +437,14 @@ class VideoRescanMixin:
                 continue
 
             _mergePromptedGroup(*promptResult)
+
+        if leftoverMergedDirs:
+            logger.multiline(
+                [
+                    "rescan merge cleanup still needed",
+                    *sorted(str(path) for path in leftoverMergedDirs),
+                ]
+            )
 
         return [entry for entry in showEntries if not entry.get("_mergedInto")]
 
