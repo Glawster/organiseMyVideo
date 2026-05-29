@@ -812,6 +812,15 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         """Record cleanup work performed or still needed for the optional summary."""
         self._summaryCleanupTasks.append(task)
 
+    def _recordSummaryDuplicateTvShow(
+        self, label: str, showNames: Iterable[str]
+    ) -> None:
+        """Record a possible duplicate TV show warning for the optional summary."""
+        orderedShowNames = tuple(showNames)
+        entry = (str(label), orderedShowNames)
+        if entry not in self._summaryDuplicateTvShows:
+            self._summaryDuplicateTvShows.append(entry)
+
     def _writeSummaryReport(self) -> None:
         """Write the optional transfer/rename summary file when configured."""
         summaryReportPath = getattr(self, "summaryReportPath", None)
@@ -857,6 +866,13 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         lines.extend(["", "Cleanup:"])
         if self._summaryCleanupTasks:
             lines.extend(f"- {task}" for task in self._summaryCleanupTasks)
+        else:
+            lines.append("- none")
+        lines.extend(["", "Possible duplicate TV shows:"])
+        if self._summaryDuplicateTvShows:
+            for label, showNames in self._summaryDuplicateTvShows:
+                lines.append(f"- {label}")
+                lines.extend(f"  - {showName}" for showName in showNames)
         else:
             lines.append("- none")
         lines.append("")

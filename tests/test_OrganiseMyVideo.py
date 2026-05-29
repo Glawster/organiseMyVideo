@@ -5582,6 +5582,75 @@ def testResetTvEpisodeTitlesPromptsSeriesIdDuplicateOnlyOnce(
     )
 
 
+def testResetTvEpisodeTitlesRemembersNotDuplicateChoice(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    configFile = tmp_path / "config" / "config.json"
+
+    for showName, filename in (
+        ("Grimm", "Grimm.S01E01.Pilot.mkv"),
+        ("Grimm (2011)", "Grimm.S01E02.Bears.Will.Be.Bears.mkv"),
+    ):
+        seasonDir = tvStorage / showName / "Season 01"
+        seasonDir.mkdir(parents=True)
+        (seasonDir / filename).write_bytes(b"x" * 20)
+
+    with (
+        patch.object(
+            confirmedOrganizer,
+            "_fetchTvMetadataFromScraper",
+            side_effect=AssertionError("scraper lookup should not run"),
+        ),
+        patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ),
+        patch.object(
+            confirmedOrganizer, "_shouldPromptInteractively", return_value=True
+        ),
+        patch.object(confirmedOrganizer, "_readMenuChoice", return_value="n"),
+        patch("organiseMyVideo.video_rescan.APP_CONFIG_FILE", configFile),
+    ):
+        with caplog.at_level("INFO"):
+            firstStats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert firstStats == {"renamed": 0, "skipped": 2, "errors": 0}
+    assert json.loads(configFile.read_text(encoding="utf-8")) == {
+        "ignored_tv_show_duplicates": [["Grimm", "Grimm (2011)"]]
+    }
+    caplog.clear()
+
+    followupSourceDir = tmp_path / "source2"
+    followupSourceDir.mkdir()
+    followupOrganizer = VideoOrganizer(sourceDir=str(followupSourceDir), dryRun=False)
+
+    with (
+        patch.object(
+            followupOrganizer,
+            "_fetchTvMetadataFromScraper",
+            side_effect=AssertionError("scraper lookup should not run"),
+        ),
+        patch.object(
+            followupOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ),
+        patch.object(
+            followupOrganizer, "_shouldPromptInteractively", return_value=False
+        ),
+        patch("organiseMyVideo.video_rescan.APP_CONFIG_FILE", configFile),
+    ):
+        with caplog.at_level("INFO"):
+            secondStats = followupOrganizer.resetTvEpisodeTitles()
+
+    assert secondStats == {"renamed": 0, "skipped": 2, "errors": 0}
+    assert "possible duplicate TV show folders" not in caplog.text
+
+
 def testResetTvEpisodeTitlesLogsCleanupWhenMergeLeavesConflictsBehind(
     tmp_path: Path,
     confirmedOrganizer: VideoOrganizer,
@@ -6045,7 +6114,7 @@ def testMainAutoModeDisablesPromptsAndSetsSummaryPath():
     )
     assert organizerInstance.summaryReportPath == (
         omv_main.APP_CONFIG_FILE.parent
-        / f"summaryt.{omv_main.datetime.now().strftime('%Y%m%d')}.txt"
+        / f"summary.{omv_main.datetime.now().strftime('%Y%m%d')}.txt"
     )
     assert organizerInstance.summaryReportMode == "process"
     organizerInstance.processFiles.assert_called_once_with(interactive=False)
@@ -6058,7 +6127,7 @@ def testGetSummaryReportPathUsesApplicationDirectory(tmp_path: Path):
         reportPath = omv_main._getSummaryReportPath("/tmp/source", "process")
 
     assert reportPath == (
-        configFile.parent / f"summaryt.{omv_main.datetime.now().strftime('%Y%m%d')}.txt"
+        configFile.parent / f"summary.{omv_main.datetime.now().strftime('%Y%m%d')}.txt"
     )
 
 
@@ -6082,7 +6151,7 @@ def testMainRescanModeCallsResetTvEpisodeTitlesAndSetsSummaryPath():
     )
     assert organizerInstance.summaryReportPath == (
         omv_main.APP_CONFIG_FILE.parent
-        / f"summaryt.{omv_main.datetime.now().strftime('%Y%m%d')}.txt"
+        / f"summary.{omv_main.datetime.now().strftime('%Y%m%d')}.txt"
     )
     assert organizerInstance.summaryReportMode == "rescan"
     organizerInstance.resetTvEpisodeTitles.assert_called_once_with()
@@ -6102,11 +6171,16 @@ def testWriteSummaryReportAppendsTransfersRenamesAndCleanup(
         Path("/tmp/source/Extras"), Path("/tmp/source/Featurettes")
     )
     organizer._recordSummaryCleanup("remove empty folder: /tmp/source/old")
+    organizer._recordSummaryDuplicateTvShow(
+        "possible duplicate TV show folders: Grimm",
+        ["Grimm", "Grimm (2011)"],
+    )
     organizer._writeSummaryReport()
 
     organizer._summaryTransfers = []
     organizer._summaryRenames = []
     organizer._summaryCleanupTasks = []
+    organizer._summaryDuplicateTvShows = []
     organizer.dryRun = False
     organizer.summaryReportMode = "rescan"
     organizer._recordSummaryCleanup("cleanup needed: /tmp/source/duplicate")
@@ -6119,6 +6193,12 @@ def testWriteSummaryReportAppendsTransfersRenamesAndCleanup(
     assert "Transfers:\n- /tmp/source/movie.mkv -> /library/movie.mkv" in reportText
     assert "Renames:\n- /tmp/source/Extras -> /tmp/source/Featurettes" in reportText
     assert "Cleanup:\n- remove empty folder: /tmp/source/old" in reportText
+    assert (
+        "Possible duplicate TV shows:\n"
+        "- possible duplicate TV show folders: Grimm\n"
+        "  - Grimm\n"
+        "  - Grimm (2011)"
+    ) in reportText
     assert "- cleanup needed: /tmp/source/duplicate" in reportText
 
 

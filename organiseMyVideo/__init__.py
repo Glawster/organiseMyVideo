@@ -81,3 +81,5 @@ class VideoOrganizer(MetadataMixin, VideoMixin, TorrentMixin):
         self._summaryTransfers = []
         self._summaryRenames = []
         self._summaryCleanupTasks = []
+        self._summaryDuplicateTvShows = []
+        self._resetIgnoredDuplicateTvShowGroups = None
