@@ -48,6 +48,14 @@ def confirmedOrganizer(sourceDir: Path) -> VideoOrganizer:
     return VideoOrganizer(sourceDir=str(sourceDir), dryRun=False)
 
 
+@pytest.fixture(autouse=True)
+def isolateDuplicateTvShowConfig(tmp_path: Path):
+    """Keep duplicate-folder persistence isolated from the real home directory."""
+    configFile = tmp_path / "config" / "config.json"
+    with patch("organiseMyVideo.video_rescan.APP_CONFIG_FILE", configFile):
+        yield configFile
+
+
 # ---------------------------------------------------------------------------
 # VideoOrganizer.__init__
 # ---------------------------------------------------------------------------

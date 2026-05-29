@@ -261,9 +261,7 @@ class VideoRescanMixin:
         ignoredGroups.append(ignoredGroup)
         self._saveResetIgnoredDuplicateTvShowGroups(ignoredGroups)
 
-    def _shouldIgnoreResetDuplicateTvShowGroup(
-        self, showNames: Iterable[str]
-    ) -> bool:
+    def _shouldIgnoreResetDuplicateTvShowGroup(self, showNames: Iterable[str]) -> bool:
         """Return True when the group was previously marked as not duplicate."""
         showNameSet = {
             showName.strip()
@@ -336,9 +334,7 @@ class VideoRescanMixin:
         for warning in self._iterResetDuplicateTvShowWarnings(
             showDirsBySeriesId, canonicalNameGroups
         ):
-            self._recordSummaryDuplicateTvShow(
-                warning["label"], warning["showNames"]
-            )
+            self._recordSummaryDuplicateTvShow(warning["label"], warning["showNames"])
 
     def _logResetDuplicateTvShowFolders(self, tvDir: Path) -> None:
         """Warn when multiple stored TV show folders look like duplicates."""
