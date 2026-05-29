@@ -6069,6 +6069,7 @@ def testWriteSummaryReportAppendsTransfersRenamesAndCleanup(
     organizer._summaryTransfers = []
     organizer._summaryRenames = []
     organizer._summaryCleanupTasks = []
+    organizer.dryRun = False
     organizer.summaryReportMode = "rescan"
     organizer._recordSummaryCleanup("cleanup needed: /tmp/source/duplicate")
     organizer._writeSummaryReport()
