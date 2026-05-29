@@ -1533,12 +1533,20 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         candidate = re.sub(r"\s+", " ", candidateName).strip()
         current = re.sub(r"\s+", " ", currentName).strip()
         candidateLetters = [character for character in candidate if character.isalpha()]
+        currentLetters = [character for character in current if character.isalpha()]
+        if candidateLetters and all(
+            character.islower() for character in candidateLetters
+        ):
+            if currentLetters and any(
+                character.isupper() for character in currentLetters
+            ):
+                return current
+            return self._capitaliseLowercaseTvShowTitle(candidate) or candidate
         if candidateLetters and all(
             character.isupper() for character in candidateLetters
         ):
             if len(candidateLetters) <= 4:
                 return candidate
-            currentLetters = [character for character in current if character.isalpha()]
             if currentLetters and all(
                 character.islower() for character in currentLetters
             ):

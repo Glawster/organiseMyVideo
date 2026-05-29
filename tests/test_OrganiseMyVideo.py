@@ -5009,6 +5009,40 @@ def testResetTvEpisodeTitlesPreservesMixedCaseShowNamesFromSeriesMetadata(
     assert "renaming TV show: iZombie (from izombie)" in caplog.text
 
 
+def testResetTvEpisodeTitlesDoesNotLowercaseReadableShowNamesFromSeriesMetadata(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    showDir = tvStorage / "Supernatural"
+    seasonDir = showDir / "Season 01"
+    seasonDir.mkdir(parents=True)
+    (showDir / "series.xml").write_text(
+        "<Series><SeriesName>supernatural</SeriesName></Series>", encoding="utf-8"
+    )
+    episodeFile = seasonDir / "Supernatural.S01E01.Pilot.mkv"
+    episodeFile.write_bytes(b"x" * 20)
+
+    with patch.object(
+        confirmedOrganizer,
+        "_fetchTvMetadataFromScraper",
+        side_effect=AssertionError("scraper lookup should not run"),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ):
+            with caplog.at_level("INFO"):
+                stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
+    assert (tvStorage / "Supernatural" / "Season 01" / episodeFile.name).exists()
+    assert not (tvStorage / "supernatural").exists()
+    assert "renaming TV show: supernatural (from Supernatural)" not in caplog.text
+
+
 def testResetTvEpisodeTitlesIgnoresAllCapsSeriesMetadataForMixedCaseFolder(
     tmp_path: Path,
     confirmedOrganizer: VideoOrganizer,
