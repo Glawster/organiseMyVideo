@@ -81,7 +81,7 @@ def _promptForTvdbApiKey(configPath: Path) -> Optional[str]:
 def _getSummaryReportPath(sourcePath: str, mode: str) -> Path:
     """Return the summary-report path for auto/rescan runs."""
     del sourcePath, mode
-    return APP_CONFIG_FILE.parent / f"summaryt.{datetime.now().strftime('%Y%m%d')}.txt"
+    return APP_CONFIG_FILE.parent / f"summary.{datetime.now().strftime('%Y%m%d')}.txt"
 
 
 def main():
