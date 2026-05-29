@@ -6095,8 +6095,12 @@ def testWriteSummaryReportAppendsTransfersRenamesAndCleanup(
     reportPath = tmp_path / "summaryt.20260529.txt"
     organizer.summaryReportPath = reportPath
     organizer.summaryReportMode = "process"
-    organizer._recordSummaryTransfer(Path("/tmp/source/movie.mkv"), Path("/library/movie.mkv"))
-    organizer._recordSummaryRename(Path("/tmp/source/Extras"), Path("/tmp/source/Featurettes"))
+    organizer._recordSummaryTransfer(
+        Path("/tmp/source/movie.mkv"), Path("/library/movie.mkv")
+    )
+    organizer._recordSummaryRename(
+        Path("/tmp/source/Extras"), Path("/tmp/source/Featurettes")
+    )
     organizer._recordSummaryCleanup("remove empty folder: /tmp/source/old")
     organizer._writeSummaryReport()
 

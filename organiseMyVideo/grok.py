@@ -119,7 +119,9 @@ class GrokMixin:
         if not hostname or hostname not in GROK_USER_CONTENT_DOMAINS:
             return False
         ext = Path(parsed.path).suffix.lower()
-        return ext in GROK_MEDIA_EXTENSIONS or contentType.startswith(("image/", "video/"))
+        return ext in GROK_MEDIA_EXTENSIONS or contentType.startswith(
+            ("image/", "video/")
+        )
 
     def _downloadMediaFiles(self, mediaUrls: List[str], playwrightContext=None) -> dict:
         """Download URLs into ~/Downloads/Grok and return download stats.
@@ -138,7 +140,10 @@ class GrokMixin:
 
         for mediaUrl in mediaUrls:
             parsed = urllib.parse.urlparse(mediaUrl)
-            filename = Path(parsed.path).name or f"grok_media_{stats['downloaded'] + stats['errors'] + 1}"
+            filename = (
+                Path(parsed.path).name
+                or f"grok_media_{stats['downloaded'] + stats['errors'] + 1}"
+            )
             dest = destDir / filename
 
             if dest.exists():
@@ -213,7 +218,11 @@ class GrokMixin:
                 cookie["expires"] = -1
                 changed = True
             # ---- None, 0, or any negative except -1 → session cookie sentinel
-            elif raw is None or raw == 0 or (isinstance(raw, (int, float)) and raw < 0 and raw != -1):
+            elif (
+                raw is None
+                or raw == 0
+                or (isinstance(raw, (int, float)) and raw < 0 and raw != -1)
+            ):
                 cookie["expires"] = -1
                 changed = True
             elif isinstance(raw, float):
@@ -308,9 +317,9 @@ class GrokMixin:
             msg = str(e)
             msg_lower = msg.lower()
             if (
-                ("executable" in msg_lower and ("exist" in msg_lower or "found" in msg_lower))
-                or "playwright install" in msg_lower
-            ):
+                "executable" in msg_lower
+                and ("exist" in msg_lower or "found" in msg_lower)
+            ) or "playwright install" in msg_lower:
                 raise RuntimeError(
                     "Playwright Firefox browser is not installed.\n"
                     "Run: playwright install firefox"
@@ -402,7 +411,9 @@ class GrokMixin:
 
         return None
 
-    def _findFirefoxProfile(self, _firefoxBase: Optional[Path] = None) -> Optional[Path]:
+    def _findFirefoxProfile(
+        self, _firefoxBase: Optional[Path] = None
+    ) -> Optional[Path]:
         """Locate the best Firefox profile directory on the current OS.
 
         When *_firefoxBase* is provided (unit-test override), that single base
@@ -512,14 +523,12 @@ class GrokMixin:
             # (e.g. '.grok.com', 'accounts.x.ai').  The LIKE patterns use a
             # leading dot/% pair so they cannot match unrelated suffixes such
             # as 'fakegrok.com'.
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT name, value, host, path, expiry, isSecure, isHttpOnly, sameSite
                 FROM moz_cookies
                 WHERE host = 'grok.com'  OR host LIKE '%.grok.com'
                    OR host = 'x.ai'      OR host LIKE '%.x.ai'
-                """
-            )
+                """)
             rows = cursor.fetchall()
             conn.close()
         finally:
@@ -548,7 +557,11 @@ class GrokMixin:
                 # "1742000000.0", which Playwright also rejects.
                 # Some sites set extremely far-future expiry timestamps.
                 # Playwright rejects any expires > 253402300799 (year 9999).
-                "expires": min(int(expiry), _PLAYWRIGHT_MAX_COOKIE_EXPIRES) if expiry > 0 else -1,
+                "expires": (
+                    min(int(expiry), _PLAYWRIGHT_MAX_COOKIE_EXPIRES)
+                    if expiry > 0
+                    else -1
+                ),
                 "httpOnly": bool(isHttpOnly),
                 "secure": bool(isSecure),
                 "sameSite": _SAMESITE.get(sameSite, "None"),
@@ -561,7 +574,9 @@ class GrokMixin:
         sessionFile.write_text(json.dumps(storageState, indent=2))
         sessionFile.chmod(0o600)
         self._sanitizeStorageState(sessionFile)
-        logger.value(f"imported {len(cookies)} cookies from Firefox to", str(sessionFile))
+        logger.value(
+            f"imported {len(cookies)} cookies from Firefox to", str(sessionFile)
+        )
         return True
 
     def resetGrokConfig(
@@ -852,7 +867,9 @@ class GrokMixin:
                     f"if the session has expired, delete {sessionFile} and re-run"
                 )
 
-            downloadStats = self._downloadMediaFiles(mediaUrls, playwrightContext=context)
+            downloadStats = self._downloadMediaFiles(
+                mediaUrls, playwrightContext=context
+            )
             browser.close()
 
         logger.done("Grok scrape complete")
