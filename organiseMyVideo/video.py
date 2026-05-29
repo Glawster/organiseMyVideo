@@ -821,11 +821,12 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         reportPath = Path(summaryReportPath)
         reportPath.parent.mkdir(parents=True, exist_ok=True)
         reportMode = getattr(self, "summaryReportMode", None)
+        runLabel = "DRY-RUN" if self.dryRun else "ACTUAL-RUN"
         summaryLabel = " ".join(
             part
             for part in (
                 "organiseMyVideo",
-                "DRY-RUN" if self.dryRun else None,
+                runLabel,
                 reportMode,
                 "summary",
             )

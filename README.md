@@ -71,7 +71,7 @@ python organiseMyVideo.py --torrent --clean --confirm
 
 The metadata library is saved in `~/.config/organiseMyVideo/metadataLibrary.json` and reused on later runs. Use `--refresh` when you want to rescan the existing movie and TV storage roots and rebuild that cache.
 
-`--auto` reuses the normal organiser logic without prompts and appends a plain-text summary in `~/.config/organiseMyVideo/summaryt.yyyymmdd.txt`, including file moves, renames, and cleanup tasks performed or still needed that day.
+`--auto` reuses the normal organiser logic without prompts and appends a plain-text summary in `~/.config/organiseMyVideo/summaryt.yyyymmdd.txt`, including whether each entry was a dry-run or an actual run plus any file moves, renames, and cleanup tasks performed or still needed that day.
 
 `--rescan` scans the existing TV library roots, normalises retitled episodes to the newer space-style show/title fragments, capitalises lowercase TV show folders when needed, and only falls back to scraper lookups when the current filename suffix still looks like release noise or is missing. It also warns when multiple show folders share the same stored SeriesID so likely duplicates are easier to spot, and interactive runs can prompt to merge those duplicate folders while choosing which one remains the master. When an episode is retitled, matching same-stem `.xml` and `.jpg` companion files are renamed with it. Console output is otherwise limited to `rescanning: ...` lines plus any actual rescan rename lines.
 
