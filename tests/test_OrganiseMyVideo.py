@@ -980,6 +980,7 @@ def testProcessFilesRenamesExtrasFolderToFeaturettes(
     extrasDir.mkdir()
     extraFile = extrasDir / "Bonus.Feature.2026.mp4"
     extraFile.write_bytes(b"x" * 100)
+    confirmedOrganizer.summaryReportPath = tmp_path / "summaryt.20260529.txt"
 
     movieStorage = tmp_path / "movie1"
     movieStorage.mkdir()
@@ -1002,6 +1003,10 @@ def testProcessFilesRenamesExtrasFolderToFeaturettes(
     assert featurettesDir.exists()
     assert (featurettesDir / "Bonus.Feature.2026.mp4").exists()
     mockMoveMovie.assert_not_called()
+    assert (
+        f"- {extrasDir} -> {featurettesDir}"
+        in confirmedOrganizer.summaryReportPath.read_text(encoding="utf-8")
+    )
 
 
 def testProcessFilesUsesMovieMcmHintsWhenFilenameCannotBeParsed(
@@ -6004,36 +6009,22 @@ def testMainAutoModeDisablesPromptsAndSetsSummaryPath():
         refreshMetadataLibrary=False,
         useCurses=True,
     )
-    assert organizerInstance.summaryReportPath == Path(
-        "/tmp/source/organiseMyVideo-auto-summary.txt"
+    assert organizerInstance.summaryReportPath == (
+        omv_main.APP_CONFIG_FILE.parent
+        / f"summaryt.{omv_main.datetime.now().strftime('%Y%m%d')}.txt"
     )
+    assert organizerInstance.summaryReportMode == "process"
     organizerInstance.processFiles.assert_called_once_with(interactive=False)
 
 
-def testGetSummaryReportPathAddsIncrementWhenAutoSummaryExists(tmp_path: Path):
-    sourceDir = tmp_path / "source"
-    sourceDir.mkdir()
-    (sourceDir / "organiseMyVideo-auto-summary.txt").write_text(
-        "existing", encoding="utf-8"
-    )
+def testGetSummaryReportPathUsesApplicationDirectory(tmp_path: Path):
+    configFile = tmp_path / "config" / "config.json"
 
-    assert omv_main._getSummaryReportPath(str(sourceDir), "process") == (
-        sourceDir / "organiseMyVideo-auto-summary.01.txt"
-    )
+    with patch.object(omv_main, "APP_CONFIG_FILE", configFile):
+        reportPath = omv_main._getSummaryReportPath("/tmp/source", "process")
 
-
-def testGetSummaryReportPathSkipsUsedAutoSummaryIncrements(tmp_path: Path):
-    sourceDir = tmp_path / "source"
-    sourceDir.mkdir()
-    (sourceDir / "organiseMyVideo-auto-summary.txt").write_text(
-        "existing", encoding="utf-8"
-    )
-    (sourceDir / "organiseMyVideo-auto-summary.01.txt").write_text(
-        "existing", encoding="utf-8"
-    )
-
-    assert omv_main._getSummaryReportPath(str(sourceDir), "process") == (
-        sourceDir / "organiseMyVideo-auto-summary.02.txt"
+    assert reportPath == (
+        configFile.parent / f"summaryt.{omv_main.datetime.now().strftime('%Y%m%d')}.txt"
     )
 
 
@@ -6055,23 +6046,39 @@ def testMainRescanModeCallsResetTvEpisodeTitlesAndSetsSummaryPath():
         refreshMetadataLibrary=False,
         useCurses=True,
     )
-    assert organizerInstance.summaryReportPath == Path(
-        "/tmp/source/organiseMyVideo-rescan-summary.txt"
+    assert organizerInstance.summaryReportPath == (
+        omv_main.APP_CONFIG_FILE.parent
+        / f"summaryt.{omv_main.datetime.now().strftime('%Y%m%d')}.txt"
     )
+    assert organizerInstance.summaryReportMode == "rescan"
     organizerInstance.resetTvEpisodeTitles.assert_called_once_with()
     organizerInstance.processFiles.assert_not_called()
 
 
-def testGetSummaryReportPathAddsIncrementWhenRescanSummaryExists(tmp_path: Path):
-    sourceDir = tmp_path / "source"
-    sourceDir.mkdir()
-    (sourceDir / "organiseMyVideo-rescan-summary.txt").write_text(
-        "existing", encoding="utf-8"
-    )
+def testWriteSummaryReportAppendsTransfersRenamesAndCleanup(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    reportPath = tmp_path / "summaryt.20260529.txt"
+    organizer.summaryReportPath = reportPath
+    organizer.summaryReportMode = "process"
+    organizer._recordSummaryTransfer(Path("/tmp/source/movie.mkv"), Path("/library/movie.mkv"))
+    organizer._recordSummaryRename(Path("/tmp/source/Extras"), Path("/tmp/source/Featurettes"))
+    organizer._recordSummaryCleanup("remove empty folder: /tmp/source/old")
+    organizer._writeSummaryReport()
 
-    assert omv_main._getSummaryReportPath(str(sourceDir), "rescan") == (
-        sourceDir / "organiseMyVideo-rescan-summary.01.txt"
-    )
+    organizer._summaryTransfers = []
+    organizer._summaryRenames = []
+    organizer._summaryCleanupTasks = []
+    organizer.summaryReportMode = "rescan"
+    organizer._recordSummaryCleanup("cleanup needed: /tmp/source/duplicate")
+    organizer._writeSummaryReport()
+
+    reportText = reportPath.read_text(encoding="utf-8")
+    assert reportText.count("organiseMyVideo") == 2
+    assert "Transfers:\n- /tmp/source/movie.mkv -> /library/movie.mkv" in reportText
+    assert "Renames:\n- /tmp/source/Extras -> /tmp/source/Featurettes" in reportText
+    assert "Cleanup:\n- remove empty folder: /tmp/source/old" in reportText
+    assert "- cleanup needed: /tmp/source/duplicate" in reportText
 
 
 def testMainConfiguresConsoleTimestampWithoutMilliseconds():

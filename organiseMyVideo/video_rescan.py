@@ -329,6 +329,9 @@ class VideoRescanMixin:
                     self._mergeResetTvShowFolderContents(sourcePath, destinationPath)
                     try:
                         sourcePath.rmdir()
+                        self._recordSummaryCleanup(
+                            f"removed empty folder: {sourcePath}"
+                        )
                     except OSError:
                         pass
                     continue
@@ -336,14 +339,19 @@ class VideoRescanMixin:
                     "skipping rescan merge; destination already exists: %s",
                     destinationPath,
                 )
+                self._recordSummaryCleanup(
+                    f"cleanup needed: {sourcePath} conflicts with existing {destinationPath}"
+                )
                 continue
             logger.multiline(
                 ["merging TV show folder item", sourcePath, destinationPath]
             )
+            self._recordSummaryTransfer(sourcePath, destinationPath)
             shutil.move(str(sourcePath), str(destinationPath))
 
         try:
             sourceDir.rmdir()
+            self._recordSummaryCleanup(f"removed empty folder: {sourceDir}")
         except OSError:
             pass
 
@@ -396,6 +404,9 @@ class VideoRescanMixin:
                 destinationDir = tvDir / masterShowName
                 logger.multiline(["merging TV show folders", masterShowName, showName])
                 if self.dryRun:
+                    self._recordSummaryCleanup(
+                        f"merge TV show folders needed: {sourceDir} -> {destinationDir}"
+                    )
                     continue
 
                 self._mergeResetTvShowFolderContents(sourceDir, destinationDir)
@@ -439,6 +450,8 @@ class VideoRescanMixin:
             _mergePromptedGroup(*promptResult)
 
         if leftoverMergedDirs:
+            for path in sorted(leftoverMergedDirs):
+                self._recordSummaryCleanup(f"cleanup needed: {path}")
             logger.multiline(
                 [
                     "rescan merge cleanup still needed",

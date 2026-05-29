@@ -373,6 +373,7 @@ class VideoMoveMixin:
 
         if not videoFiles:
             logger.value("no video files found in", self.sourceDir)
+            self._writeSummaryReport()
             return
 
         logger.info(f"found {len(videoFiles)} video file(s) to process")

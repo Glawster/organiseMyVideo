@@ -10,6 +10,7 @@ import termios
 import tty
 import unicodedata
 import xml.etree.ElementTree as ET
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable, List, Tuple, Optional, TextIO
 
@@ -807,6 +808,10 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         """Record an in-place rename for the optional text summary."""
         self._summaryRenames.append((str(sourcePath), str(destPath)))
 
+    def _recordSummaryCleanup(self, task: str) -> None:
+        """Record cleanup work performed or still needed for the optional summary."""
+        self._summaryCleanupTasks.append(task)
+
     def _writeSummaryReport(self) -> None:
         """Write the optional transfer/rename summary file when configured."""
         summaryReportPath = getattr(self, "summaryReportPath", None)
@@ -815,8 +820,20 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
 
         reportPath = Path(summaryReportPath)
         reportPath.parent.mkdir(parents=True, exist_ok=True)
+        reportMode = getattr(self, "summaryReportMode", None)
+        summaryLabel = " ".join(
+            part
+            for part in (
+                "organiseMyVideo",
+                "DRY-RUN" if self.dryRun else None,
+                reportMode,
+                "summary",
+            )
+            if part
+        )
         lines = [
-            f"organiseMyVideo {'DRY-RUN ' if self.dryRun else ''}summary".strip(),
+            summaryLabel,
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "",
             "Transfers:",
         ]
@@ -836,8 +853,16 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
             )
         else:
             lines.append("- none")
+        lines.extend(["", "Cleanup:"])
+        if self._summaryCleanupTasks:
+            lines.extend(f"- {task}" for task in self._summaryCleanupTasks)
+        else:
+            lines.append("- none")
         lines.append("")
-        reportPath.write_text("\n".join(lines), encoding="utf-8")
+        with reportPath.open("a", encoding="utf-8") as reportFile:
+            if reportFile.tell():
+                reportFile.write("\n\n")
+            reportFile.write("\n".join(lines))
         logger.value("summary report", reportPath)
 
     def _extractEpisodeMetadataImage(self, metadataFile: Path) -> Optional[str]:
@@ -1628,6 +1653,7 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         logger.action(
             "renaming TV show: %s (from %s)", destinationDir.name, showDir.name
         )
+        self._recordSummaryRename(showDir, destinationDir)
         if self.dryRun:
             return capitalisedShowName, videoFiles
 
@@ -2044,8 +2070,12 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
             destination = folder.with_name("Featurettes")
             if destination.exists():
                 logger.warning("featurettes folder already exists: %s", destination)
+                self._recordSummaryCleanup(
+                    f"cleanup needed: {folder} conflicts with existing {destination}"
+                )
                 continue
             logger.action("rename folder: %s -> %s", folder, destination)
+            self._recordSummaryRename(folder, destination)
             if self.dryRun:
                 continue
             try:
@@ -2095,12 +2125,14 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
 
             if self.dryRun:
                 logger.action(f"rename: {oldName} → {newName}")
+                self._recordSummaryRename(entry, newPath)
                 stats["renamed"] += 1
                 continue
 
             try:
                 entry.rename(newPath)
                 logger.action(f"renamed: {oldName} → {newName}")
+                self._recordSummaryRename(entry, newPath)
                 stats["renamed"] += 1
             except FileExistsError:
                 logger.error(f"target already exists, skipping: {newName}")
@@ -2147,6 +2179,7 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
                 continue
 
             logger.action(f"removing empty folder: {subDir}")
+            self._recordSummaryCleanup(f"remove empty folder: {subDir}")
             if self.dryRun:
                 stats["removed"] += 1
                 continue

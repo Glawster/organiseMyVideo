@@ -60,7 +60,7 @@ python organiseMyVideo.py --torrent --clean --confirm
 |--------|-------------|
 | `--source PATH` | Source directory containing files to organize. Default: `/mnt/video2/toFile` |
 | `--confirm` | Execute changes. Without this flag the script runs as a dry-run |
-| `--auto` | Run organisation without prompts and write `organiseMyVideo-auto-summary.txt` in the source directory (or `organiseMyVideo-auto-summary.nn.txt` if needed to avoid overwriting an existing summary) |
+| `--auto` | Run organisation without prompts and append the day’s actions to `~/.config/organiseMyVideo/summaryt.yyyymmdd.txt` |
 | `--clean` | Clean the source directory, or when combined with `--torrent`, also clean prefixed `.torrent` names |
 | `--non-interactive` | Skip prompts for files that cannot be auto-detected |
 | `--refresh` | Rebuild the saved metadata library from storage before processing files |
@@ -71,7 +71,7 @@ python organiseMyVideo.py --torrent --clean --confirm
 
 The metadata library is saved in `~/.config/organiseMyVideo/metadataLibrary.json` and reused on later runs. Use `--refresh` when you want to rescan the existing movie and TV storage roots and rebuild that cache.
 
-`--auto` reuses the normal organiser logic without prompts and writes a plain-text transfer/rename summary into the source directory so you can review any manual tidy-up afterwards.
+`--auto` reuses the normal organiser logic without prompts and appends a plain-text summary in `~/.config/organiseMyVideo/summaryt.yyyymmdd.txt`, including file moves, renames, and cleanup tasks performed or still needed that day.
 
 `--rescan` scans the existing TV library roots, normalises retitled episodes to the newer space-style show/title fragments, capitalises lowercase TV show folders when needed, and only falls back to scraper lookups when the current filename suffix still looks like release noise or is missing. It also warns when multiple show folders share the same stored SeriesID so likely duplicates are easier to spot, and interactive runs can prompt to merge those duplicate folders while choosing which one remains the master. When an episode is retitled, matching same-stem `.xml` and `.jpg` companion files are renamed with it. Console output is otherwise limited to `rescanning: ...` lines plus any actual rescan rename lines.
 

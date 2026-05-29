@@ -78,19 +78,25 @@ class TorrentMixin:
                 if self.dryRun:
                     if downloadSubDir is not None:
                         logger.action(f"delete folder: {downloadSubDir.name}")
+                        self._recordSummaryCleanup(f"delete folder: {downloadSubDir}")
                         removedDirs.add(downloadSubDir)
                     else:
                         logger.action(f"delete torrent: {entry.name}")
+                        self._recordSummaryCleanup(f"delete torrent: {entry}")
                     stats["deleted"] += 1
                 else:
                     try:
                         if downloadSubDir is not None:
                             shutil.rmtree(downloadSubDir)
                             logger.action(f"deleted folder: {downloadSubDir.name}")
+                            self._recordSummaryCleanup(
+                                f"deleted folder: {downloadSubDir}"
+                            )
                             removedDirs.add(downloadSubDir)
                         else:
                             entry.unlink()
                             logger.action(f"deleted torrent: {entry.name}")
+                            self._recordSummaryCleanup(f"deleted torrent: {entry}")
                         stats["deleted"] += 1
                     except Exception as e:
                         logger.error(f"failed to delete {entry.name}: {e}")
@@ -141,12 +147,14 @@ class TorrentMixin:
 
             if self.dryRun:
                 logger.action(f"rename torrent: {oldName} → {newName}")
+                self._recordSummaryRename(entry, newPath)
                 stats["renamed"] += 1
                 continue
 
             try:
                 entry.rename(newPath)
                 logger.action(f"renamed torrent: {oldName} → {newName}")
+                self._recordSummaryRename(entry, newPath)
                 stats["renamed"] += 1
             except FileExistsError:
                 logger.error(f"target already exists, skipping: {newName}")
