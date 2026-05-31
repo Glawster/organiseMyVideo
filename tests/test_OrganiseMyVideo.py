@@ -5113,6 +5113,46 @@ def testResetTvEpisodeTitlesIgnoresAllCapsSeriesMetadataForMixedCaseFolder(
     assert "renaming TV show: OUTLANDER (from Outlander)" not in caplog.text
 
 
+def testResetTvEpisodeTitlesDoesNotForceShortAllCapsShowFolders(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    showDir = tvStorage / "from"
+    seasonDir = showDir / "Season 01"
+    seasonDir.mkdir(parents=True)
+    (showDir / "series.xml").write_text(
+        "<Series><SeriesName>FROM</SeriesName><LocalTitle>From</LocalTitle></Series>",
+        encoding="utf-8",
+    )
+    episodeFile = seasonDir / "from.S01E01.Long.Day's.Journey.Into.Night.mkv"
+    episodeFile.write_bytes(b"x" * 20)
+
+    with patch.object(
+        confirmedOrganizer,
+        "_fetchTvMetadataFromScraper",
+        side_effect=AssertionError("scraper lookup should not run"),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ):
+            with caplog.at_level("INFO"):
+                stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    renamedSeasonDir = tvStorage / "From" / "Season 01"
+    assert stats == {"renamed": 1, "skipped": 0, "errors": 0}
+    assert renamedSeasonDir.exists()
+    assert (
+        renamedSeasonDir / "From.S01E01.Long.Day's.Journey.Into.Night.mkv"
+    ).exists()
+    assert not (tvStorage / "FROM").exists()
+    assert "renaming TV show: From (from from)" in caplog.text
+    assert "rescanning: From" in caplog.text
+
+
 def testResetTvEpisodeTitlesRegeneratesCorruptEpisodeMetadataXml(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
 ):

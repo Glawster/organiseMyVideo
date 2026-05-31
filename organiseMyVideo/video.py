@@ -1561,8 +1561,6 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         if candidateLetters and all(
             character.isupper() for character in candidateLetters
         ):
-            if len(candidateLetters) <= 4:
-                return candidate
             if currentLetters and all(
                 character.islower() for character in currentLetters
             ):
