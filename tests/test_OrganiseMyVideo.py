@@ -1162,7 +1162,7 @@ def testProcessFilesUsesTvMcmHintsWhenFilenameCannotBeParsed(
         tvStorage
         / "After Life"
         / "Season 01"
-        / "After.Life.S01E04.Sic.Semper.Systema.mkv"
+        / "After Life.S01E04.Sic Semper Systema.mkv"
     )
     assert destFile.exists()
     assert not srcFile.exists()
@@ -1211,7 +1211,7 @@ def testProcessFilesPrefersTvMcmShowNameOverFilenameMismatch(
         confirmedOrganizer.processFiles(interactive=False)
 
     destFile = (
-        tvStorage / "Breaking Bad" / "Season 01" / "Breaking.Bad.S01E01.Pilot.mkv"
+        tvStorage / "Breaking Bad" / "Season 01" / "Breaking Bad.S01E01.Pilot.mkv"
     )
     assert destFile.exists()
     assert not srcFile.exists()
@@ -1336,7 +1336,7 @@ def testProcessFilesUsesMetadataLibraryToRenameLaterScan(tmp_path: Path):
         tvStorage
         / "After Life"
         / "Season 01"
-        / "After.Life.S01E04.Sic.Semper.Systema.mkv"
+        / "After Life.S01E04.Sic Semper Systema.mkv"
     )
     assert destFile.exists()
     assert not secondFile.exists()
@@ -1392,8 +1392,8 @@ def testProcessFilesScrapesMissingEpisodeTitleAndWritesItBack(
                 confirmedOrganizer.processFiles(interactive=False)
 
     destSeasonDir = tvStorage / "Virgin River" / "Season 06"
-    destFile = destSeasonDir / "Virgin.River.S06E01.The.Beginning.mkv"
-    episodeXml = destSeasonDir / "metadata" / "Virgin.River.S06E01.The.Beginning.xml"
+    destFile = destSeasonDir / "Virgin River.S06E01.The Beginning.mkv"
+    episodeXml = destSeasonDir / "metadata" / "Virgin River.S06E01.The Beginning.xml"
     assert destFile.exists()
     assert not srcFile.exists()
     assert episodeXml.exists()
@@ -1469,7 +1469,7 @@ def testProcessFilesUsesLibraryCanonicalShowNameForPunctuationVariants(
                 confirmedOrganizer.processFiles(interactive=False)
 
     destFile = (
-        tvStorage / "Law & Order: SVU" / "Season 03" / "Law.Order.SVU.S03E02.Wrath.mkv"
+        tvStorage / "Law & Order: SVU" / "Season 03" / "Law Order SVU.S03E02.Wrath.mkv"
     )
     assert destFile.exists()
     assert not srcFile.exists()
@@ -1724,7 +1724,7 @@ def testProcessFilesBuildsMetadataLibraryFromStorageBeforeSourceProcessing(
         tvStorage
         / "After Life"
         / "Season 01"
-        / "After.Life.S01E04.Sic.Semper.Systema.mkv"
+        / "After Life.S01E04.Sic Semper Systema.mkv"
     )
     assert destFile.exists()
     assert not srcFile.exists()
@@ -1822,7 +1822,7 @@ def testProcessFilesUsesSavedMetadataLibraryWithoutStorageRescan(
         tvStorage
         / "After Life"
         / "Season 01"
-        / "After.Life.S01E04.Sic.Semper.Systema.mkv"
+        / "After Life.S01E04.Sic Semper Systema.mkv"
     )
     assert destFile.exists()
     assert not srcFile.exists()
@@ -2536,7 +2536,7 @@ def testProcessFilesCachesImdbFallbackEpisodeTitleForLaterRuns(tmp_path: Path):
         tvStorage
         / "Virgin River"
         / "Season 06"
-        / "Virgin.River.S06E01.The.Beginning.mkv"
+        / "Virgin River.S06E01.The Beginning.mkv"
     )
     assert cachedDest.exists()
     assert not secondFile.exists()
@@ -3311,7 +3311,7 @@ def testMoveTvShowDryRunReturnsTrueWithoutMoving(
     mockMove.assert_not_called()
     assert srcFile.exists()
     expectedDest = (
-        tvStorage / "Breaking Bad" / "Season 01" / "Breaking.Bad.S01E01.Pilot.mkv"
+        tvStorage / "Breaking Bad" / "Season 01" / "Breaking Bad.S01E01.Pilot.mkv"
     )
     assert (
         f"...moving TV show:\n"
@@ -3448,7 +3448,7 @@ def testMoveTvShowConfirmMovesFile(tmp_path: Path, confirmedOrganizer: VideoOrga
 
     assert result is True
     destFile = (
-        tvStorage / "Breaking Bad" / "Season 01" / "Breaking.Bad.S01E01.Pilot.mkv"
+        tvStorage / "Breaking Bad" / "Season 01" / "Breaking Bad.S01E01.Pilot.mkv"
     )
     assert destFile.exists()
     assert not srcFile.exists()
@@ -3917,7 +3917,7 @@ def testMoveTvShowUsesScrapedEpisodeTitleToRenameNoisyFilename(
         tvStorage
         / "Pitt, The"
         / "Season 02"
-        / "The.Pitt.S02E05.A.Better.Episode.Title.mkv"
+        / "The Pitt.S02E05.A Better Episode Title.mkv"
     )
     assert destFile.exists()
     assert not srcFile.exists()
@@ -4310,7 +4310,7 @@ def testMoveTvShowUsesDefaultWhenUserEntersBlank(
     assert result is True
     assert not srcFile.exists()
     destFile = (
-        tvStorage / "Breaking Bad" / "Season 01" / "Breaking.Bad.S01E01.Pilot.mkv"
+        tvStorage / "Breaking Bad" / "Season 01" / "Breaking Bad.S01E01.Pilot.mkv"
     )
     assert destFile.exists()
 

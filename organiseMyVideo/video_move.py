@@ -298,7 +298,13 @@ class VideoMoveMixin:
 
         # Create season directory
         seasonDir = showDir / f"Season {season:02d}"
-        destFile = seasonDir / self._buildTvDestinationFilename(sourceFile, tvInfo)
+        destFile = seasonDir / self._buildTvDestinationFilename(
+            sourceFile,
+            tvInfo,
+            preferSpaceStyle=bool(
+                tvInfo.get("metadataSource") and tvInfo.get("episodeTitle")
+            ),
+        )
 
         logger.action(
             f"moving TV show:\n" f"     {sourceFile.name}\n" f"     -> {destFile}"
