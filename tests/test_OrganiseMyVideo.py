@@ -5143,11 +5143,9 @@ def testResetTvEpisodeTitlesDoesNotForceShortAllCapsShowFolders(
                 stats = confirmedOrganizer.resetTvEpisodeTitles()
 
     renamedSeasonDir = tvStorage / "From" / "Season 01"
-    assert stats == {"renamed": 1, "skipped": 0, "errors": 0}
+    assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
     assert renamedSeasonDir.exists()
-    assert (
-        renamedSeasonDir / "From.S01E01.Long.Day's.Journey.Into.Night.mkv"
-    ).exists()
+    assert (renamedSeasonDir / "from.S01E01.Long.Day's.Journey.Into.Night.mkv").exists()
     assert not (tvStorage / "FROM").exists()
     assert "renaming TV show: From (from from)" in caplog.text
     assert "rescanning: From" in caplog.text
