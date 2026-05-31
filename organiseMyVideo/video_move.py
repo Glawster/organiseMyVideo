@@ -282,6 +282,9 @@ class VideoMoveMixin:
             showName = result["name"]
             tvInfo["showName"] = showName
 
+        showName = self._capitaliseLowercaseTvShowTitle(showName) or showName
+        tvInfo["showName"] = showName
+
         # Find existing show directory or choose storage location
         existingShowDir = self.findExistingTvShowDir(showName, videoDirs)
 

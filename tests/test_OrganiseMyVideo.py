@@ -3454,6 +3454,34 @@ def testMoveTvShowConfirmMovesFile(tmp_path: Path, confirmedOrganizer: VideoOrga
     assert not srcFile.exists()
 
 
+def testMoveTvShowCapitalisesLowercaseShowNames(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "breaking.bad.S01E01.Pilot.mkv"
+    srcFile.write_bytes(b"x" * 100)
+
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    tvInfo = {
+        "showName": "breaking bad",
+        "season": 1,
+        "episode": 1,
+        "extension": ".mkv",
+        "type": "tv",
+    }
+    result = confirmedOrganizer.moveTvShow(
+        srcFile, tvInfo, [tvStorage], interactive=False
+    )
+
+    assert result is True
+    destFile = (
+        tvStorage / "Breaking Bad" / "Season 01" / "Breaking Bad.S01E01.Pilot.mkv"
+    )
+    assert destFile.exists()
+    assert not srcFile.exists()
+
+
 def testMoveTvShowReplicatesMcmCompanionFiles(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer
 ):
