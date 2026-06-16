@@ -134,7 +134,17 @@ def main():
     parser.add_argument(
         "--rescan",
         action="store_true",
-        help="scan existing TV library files and retitle episodes whose filenames still contain noisy or missing episode titles",
+        help="scan existing movie and TV libraries for metadata and naming fixes",
+    )
+    parser.add_argument(
+        "--movie",
+        action="store_true",
+        help="with --rescan, limit repairs to movies",
+    )
+    parser.add_argument(
+        "--video",
+        action="store_true",
+        help="with --rescan, limit repairs to TV/video episodes",
     )
     parser.add_argument(
         "--torrent",
@@ -260,8 +270,15 @@ Folder errors:   {cleanStats['errors']}
 """
         drawBox(summary)
     elif args.rescan:
-        logger.doing("running rescan mode")
-        organizer.resetTvEpisodeTitles()
+        rescanTarget = "both"
+        if args.movie and args.video:
+            rescanTarget = "both"
+        elif args.movie:
+            rescanTarget = "movies"
+        elif args.video:
+            rescanTarget = "tv"
+        logger.doing(f"running rescan mode ({rescanTarget})")
+        organizer.resetLibraryMetadata(target=rescanTarget)
     else:
         logger.doing("running file organisation mode")
         organizer.processFiles(interactive=not (args.non_interactive or args.auto))
