@@ -15,6 +15,17 @@ VIDEO_EXTENSIONS = {
     ".mpg",
     ".mpeg",
 }
+MUSIC_EXTENSIONS = {
+    ".mp3",
+    ".m4a",
+    ".aac",
+    ".flac",
+    ".ogg",
+    ".opus",
+    ".wav",
+    ".wma",
+}
+MUSIC_FOLDER_NAMES = {"music"}
 GROK_MEDIA_EXTENSIONS = {
     ".mp4",
     ".mov",

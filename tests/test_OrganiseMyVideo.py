@@ -52,7 +52,9 @@ def confirmedOrganizer(sourceDir: Path) -> VideoOrganizer:
 def isolateDuplicateTvShowConfig(tmp_path: Path):
     """Keep duplicate-folder persistence isolated from the real home directory."""
     configFile = tmp_path / "config" / "config.json"
-    with patch("organiseMyVideo.video_rescan.APP_CONFIG_FILE", configFile):
+    with patch("organiseMyVideo.video_rescan.APP_CONFIG_FILE", configFile), patch(
+        "organiseMyVideo.video.APP_CONFIG_FILE", configFile
+    ):
         yield configFile
 
 
@@ -591,6 +593,79 @@ def testScanStorageLocationsFindsAllLocationTypes(
     assert "TV storage location found" in caplog.text
 
 
+def testScanStorageLocationsPrefersMoviesSubfolderForMovieMount(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    """/mnt/movie<n>/Movies is used as movie storage when present."""
+    mnt = tmp_path / "mnt"
+    movieRoot = mnt / "movie1"
+    moviesDir = movieRoot / "Movies"
+    moviesDir.mkdir(parents=True)
+    (movieRoot / "System Volume Information").mkdir()
+
+    with patch("organiseMyVideo.video.Path") as mockPath:
+        mockPath.return_value = mnt
+        movieDirs, videoDirs = organizer.scanStorageLocations()
+
+    assert movieDirs == [moviesDir]
+    assert videoDirs == []
+
+
+def testScanStorageLocationsUsesConfiguredStorageLocations(
+    tmp_path: Path, organizer: VideoOrganizer, isolateDuplicateTvShowConfig: Path
+):
+    """Configured storage roots are reused instead of guessed mount roots."""
+    configuredMovies = tmp_path / "configured" / "Movies"
+    configuredTv = tmp_path / "configured" / "TV"
+    configuredMovies.mkdir(parents=True)
+    configuredTv.mkdir(parents=True)
+    isolateDuplicateTvShowConfig.parent.mkdir(parents=True)
+    isolateDuplicateTvShowConfig.write_text(
+        json.dumps(
+            {
+                "storage_locations": {
+                    "movies": [str(configuredMovies)],
+                    "tv": [str(configuredTv)],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    mnt = tmp_path / "mnt"
+    (mnt / "movie1").mkdir(parents=True)
+    (mnt / "video1" / "TV").mkdir(parents=True)
+
+    with patch("organiseMyVideo.video.Path") as mockPath:
+        mockPath.return_value = mnt
+        movieDirs, videoDirs = organizer.scanStorageLocations()
+
+    assert movieDirs == [configuredMovies]
+    assert videoDirs == [configuredTv]
+
+
+def testScanStorageLocationsFallsBackForUnconfiguredStorageType(
+    tmp_path: Path, organizer: VideoOrganizer, isolateDuplicateTvShowConfig: Path
+):
+    """Configured movie roots can be reused while TV roots are still discovered."""
+    configuredMovies = tmp_path / "configured" / "Movies"
+    configuredMovies.mkdir(parents=True)
+    isolateDuplicateTvShowConfig.parent.mkdir(parents=True)
+    isolateDuplicateTvShowConfig.write_text(
+        json.dumps({"storage_locations": {"movies": [str(configuredMovies)]}}),
+        encoding="utf-8",
+    )
+    mnt = tmp_path / "mnt"
+    tvDir = mnt / "video1" / "TV"
+    tvDir.mkdir(parents=True)
+
+    with patch("organiseMyVideo.video.Path") as mockPath:
+        mockPath.return_value = mnt
+        movieDirs, videoDirs = organizer.scanStorageLocations()
+
+    assert movieDirs == [configuredMovies]
+    assert videoDirs == [tvDir]
+
+
 # ---------------------------------------------------------------------------
 # findExistingMovieDir
 # ---------------------------------------------------------------------------
@@ -978,6 +1053,88 @@ def testProcessFilesIgnoresFeaturettesSubdirectory(
 
     assert [call.args[0] for call in mockMoveMovie.call_args_list] == [normalFile]
     assert ignoredFile.exists()
+
+
+def testProcessFilesMovesMusicFolderWithoutVideoStorage(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    """Music folders are moved into the user's Music library independently."""
+    musicFolder = confirmedOrganizer.sourceDir / "Music"
+    albumFolder = musicFolder / "The Artist" / "The Album"
+    albumFolder.mkdir(parents=True)
+    srcFile = albumFolder / "01 - Opening Track.mp3"
+    srcFile.write_bytes(b"not a real mp3, but enough for move-path tests")
+    musicRoot = tmp_path / "Music"
+
+    with patch.object(
+        confirmedOrganizer, "scanStorageLocations", return_value=([], [])
+    ), patch.object(confirmedOrganizer, "_prepareMetadataLibrary"), patch.object(
+        confirmedOrganizer, "_getMusicLibraryRoot", return_value=musicRoot
+    ), patch.object(
+        confirmedOrganizer, "_updateMusicTags"
+    ) as mockUpdateTags:
+        confirmedOrganizer.processFiles(interactive=False)
+
+    destFile = musicRoot / "The Artist" / "The Album" / "01 - Opening Track.mp3"
+    assert destFile.exists()
+    assert not srcFile.exists()
+    mockUpdateTags.assert_called_once()
+
+
+def testProcessFilesSkipsVideoInsideMusicFolder(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    """Video-looking files under a music folder are not sent through video moves."""
+    normalFile = confirmedOrganizer.sourceDir / "One.Mile.2026.mp4"
+    normalFile.write_bytes(b"x" * 100)
+    musicFolder = confirmedOrganizer.sourceDir / "Music" / "Concerts"
+    musicFolder.mkdir(parents=True)
+    ignoredFile = musicFolder / "Live.Show.2026.mp4"
+    ignoredFile.write_bytes(b"x" * 100)
+
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+    tvStorage = tmp_path / "TV"
+    tvStorage.mkdir()
+
+    with patch.object(
+        confirmedOrganizer,
+        "scanStorageLocations",
+        return_value=([movieStorage], [tvStorage]),
+    ), patch.object(confirmedOrganizer, "_prepareMetadataLibrary"), patch.object(
+        confirmedOrganizer,
+        "_classifyVideoFile",
+        return_value=(None, {"title": "One Mile", "year": "2026", "extension": ".mp4"}),
+    ), patch.object(
+        confirmedOrganizer, "moveMovie", return_value=True
+    ) as mockMoveMovie:
+        confirmedOrganizer.processFiles(interactive=False)
+
+    assert [call.args[0] for call in mockMoveMovie.call_args_list] == [normalFile]
+    assert ignoredFile.exists()
+
+
+def testMoveMusicFileDryRunRecordsArtistAlbumDestination(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    musicFolder = organizer.sourceDir / "Music"
+    albumFolder = musicFolder / "The Artist" / "The Album"
+    albumFolder.mkdir(parents=True)
+    srcFile = albumFolder / "02 - Second Track.mp3"
+    srcFile.write_bytes(b"x")
+    musicRoot = tmp_path / "Music"
+
+    with patch.object(organizer, "_getMusicLibraryRoot", return_value=musicRoot):
+        result = organizer.moveMusicFile(srcFile, musicFolder)
+
+    assert result is True
+    assert srcFile.exists()
+    assert organizer._summaryTransfers == [
+        (
+            str(srcFile),
+            str(musicRoot / "The Artist" / "The Album" / "02 - Second Track.mp3"),
+        )
+    ]
 
 
 def testProcessFilesRenamesExtrasFolderToFeaturettes(

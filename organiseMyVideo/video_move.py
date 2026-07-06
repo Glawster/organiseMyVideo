@@ -2,18 +2,232 @@
 
 import re
 import sys
+import unicodedata
 from pathlib import Path
 from typing import List, Optional
 
 from organiseMyProjects.logUtils import getLogger  # type: ignore
 
-from .constants import VIDEO_EXTENSIONS
+from .constants import MUSIC_EXTENSIONS, MUSIC_FOLDER_NAMES, VIDEO_EXTENSIONS
 
 logger = getLogger()
 
 
 class VideoMoveMixin:
     """Workflow methods for confirming, moving, and processing source files."""
+
+    def _getMusicLibraryRoot(self) -> Path:
+        """Return the root folder used for organised music files."""
+        return Path.home() / "Music"
+
+    def _isMusicFolder(self, folder: Path) -> bool:
+        """Return True when *folder* is a source music folder."""
+        return folder.name.strip().casefold() in MUSIC_FOLDER_NAMES
+
+    def _findSourceMusicFolders(self) -> List[Path]:
+        """Return top-level matching music folders within the current source tree."""
+        if not self.sourceDir.exists():
+            return []
+
+        musicFolders = []
+        if self._isMusicFolder(self.sourceDir):
+            musicFolders.append(self.sourceDir)
+        for folder in sorted(
+            self.sourceDir.rglob("*"), key=lambda item: len(item.parts)
+        ):
+            if not folder.is_dir() or not self._isMusicFolder(folder):
+                continue
+            if any(
+                folder == existing or folder.is_relative_to(existing)
+                for existing in musicFolders
+            ):
+                continue
+            musicFolders.append(folder)
+        return musicFolders
+
+    def _isInsideAnyFolder(self, path: Path, folders: List[Path]) -> bool:
+        """Return True when *path* is inside one of *folders*."""
+        return any(path == folder or path.is_relative_to(folder) for folder in folders)
+
+    def _cleanMusicField(self, value: object) -> Optional[str]:
+        """Return a filesystem-safe music metadata value."""
+        if value is None:
+            return None
+        if isinstance(value, (list, tuple)):
+            value = next((item for item in value if item), None)
+        text = str(value).strip()
+        if not text:
+            return None
+        text = unicodedata.normalize("NFKC", text)
+        text = re.sub(r"[\\/:*?\"<>|]+", " ", text)
+        text = re.sub(r"\s+", " ", text).strip(" .")
+        return text or None
+
+    def _readMusicTags(self, musicFile: Path) -> dict:
+        """Return simple audio metadata using mutagen when available."""
+        try:
+            from mutagen import File as MutagenFile  # type: ignore
+        except ImportError:
+            return {}
+
+        try:
+            audio = MutagenFile(musicFile, easy=True)
+        except Exception as error:
+            logger.warning(f"could not read music tags for {musicFile}: {error}")
+            return {}
+        if audio is None:
+            return {}
+
+        return {
+            "artist": self._cleanMusicField(audio.get("artist")),
+            "album": self._cleanMusicField(audio.get("album")),
+            "title": self._cleanMusicField(audio.get("title")),
+            "track": self._cleanMusicTrack(audio.get("tracknumber")),
+        }
+
+    def _cleanMusicTrack(self, value: object) -> Optional[int]:
+        """Return a track number from a tag or filename fragment."""
+        if isinstance(value, (list, tuple)):
+            value = next((item for item in value if item), None)
+        if value is None:
+            return None
+        match = re.search(r"\d+", str(value))
+        return int(match.group(0)) if match else None
+
+    def _inferMusicMetadataFromPath(self, musicFile: Path, musicFolder: Path) -> dict:
+        """Infer artist, album, title and track from a source music path."""
+        relativePath = musicFile.relative_to(musicFolder)
+        parts = relativePath.parts
+        parentParts = parts[:-1]
+        artist = (
+            self._cleanMusicField(parentParts[0]) if len(parentParts) >= 2 else None
+        )
+        album = (
+            self._cleanMusicField(parentParts[1]) if len(parentParts) >= 2 else None
+        )
+        if len(parentParts) == 1:
+            album = self._cleanMusicField(parentParts[0])
+
+        stem = musicFile.stem
+        track = None
+        titleText = stem
+        match = re.match(r"^\s*(\d{1,3})(?:\s*[-._]\s*|\s+)(.+)$", stem)
+        if match:
+            track = int(match.group(1))
+            titleText = match.group(2)
+
+        return {
+            "artist": artist,
+            "album": album,
+            "title": self._cleanMusicField(titleText),
+            "track": track,
+        }
+
+    def _resolveMusicMetadata(self, musicFile: Path, musicFolder: Path) -> dict:
+        """Return complete music metadata from tags with path-based fallbacks."""
+        tags = self._readMusicTags(musicFile)
+        inferred = self._inferMusicMetadataFromPath(musicFile, musicFolder)
+        return {
+            "artist": tags.get("artist") or inferred.get("artist") or "Unknown Artist",
+            "album": tags.get("album") or inferred.get("album") or "Unknown Album",
+            "title": tags.get("title") or inferred.get("title") or musicFile.stem,
+            "track": tags.get("track") or inferred.get("track"),
+        }
+
+    def _buildMusicDestinationFilename(self, musicFile: Path, metadata: dict) -> str:
+        """Return the destination filename for a music track."""
+        title = self._cleanMusicField(metadata.get("title")) or musicFile.stem
+        track = metadata.get("track")
+        if isinstance(track, int) and track > 0:
+            return f"{track:02d} - {title}{musicFile.suffix.lower()}"
+        return f"{title}{musicFile.suffix.lower()}"
+
+    def _dedupeDestinationPath(self, destFile: Path) -> Path:
+        """Return a non-existing destination path by adding a numeric suffix."""
+        if not destFile.exists():
+            return destFile
+        for counter in range(2, 1000):
+            candidate = destFile.with_name(
+                f"{destFile.stem} ({counter}){destFile.suffix}"
+            )
+            if not candidate.exists():
+                return candidate
+        raise FileExistsError(f"could not find available destination for {destFile}")
+
+    def _updateMusicTags(self, musicFile: Path, metadata: dict) -> None:
+        """Best-effort update of MP3/audio tags after a track has been moved."""
+        try:
+            if musicFile.suffix.lower() == ".mp3":
+                from mutagen.easyid3 import EasyID3  # type: ignore
+                from mutagen.id3 import ID3, ID3NoHeaderError  # type: ignore
+
+                try:
+                    tags = EasyID3(musicFile)
+                except ID3NoHeaderError:
+                    ID3().save(musicFile)
+                    tags = EasyID3(musicFile)
+            else:
+                from mutagen import File as MutagenFile  # type: ignore
+
+                tags = MutagenFile(musicFile, easy=True)
+                if tags is None:
+                    return
+
+            tags["artist"] = [str(metadata["artist"])]
+            tags["album"] = [str(metadata["album"])]
+            tags["title"] = [str(metadata["title"])]
+            if metadata.get("track"):
+                tags["tracknumber"] = [str(metadata["track"])]
+            tags.save()
+        except ImportError:
+            logger.warning("mutagen is not installed; music tags were not updated")
+        except Exception as error:
+            logger.warning(f"could not update music tags for {musicFile}: {error}")
+
+    def moveMusicFile(self, musicFile: Path, musicFolder: Path) -> bool:
+        """Move one audio file into the user's Music library."""
+        metadata = self._resolveMusicMetadata(musicFile, musicFolder)
+        libraryRoot = self._getMusicLibraryRoot()
+        destDir = libraryRoot / metadata["artist"] / metadata["album"]
+        destFile = self._dedupeDestinationPath(
+            destDir / self._buildMusicDestinationFilename(musicFile, metadata)
+        )
+
+        logger.action(f"moving music:\n     {musicFile.name}\n     -> {destFile}")
+        if self.dryRun:
+            self._recordSummaryTransfer(musicFile, destFile)
+            return True
+
+        try:
+            destDir.mkdir(parents=True, exist_ok=True)
+            self._moveFileWithProgress(musicFile, destFile)
+            self._updateMusicTags(destFile, metadata)
+            self._recordSummaryTransfer(musicFile, destFile)
+            logger.done("music moved successfully")
+            return True
+        except Exception as error:
+            logger.error(f"Failed to move music: {error}")
+            return False
+
+    def processMusicFolders(self) -> dict:
+        """Move audio files found under source folders named Music."""
+        stats = {"music": 0, "errors": 0, "folders": 0}
+        for musicFolder in self._findSourceMusicFolders():
+            musicFiles = [
+                item
+                for item in sorted(musicFolder.rglob("*"))
+                if item.is_file() and item.suffix.lower() in MUSIC_EXTENSIONS
+            ]
+            if not musicFiles:
+                continue
+            stats["folders"] += 1
+            logger.info(f"found music folder: {musicFolder}")
+            for musicFile in musicFiles:
+                if self.moveMusicFile(musicFile, musicFolder):
+                    stats["music"] += 1
+                else:
+                    stats["errors"] += 1
+        return stats
 
     def promptUserConfirmation(
         self,
@@ -363,13 +577,18 @@ class VideoMoveMixin:
 
         self._prepareMetadataLibrary(movieDirs, videoDirs)
 
+        self._renameExtrasFolders()
+        musicFolders = self._findSourceMusicFolders()
+        musicStats = self.processMusicFolders()
+
         if not movieDirs:
             logger.error("No Movie storage locations found")
         if not videoDirs:
             logger.error("No TV storage locations found!")
+            if musicStats["music"] or musicStats["errors"]:
+                logger.value("music processing complete", musicStats)
+                self._writeSummaryReport()
             return
-
-        self._renameExtrasFolders()
 
         # Get all video files (including those in subdirectories)
         videoFiles = [
@@ -378,17 +597,27 @@ class VideoMoveMixin:
             if f.is_file()
             and f.suffix.lower() in VIDEO_EXTENSIONS
             and not self._shouldIgnoreLocalVideoFile(f)
+            and not self._isInsideAnyFolder(f, musicFolders)
         ]
 
         if not videoFiles:
-            logger.value("no video files found in", self.sourceDir)
+            if musicStats["music"] or musicStats["errors"]:
+                logger.value("music processing complete", musicStats)
+            else:
+                logger.value("no video files found in", self.sourceDir)
             self._writeSummaryReport()
             return
 
         logger.info(f"found {len(videoFiles)} video file(s) to process")
 
         # Process each file
-        stats = {"movies": 0, "tv": 0, "skipped": 0, "errors": 0}
+        stats = {
+            "movies": 0,
+            "tv": 0,
+            "music": musicStats["music"],
+            "skipped": 0,
+            "errors": musicStats["errors"],
+        }
 
         for videoFile in videoFiles:
             logger.info(_FILE_PROCESS_SEPARATOR)
@@ -479,6 +708,7 @@ class VideoMoveMixin:
         summary = f"""SUMMARY
 Movies moved:   {stats['movies']}
 TV shows moved: {stats['tv']}
+Music moved:    {stats['music']}
 Skipped:        {stats['skipped']}
 Errors:         {stats['errors']}
 """
