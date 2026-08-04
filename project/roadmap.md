@@ -9,7 +9,7 @@ not itself a substitute for acceptance evidence.
 | --- | --- | --- | --- |
 | 0 | Establish a safe, reproducible baseline | Completed | Managed process documentation adopted |
 | 1 | Bootstrap requirements and architecture governance | Completed | Phase 0 tests pass |
-| 2 | Make installation and execution reproducible | ToDo | Create REQ-002 from packaging audit findings |
+| 2 | Make installation and execution reproducible | ToDo | Create REQ-003 from packaging audit findings |
 | 3 | Repair entry-point and CLI architecture | ToDo | Refine and accept ADR-002 |
 | 4 | Centralise safe filesystem behaviour | ToDo | Refine and accept ADR-003 |
 | 5 | Refactor by domain without changing behaviour | ToDo | Phases 2–4 provide stable boundaries |
@@ -18,9 +18,11 @@ not itself a substitute for acceptance evidence.
 
 ## Current priority
 
-Create and refine REQ-002 for Phase 2. It should cover `pyproject.toml`, the
+Create and refine REQ-003 for Phase 2. It should cover `pyproject.toml`, the
 console-script entry point, declared dependencies, `environment.yml`, clean
 installation, pytest/pre-commit configuration, and corrected ignore rules.
+REQ-002 captures the Qt media-library browser as a separate product outcome;
+it remains `ToDo` pending its open product decisions and ADR-004.
 
 ## Deferred decisions
 

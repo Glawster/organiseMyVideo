@@ -7,10 +7,10 @@ scope:
   - Filename and metadata interpretation
   - Dry-run planning and confirmed media operations
   - Movie, television, music, torrent, and library-rescan workflows
+  - A Qt desktop interface for browsing supported media libraries
 outOfScope:
   - Media playback and streaming
   - Download acquisition
-  - A graphical user interface
 risks:
   - Incorrect classification or destination selection can misplace user media
   - Destructive cleanup can remove recoverable source material
@@ -39,4 +39,7 @@ milestones:
     status: ToDo
   - id: phase7
     outcome: Finish layout and documentation adoption
+    status: ToDo
+  - id: qtMediaBrowser
+    outcome: Browse supported media libraries through a Qt desktop interface
     status: ToDo
