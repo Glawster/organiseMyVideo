@@ -82,11 +82,12 @@ class VideoMoveMixin:
             "artist": self._cleanMusicField(audio.get("artist")),
             "album": self._cleanMusicField(audio.get("album")),
             "title": self._cleanMusicField(audio.get("title")),
-            "track": self._cleanMusicTrack(audio.get("tracknumber")),
+            "disc": self._cleanMusicNumber(audio.get("discnumber")),
+            "track": self._cleanMusicNumber(audio.get("tracknumber")),
         }
 
-    def _cleanMusicTrack(self, value: object) -> Optional[int]:
-        """Return a track number from a tag or filename fragment."""
+    def _cleanMusicNumber(self, value: object) -> Optional[int]:
+        """Return a music disc/track number from a tag or filename fragment."""
         if isinstance(value, (list, tuple)):
             value = next((item for item in value if item), None)
         if value is None:
@@ -109,17 +110,25 @@ class VideoMoveMixin:
             album = self._cleanMusicField(parentParts[0])
 
         stem = musicFile.stem
+        disc = None
         track = None
         titleText = stem
-        match = re.match(r"^\s*(\d{1,3})(?:\s*[-._]\s*|\s+)(.+)$", stem)
+        match = re.match(r"^\s*(\d+)-(\d+)\s+(.+)$", stem)
         if match:
-            track = int(match.group(1))
-            titleText = match.group(2)
+            disc = int(match.group(1))
+            track = int(match.group(2))
+            titleText = match.group(3)
+        else:
+            match = re.match(r"^\s*(\d{1,3})(?:\s*[-._]\s*|\s+)(.+)$", stem)
+            if match:
+                track = int(match.group(1))
+                titleText = match.group(2)
 
         return {
             "artist": artist,
             "album": album,
             "title": self._cleanMusicField(titleText),
+            "disc": disc,
             "track": track,
         }
 
@@ -131,15 +140,18 @@ class VideoMoveMixin:
             "artist": tags.get("artist") or inferred.get("artist") or "Unknown Artist",
             "album": tags.get("album") or inferred.get("album") or "Unknown Album",
             "title": tags.get("title") or inferred.get("title") or musicFile.stem,
+            "disc": tags.get("disc") or inferred.get("disc") or 1,
             "track": tags.get("track") or inferred.get("track"),
         }
 
     def _buildMusicDestinationFilename(self, musicFile: Path, metadata: dict) -> str:
         """Return the destination filename for a music track."""
         title = self._cleanMusicField(metadata.get("title")) or musicFile.stem
+        disc = metadata.get("disc")
         track = metadata.get("track")
         if isinstance(track, int) and track > 0:
-            return f"{track:02d} - {title}{musicFile.suffix.lower()}"
+            discNumber = disc if isinstance(disc, int) and disc > 0 else 1
+            return f"{discNumber}-{track:02d} {title}{musicFile.suffix.lower()}"
         return f"{title}{musicFile.suffix.lower()}"
 
     def _dedupeDestinationPath(self, destFile: Path) -> Path:
@@ -176,6 +188,8 @@ class VideoMoveMixin:
             tags["artist"] = [str(metadata["artist"])]
             tags["album"] = [str(metadata["album"])]
             tags["title"] = [str(metadata["title"])]
+            if metadata.get("disc"):
+                tags["discnumber"] = [str(metadata["disc"])]
             if metadata.get("track"):
                 tags["tracknumber"] = [str(metadata["track"])]
             tags.save()

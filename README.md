@@ -2,6 +2,17 @@
 
 Moves video files from a staging directory to organised storage locations and can also clean torrent downloads.
 
+## Documentation
+
+The README is the canonical entry point for repository documentation. The living guides are:
+
+- [Project coding guidelines](documentation/projectGuidelines.md)
+- [Master agent instructions](.github/agent-instructions.md)
+- [Copilot compatibility instructions](.github/copilot-instructions.md)
+- [Repository layout](.github/repositoryLayout.md)
+- [Requirements management](.github/requirementsManagement.md)
+- [Repository-specific agent instructions](.github/additional-instructions.md)
+
 - **Movies** → `/mnt/movie<n>/Title (Year)/`
 - **TV shows** → `/mnt/video<n>/TV/Show Name/Season NN/` (`The Name` folders are stored as `Name, The`)
 - **Default staging/source folder** → `/mnt/video2/toFile`

@@ -1062,7 +1062,7 @@ def testProcessFilesMovesMusicFolderWithoutVideoStorage(
     musicFolder = confirmedOrganizer.sourceDir / "Music"
     albumFolder = musicFolder / "The Artist" / "The Album"
     albumFolder.mkdir(parents=True)
-    srcFile = albumFolder / "01 - Opening Track.mp3"
+    srcFile = albumFolder / "1-01 Opening Track.mp3"
     srcFile.write_bytes(b"not a real mp3, but enough for move-path tests")
     musicRoot = tmp_path / "Music"
 
@@ -1075,7 +1075,7 @@ def testProcessFilesMovesMusicFolderWithoutVideoStorage(
     ) as mockUpdateTags:
         confirmedOrganizer.processFiles(interactive=False)
 
-    destFile = musicRoot / "The Artist" / "The Album" / "01 - Opening Track.mp3"
+    destFile = musicRoot / "The Artist" / "The Album" / "1-01 Opening Track.mp3"
     assert destFile.exists()
     assert not srcFile.exists()
     mockUpdateTags.assert_called_once()
@@ -1120,7 +1120,7 @@ def testMoveMusicFileDryRunRecordsArtistAlbumDestination(
     musicFolder = organizer.sourceDir / "Music"
     albumFolder = musicFolder / "The Artist" / "The Album"
     albumFolder.mkdir(parents=True)
-    srcFile = albumFolder / "02 - Second Track.mp3"
+    srcFile = albumFolder / "2-02 Second Track.mp3"
     srcFile.write_bytes(b"x")
     musicRoot = tmp_path / "Music"
 
@@ -1132,7 +1132,7 @@ def testMoveMusicFileDryRunRecordsArtistAlbumDestination(
     assert organizer._summaryTransfers == [
         (
             str(srcFile),
-            str(musicRoot / "The Artist" / "The Album" / "02 - Second Track.mp3"),
+            str(musicRoot / "The Artist" / "The Album" / "2-02 Second Track.mp3"),
         )
     ]
 
@@ -3454,8 +3454,11 @@ def testMoveTvShowDryRunReturnsTrueWithoutMoving(
         "showName": "Breaking Bad",
         "season": 1,
         "episode": 1,
+        "episodeTitle": "Pilot",
         "extension": ".mkv",
+        "metadataSource": "test",
         "type": "tv",
+        "_tvMetadataLookupAttempted": True,
     }
 
     with patch.object(organizer, "_moveFileWithProgress") as mockMove:
@@ -3596,8 +3599,11 @@ def testMoveTvShowConfirmMovesFile(tmp_path: Path, confirmedOrganizer: VideoOrga
         "showName": "Breaking Bad",
         "season": 1,
         "episode": 1,
+        "episodeTitle": "Pilot",
         "extension": ".mkv",
+        "metadataSource": "test",
         "type": "tv",
+        "_tvMetadataLookupAttempted": True,
     }
     result = confirmedOrganizer.moveTvShow(
         srcFile, tvInfo, [tvStorage], interactive=False
@@ -3624,8 +3630,11 @@ def testMoveTvShowCapitalisesLowercaseShowNames(
         "showName": "breaking bad",
         "season": 1,
         "episode": 1,
+        "episodeTitle": "Pilot",
         "extension": ".mkv",
+        "metadataSource": "test",
         "type": "tv",
+        "_tvMetadataLookupAttempted": True,
     }
     result = confirmedOrganizer.moveTvShow(
         srcFile, tvInfo, [tvStorage], interactive=False
@@ -4487,8 +4496,11 @@ def testMoveTvShowUsesDefaultWhenUserEntersBlank(
         "showName": "Breaking Bad",
         "season": 1,
         "episode": 1,
+        "episodeTitle": "Pilot",
         "extension": ".mkv",
+        "metadataSource": "test",
         "type": "tv",
+        "_tvMetadataLookupAttempted": True,
     }
     with patch("builtins.input", side_effect=["n", ""]):
         result = confirmedOrganizer.moveTvShow(srcFile, tvInfo, [tvStorage])
