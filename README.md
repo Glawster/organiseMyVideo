@@ -12,6 +12,10 @@ The README is the canonical entry point for repository documentation. The living
 - [Repository layout](.github/repositoryLayout.md)
 - [Requirements management](.github/requirementsManagement.md)
 - [Repository-specific agent instructions](.github/additional-instructions.md)
+- [Requirements index](project/requirements/README.md)
+- [Architecture decisions](project/adr/README.md)
+- [Standards adoption roadmap](project/roadmap.md)
+- [Point-in-time reviews](project/reviews/README.md)
 
 - **Movies** → `/mnt/movie<n>/Title (Year)/`
 - **TV shows** → `/mnt/video<n>/TV/Show Name/Season NN/` (`The Name` folders are stored as `Name, The`)
