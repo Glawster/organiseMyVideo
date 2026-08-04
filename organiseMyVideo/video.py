@@ -2,6 +2,7 @@
 
 import errno
 import difflib
+import json
 import os
 import re
 import shutil
@@ -16,11 +17,12 @@ from typing import Iterable, List, Tuple, Optional, TextIO
 
 from organiseMyProjects.logUtils import getLogger  # type: ignore
 
-from .constants import VIDEO_EXTENSIONS, _PREFIX_REGEX
+from .constants import APP_CONFIG_FILE, VIDEO_EXTENSIONS, _PREFIX_REGEX
 from .video_move import VideoMoveMixin
 from .video_rescan import VideoRescanMixin
 
 logger = getLogger()
+_FILESYSTEM_PATH = Path
 UNKNOWN_YEAR = "Unknown"
 _UTF8_BOM = b"\xef\xbb\xbf"
 _XML_BINARY_CHECK_WINDOW = 256
@@ -55,6 +57,109 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
     _TV_SHOW_ARTWORK_PATTERNS = ("folder.jpg", "banner.jpg", "backdrop*.jpg")
     _TV_SEASON_ARTWORK_PATTERNS = ("folder.jpg",)
 
+    def _readConfiguredStorageList(
+        self, config: dict, storageConfig: dict, keys: Iterable[str]
+    ) -> Optional[List[Path]]:
+        """Return configured storage paths for the first present key."""
+        for key in keys:
+            values = storageConfig.get(key)
+            if values is None:
+                values = config.get(key)
+            if values is None:
+                continue
+            if isinstance(values, str):
+                values = [values]
+            if not isinstance(values, list):
+                logger.warning("ignoring invalid storage config key %s", key)
+                return []
+
+            storageDirs = []
+            for value in values:
+                if not isinstance(value, str) or not value.strip():
+                    continue
+                storageDir = _FILESYSTEM_PATH(value).expanduser()
+                if not storageDir.is_dir():
+                    logger.warning("configured storage location missing: %s", storageDir)
+                    continue
+                storageDirs.append(storageDir)
+            return sorted(set(storageDirs))
+
+        return None
+
+    def _loadConfiguredStorageLocations(
+        self,
+    ) -> Tuple[Optional[List[Path]], Optional[List[Path]]]:
+        """Return storage locations from app config when present."""
+        if not APP_CONFIG_FILE.exists():
+            return None, None
+
+        try:
+            loaded = json.loads(APP_CONFIG_FILE.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            logger.warning("could not read app config %s: %s", APP_CONFIG_FILE, error)
+            return None, None
+        if not isinstance(loaded, dict):
+            return None, None
+
+        storageConfig = loaded.get("storage_locations", {})
+        if not isinstance(storageConfig, dict):
+            logger.warning("ignoring invalid storage_locations config")
+            storageConfig = {}
+
+        movieDirs = self._readConfiguredStorageList(
+            loaded,
+            storageConfig,
+            (
+                "movies",
+                "movie",
+                "movie_dirs",
+                "movieDirs",
+                "movie_storage_locations",
+            ),
+        )
+        videoDirs = self._readConfiguredStorageList(
+            loaded,
+            storageConfig,
+            (
+                "tv",
+                "video",
+                "video_dirs",
+                "videoDirs",
+                "tv_storage_locations",
+            ),
+        )
+        return movieDirs, videoDirs
+
+    def _movieStorageLocationForMount(self, mountDir: Path) -> Path:
+        """Return the movie library folder for a movie-like mount."""
+        moviesSubDir = mountDir / "Movies"
+        return moviesSubDir if moviesSubDir.exists() else mountDir
+
+    def _scanMountedStorageLocations(self) -> Tuple[List[Path], List[Path]]:
+        """Return storage locations discovered from standard /mnt names."""
+        movieDirs = []
+        videoDirs = []
+
+        mntPath = Path("/mnt")
+        if mntPath.exists():
+            for item in mntPath.iterdir():
+                if item.is_dir():
+                    if re.match(r"movie\d*$", item.name):
+                        movieStorage = self._movieStorageLocationForMount(item)
+                        movieDirs.append(movieStorage)
+                        logger.value("movie storage location found", movieStorage)
+                    elif re.match(r"myPictures$", item.name):
+                        movieStorage = self._movieStorageLocationForMount(item)
+                        movieDirs.append(movieStorage)
+                        logger.value("movie storage location found", movieStorage)
+                    elif re.match(r"video\d*$|myVideo$", item.name):
+                        tvDir = item / "TV"
+                        if tvDir.exists():
+                            videoDirs.append(tvDir)
+                            logger.value("TV storage location found", tvDir)
+
+        return sorted(movieDirs), sorted(videoDirs)
+
     def scanStorageLocations(self) -> Tuple[List[Path], List[Path]]:
         """
         Scan system for movie and video storage locations.
@@ -64,29 +169,17 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         """
         logger.info("scanning for storage locations")
 
-        movieDirs = []
-        videoDirs = []
+        discoveredMovieDirs, discoveredVideoDirs = self._scanMountedStorageLocations()
+        configuredMovieDirs, configuredVideoDirs = self._loadConfiguredStorageLocations()
+        movieDirs = configuredMovieDirs if configuredMovieDirs is not None else discoveredMovieDirs
+        videoDirs = configuredVideoDirs if configuredVideoDirs is not None else discoveredVideoDirs
 
-        # Scan for /mnt/movie<n> and /mnt/video<n> directories
-        mntPath = Path("/mnt")
-        if mntPath.exists():
-            for item in mntPath.iterdir():
-                if item.is_dir():
-                    if re.match(r"movie\d*$", item.name):
-                        movieDirs.append(item)
-                        logger.value("movie storage location found", item)
-                    elif re.match(r"myPictures$", item.name):
-                        # Use Movies subdirectory if present, otherwise use root
-                        moviesSubDir = item / "Movies"
-                        movieStorage = moviesSubDir if moviesSubDir.exists() else item
-                        movieDirs.append(movieStorage)
-                        logger.value("movie storage location found", movieStorage)
-                    elif re.match(r"video\d*$|myVideo$", item.name):
-                        # Look for TV subdirectory
-                        tvDir = item / "TV"
-                        if tvDir.exists():
-                            videoDirs.append(tvDir)
-                            logger.value("TV storage location found", tvDir)
+        if configuredMovieDirs is not None:
+            for movieDir in movieDirs:
+                logger.value("configured movie storage location", movieDir)
+        if configuredVideoDirs is not None:
+            for tvDir in videoDirs:
+                logger.value("configured TV storage location", tvDir)
 
         logger.info(
             f"storage scan complete: {len(movieDirs)} movie, {len(videoDirs)} TV locations"

@@ -52,7 +52,9 @@ def confirmedOrganizer(sourceDir: Path) -> VideoOrganizer:
 def isolateDuplicateTvShowConfig(tmp_path: Path):
     """Keep duplicate-folder persistence isolated from the real home directory."""
     configFile = tmp_path / "config" / "config.json"
-    with patch("organiseMyVideo.video_rescan.APP_CONFIG_FILE", configFile):
+    with patch("organiseMyVideo.video_rescan.APP_CONFIG_FILE", configFile), patch(
+        "organiseMyVideo.video.APP_CONFIG_FILE", configFile
+    ):
         yield configFile
 
 
@@ -591,6 +593,79 @@ def testScanStorageLocationsFindsAllLocationTypes(
     assert "TV storage location found" in caplog.text
 
 
+def testScanStorageLocationsPrefersMoviesSubfolderForMovieMount(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    """/mnt/movie<n>/Movies is used as movie storage when present."""
+    mnt = tmp_path / "mnt"
+    movieRoot = mnt / "movie1"
+    moviesDir = movieRoot / "Movies"
+    moviesDir.mkdir(parents=True)
+    (movieRoot / "System Volume Information").mkdir()
+
+    with patch("organiseMyVideo.video.Path") as mockPath:
+        mockPath.return_value = mnt
+        movieDirs, videoDirs = organizer.scanStorageLocations()
+
+    assert movieDirs == [moviesDir]
+    assert videoDirs == []
+
+
+def testScanStorageLocationsUsesConfiguredStorageLocations(
+    tmp_path: Path, organizer: VideoOrganizer, isolateDuplicateTvShowConfig: Path
+):
+    """Configured storage roots are reused instead of guessed mount roots."""
+    configuredMovies = tmp_path / "configured" / "Movies"
+    configuredTv = tmp_path / "configured" / "TV"
+    configuredMovies.mkdir(parents=True)
+    configuredTv.mkdir(parents=True)
+    isolateDuplicateTvShowConfig.parent.mkdir(parents=True)
+    isolateDuplicateTvShowConfig.write_text(
+        json.dumps(
+            {
+                "storage_locations": {
+                    "movies": [str(configuredMovies)],
+                    "tv": [str(configuredTv)],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    mnt = tmp_path / "mnt"
+    (mnt / "movie1").mkdir(parents=True)
+    (mnt / "video1" / "TV").mkdir(parents=True)
+
+    with patch("organiseMyVideo.video.Path") as mockPath:
+        mockPath.return_value = mnt
+        movieDirs, videoDirs = organizer.scanStorageLocations()
+
+    assert movieDirs == [configuredMovies]
+    assert videoDirs == [configuredTv]
+
+
+def testScanStorageLocationsFallsBackForUnconfiguredStorageType(
+    tmp_path: Path, organizer: VideoOrganizer, isolateDuplicateTvShowConfig: Path
+):
+    """Configured movie roots can be reused while TV roots are still discovered."""
+    configuredMovies = tmp_path / "configured" / "Movies"
+    configuredMovies.mkdir(parents=True)
+    isolateDuplicateTvShowConfig.parent.mkdir(parents=True)
+    isolateDuplicateTvShowConfig.write_text(
+        json.dumps({"storage_locations": {"movies": [str(configuredMovies)]}}),
+        encoding="utf-8",
+    )
+    mnt = tmp_path / "mnt"
+    tvDir = mnt / "video1" / "TV"
+    tvDir.mkdir(parents=True)
+
+    with patch("organiseMyVideo.video.Path") as mockPath:
+        mockPath.return_value = mnt
+        movieDirs, videoDirs = organizer.scanStorageLocations()
+
+    assert movieDirs == [configuredMovies]
+    assert videoDirs == [tvDir]
+
+
 # ---------------------------------------------------------------------------
 # findExistingMovieDir
 # ---------------------------------------------------------------------------
@@ -978,6 +1053,88 @@ def testProcessFilesIgnoresFeaturettesSubdirectory(
 
     assert [call.args[0] for call in mockMoveMovie.call_args_list] == [normalFile]
     assert ignoredFile.exists()
+
+
+def testProcessFilesMovesMusicFolderWithoutVideoStorage(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    """Music folders are moved into the user's Music library independently."""
+    musicFolder = confirmedOrganizer.sourceDir / "Music"
+    albumFolder = musicFolder / "The Artist" / "The Album"
+    albumFolder.mkdir(parents=True)
+    srcFile = albumFolder / "01 - Opening Track.mp3"
+    srcFile.write_bytes(b"not a real mp3, but enough for move-path tests")
+    musicRoot = tmp_path / "Music"
+
+    with patch.object(
+        confirmedOrganizer, "scanStorageLocations", return_value=([], [])
+    ), patch.object(confirmedOrganizer, "_prepareMetadataLibrary"), patch.object(
+        confirmedOrganizer, "_getMusicLibraryRoot", return_value=musicRoot
+    ), patch.object(
+        confirmedOrganizer, "_updateMusicTags"
+    ) as mockUpdateTags:
+        confirmedOrganizer.processFiles(interactive=False)
+
+    destFile = musicRoot / "The Artist" / "The Album" / "01 - Opening Track.mp3"
+    assert destFile.exists()
+    assert not srcFile.exists()
+    mockUpdateTags.assert_called_once()
+
+
+def testProcessFilesSkipsVideoInsideMusicFolder(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    """Video-looking files under a music folder are not sent through video moves."""
+    normalFile = confirmedOrganizer.sourceDir / "One.Mile.2026.mp4"
+    normalFile.write_bytes(b"x" * 100)
+    musicFolder = confirmedOrganizer.sourceDir / "Music" / "Concerts"
+    musicFolder.mkdir(parents=True)
+    ignoredFile = musicFolder / "Live.Show.2026.mp4"
+    ignoredFile.write_bytes(b"x" * 100)
+
+    movieStorage = tmp_path / "movie1"
+    movieStorage.mkdir()
+    tvStorage = tmp_path / "TV"
+    tvStorage.mkdir()
+
+    with patch.object(
+        confirmedOrganizer,
+        "scanStorageLocations",
+        return_value=([movieStorage], [tvStorage]),
+    ), patch.object(confirmedOrganizer, "_prepareMetadataLibrary"), patch.object(
+        confirmedOrganizer,
+        "_classifyVideoFile",
+        return_value=(None, {"title": "One Mile", "year": "2026", "extension": ".mp4"}),
+    ), patch.object(
+        confirmedOrganizer, "moveMovie", return_value=True
+    ) as mockMoveMovie:
+        confirmedOrganizer.processFiles(interactive=False)
+
+    assert [call.args[0] for call in mockMoveMovie.call_args_list] == [normalFile]
+    assert ignoredFile.exists()
+
+
+def testMoveMusicFileDryRunRecordsArtistAlbumDestination(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    musicFolder = organizer.sourceDir / "Music"
+    albumFolder = musicFolder / "The Artist" / "The Album"
+    albumFolder.mkdir(parents=True)
+    srcFile = albumFolder / "02 - Second Track.mp3"
+    srcFile.write_bytes(b"x")
+    musicRoot = tmp_path / "Music"
+
+    with patch.object(organizer, "_getMusicLibraryRoot", return_value=musicRoot):
+        result = organizer.moveMusicFile(srcFile, musicFolder)
+
+    assert result is True
+    assert srcFile.exists()
+    assert organizer._summaryTransfers == [
+        (
+            str(srcFile),
+            str(musicRoot / "The Artist" / "The Album" / "02 - Second Track.mp3"),
+        )
+    ]
 
 
 def testProcessFilesRenamesExtrasFolderToFeaturettes(
@@ -4856,6 +5013,122 @@ def testCleanTorrentNamesScansSubdirectories(tmp_path: Path):
     assert stats["renamed"] == 1
 
 
+def testResetMovieMetadataRepairsMetadataAndCanonicalNames(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    movieStorage = tmp_path / "movie1"
+    movieFolder = movieStorage / "inception (2010)"
+    movieFolder.mkdir(parents=True)
+    movieFile = movieFolder / "Inception.2010.1080p.mkv"
+    movieFile.write_bytes(b"x" * 20)
+    movieXml = movieFolder / "movie.xml"
+    movieXml.write_text(
+        "<Title><LocalTitle>Inception</LocalTitle><ProductionYear>2010</ProductionYear></Title>",
+        encoding="utf-8",
+    )
+    libraryPath = tmp_path / "metadataLibrary.json"
+
+    confirmedOrganizer._movieMetadataFetcher = MagicMock(
+        return_value={
+            "type": "movie",
+            "title": "Inception",
+            "year": "2010",
+            "imdbId": "tt1375666",
+            "tmdbId": "27205",
+            "metadataSource": "tmdb",
+        }
+    )
+
+    with patch.object(
+        confirmedOrganizer,
+        "_getMetadataLibraryPath",
+        return_value=libraryPath,
+    ):
+        with patch.object(confirmedOrganizer, "_fetchMovieArtwork") as mockArtwork:
+            stats = confirmedOrganizer.resetMovieMetadata([movieStorage])
+
+    canonicalFolder = movieStorage / "Inception (2010)"
+    canonicalFile = canonicalFolder / "Inception (2010).mkv"
+    assert stats == {"renamed": 1, "skipped": 0, "errors": 0}
+    assert canonicalFolder.exists()
+    assert canonicalFile.exists()
+    assert not movieFolder.exists()
+    updatedXml = (canonicalFolder / "movie.xml").read_text(encoding="utf-8")
+    assert "<IMDbId>tt1375666</IMDbId>" in updatedXml
+    assert "<TMDbId>27205</TMDbId>" in updatedXml
+    assert (canonicalFolder / "mcm_id__tt1375666-27205.dvdid.xml").exists()
+    mockArtwork.assert_called_once()
+
+
+def testResetMovieMetadataSkipsSupplementalMovieFiles(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    movieStorage = tmp_path / "movie1"
+    movieFolder = movieStorage / "Inception (2010)"
+    extrasFolder = movieFolder / "Featurettes"
+    extrasFolder.mkdir(parents=True)
+    mainFile = movieFolder / "Inception (2010).mkv"
+    mainFile.write_bytes(b"x" * 20)
+    extraFile = extrasFolder / "Inception.2010.Behind.The.Scenes.mkv"
+    extraFile.write_bytes(b"x" * 20)
+
+    with patch.object(confirmedOrganizer, "_fetchMovieArtwork"):
+        stats = confirmedOrganizer.resetMovieMetadata([movieStorage])
+
+    assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
+    assert extraFile.exists()
+
+
+def testResetLibraryMetadataMovieTargetSkipsTvMetadataPreparation(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    movieStorage = tmp_path / "movie1"
+    tvStorage = tmp_path / "video1" / "TV"
+
+    with patch.object(
+        organizer,
+        "scanStorageLocations",
+        return_value=([movieStorage], [tvStorage]),
+    ):
+        with patch.object(organizer, "_prepareMetadataLibrary") as mockPrepare:
+            with patch.object(
+                organizer,
+                "resetMovieMetadata",
+                return_value={"renamed": 0, "skipped": 0, "errors": 0},
+            ) as mockMovies:
+                with patch.object(organizer, "resetTvEpisodeTitles") as mockTv:
+                    organizer.resetLibraryMetadata(target="movies")
+
+    mockPrepare.assert_called_once_with([movieStorage], [])
+    mockMovies.assert_called_once_with([movieStorage])
+    mockTv.assert_not_called()
+
+
+def testResetLibraryMetadataTvTargetSkipsMovieMetadataPreparation(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    movieStorage = tmp_path / "movie1"
+    tvStorage = tmp_path / "video1" / "TV"
+
+    with patch.object(
+        organizer,
+        "scanStorageLocations",
+        return_value=([movieStorage], [tvStorage]),
+    ):
+        with patch.object(organizer, "_prepareMetadataLibrary") as mockPrepare:
+            with patch.object(organizer, "resetMovieMetadata") as mockMovies:
+                with patch.object(
+                    organizer,
+                    "resetTvEpisodeTitles",
+                    return_value={"renamed": 0, "skipped": 0, "errors": 0},
+                ) as mockTv:
+                    organizer.resetLibraryMetadata(target="tv")
+
+    mockPrepare.assert_called_once_with([], [tvStorage])
+    mockMovies.assert_not_called()
+    mockTv.assert_called_once_with([tvStorage])
+
+
 def testResetTvEpisodeTitlesRenamesNoisyStoredEpisodes(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer
 ):
@@ -6205,7 +6478,7 @@ def testGetSummaryReportPathUsesApplicationDirectory(tmp_path: Path):
     )
 
 
-def testMainRescanModeCallsResetTvEpisodeTitlesAndSetsSummaryPath():
+def testMainRescanModeCallsResetLibraryMetadataAndSetsSummaryPath():
     organizerInstance = MagicMock()
 
     with patch(
@@ -6228,7 +6501,113 @@ def testMainRescanModeCallsResetTvEpisodeTitlesAndSetsSummaryPath():
         / f"summary.{omv_main.datetime.now().strftime('%Y%m%d')}.txt"
     )
     assert organizerInstance.summaryReportMode == "rescan"
-    organizerInstance.resetTvEpisodeTitles.assert_called_once_with()
+    organizerInstance.resetLibraryMetadata.assert_called_once_with(target="both")
+    organizerInstance.processFiles.assert_not_called()
+
+
+def testMainRescanRejectsBothPositionalTarget():
+    organizerInstance = MagicMock()
+
+    with patch("organiseMyVideo.VideoOrganizer", return_value=organizerInstance):
+        with patch(
+            "sys.argv",
+            ["organiseMyVideo", "--source", "/tmp/source", "--rescan", "both"],
+        ):
+            with pytest.raises(SystemExit):
+                omv_main.main()
+
+    organizerInstance.resetLibraryMetadata.assert_not_called()
+    organizerInstance.processFiles.assert_not_called()
+
+
+def testMainRescanRejectsMoviePositionalTarget():
+    organizerInstance = MagicMock()
+
+    with patch("organiseMyVideo.VideoOrganizer", return_value=organizerInstance):
+        with patch(
+            "sys.argv",
+            [
+                "organiseMyVideo",
+                "--source",
+                "/tmp/source",
+                "--rescan",
+                "movies",
+            ],
+        ):
+            with pytest.raises(SystemExit):
+                omv_main.main()
+
+    organizerInstance.resetLibraryMetadata.assert_not_called()
+    organizerInstance.processFiles.assert_not_called()
+
+
+def testMainRescanRejectsTvPositionalTarget():
+    organizerInstance = MagicMock()
+
+    with patch("organiseMyVideo.VideoOrganizer", return_value=organizerInstance):
+        with patch(
+            "sys.argv",
+            ["organiseMyVideo", "--source", "/tmp/source", "--rescan", "tv"],
+        ):
+            with pytest.raises(SystemExit):
+                omv_main.main()
+
+    organizerInstance.resetLibraryMetadata.assert_not_called()
+    organizerInstance.processFiles.assert_not_called()
+
+
+def testMainRescanRejectsSingularMoviePositionalTarget():
+    organizerInstance = MagicMock()
+
+    with patch("organiseMyVideo.VideoOrganizer", return_value=organizerInstance):
+        with patch(
+            "sys.argv",
+            ["organiseMyVideo", "--source", "/tmp/source", "--rescan", "movie"],
+        ):
+            with pytest.raises(SystemExit):
+                omv_main.main()
+
+    organizerInstance.resetLibraryMetadata.assert_not_called()
+    organizerInstance.processFiles.assert_not_called()
+
+
+def testMainRescanMovieFlagCallsResetLibraryMetadataWithMovies():
+    organizerInstance = MagicMock()
+
+    with patch("organiseMyVideo.VideoOrganizer", return_value=organizerInstance):
+        with patch(
+            "sys.argv",
+            [
+                "organiseMyVideo",
+                "--source",
+                "/tmp/source",
+                "--rescan",
+                "--movie",
+            ],
+        ):
+            omv_main.main()
+
+    organizerInstance.resetLibraryMetadata.assert_called_once_with(target="movies")
+    organizerInstance.processFiles.assert_not_called()
+
+
+def testMainRescanVideoFlagCallsResetLibraryMetadataWithTv():
+    organizerInstance = MagicMock()
+
+    with patch("organiseMyVideo.VideoOrganizer", return_value=organizerInstance):
+        with patch(
+            "sys.argv",
+            [
+                "organiseMyVideo",
+                "--source",
+                "/tmp/source",
+                "--rescan",
+                "--video",
+            ],
+        ):
+            omv_main.main()
+
+    organizerInstance.resetLibraryMetadata.assert_called_once_with(target="tv")
     organizerInstance.processFiles.assert_not_called()
 
 

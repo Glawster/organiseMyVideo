@@ -95,6 +95,39 @@ class VideoRescanMixin:
             )
             yield showName, seriesId, videoFiles
 
+    def _iterResetMovieFiles(self, movieDir: Path):
+        """Yield grouped reset candidates by stored movie folder."""
+        try:
+            entries = sorted(movieDir.iterdir(), key=lambda item: item.name.casefold())
+        except OSError as error:
+            logger.warning("could not inspect movie storage %s: %s", movieDir, error)
+            return
+
+        for entry in entries:
+            if not entry.is_dir():
+                continue
+            videoFiles = [
+                videoFile
+                for videoFile in sorted(entry.rglob("*"))
+                if videoFile.is_file()
+                and videoFile.suffix.lower() in VIDEO_EXTENSIONS
+                and not self._isResetMovieSupplementalFile(entry, videoFile)
+            ]
+            if videoFiles:
+                yield entry, videoFiles
+
+    def _isResetMovieSupplementalFile(self, movieFolder: Path, videoFile: Path) -> bool:
+        """Return True for extras/featurettes that should not drive movie rescans."""
+        try:
+            relativeParts = videoFile.relative_to(movieFolder).parts
+        except ValueError:
+            return False
+        if len(relativeParts) <= 1:
+            return False
+        return any(
+            part.casefold() in {"extras", "featurettes"} for part in relativeParts
+        )
+
     def _iterResetTvShowDirs(self, tvDir: Path) -> Iterable[Path]:
         """Yield top-level TV show directories for reset scans."""
         try:
@@ -638,6 +671,140 @@ class VideoRescanMixin:
             return
         ET.ElementTree(root).write(metadataFile, encoding="utf-8", xml_declaration=True)
 
+    def _updateMovieMetadataRoot(self, root: ET.Element, movieInfo: dict) -> bool:
+        """Update a movie metadata XML root with resolved title, year, and IDs."""
+        fieldMap = {
+            "LocalTitle": movieInfo.get("title") or "",
+            "OriginalTitle": movieInfo.get("title") or "",
+            "ProductionYear": movieInfo.get("year") or "",
+            "IMDbId": movieInfo.get("imdbId") or "",
+            "TMDbId": movieInfo.get("tmdbId") or "",
+        }
+        changed = False
+        for fieldName, value in fieldMap.items():
+            node = root.find(fieldName)
+            if node is None:
+                node = ET.SubElement(root, fieldName)
+                changed = True
+            if (node.text or "") != value:
+                node.text = value
+                changed = True
+        return changed
+
+    def _updateMovieMetadataFile(self, metadataFile: Path, movieInfo: dict) -> None:
+        """Update or regenerate movie.xml for an existing stored movie."""
+        root = self._readXmlRoot(metadataFile)
+        if root is None:
+            if metadataFile.exists() and self._readXmlText(metadataFile) is not None:
+                title = movieInfo.get("title")
+                if not title:
+                    return
+                root = ET.Element("Title")
+                self._updateMovieMetadataRoot(root, movieInfo)
+                if self.dryRun:
+                    return
+                metadataFile.parent.mkdir(parents=True, exist_ok=True)
+                ET.ElementTree(root).write(
+                    metadataFile, encoding="utf-8", xml_declaration=True
+                )
+            return
+
+        if not self._updateMovieMetadataRoot(root, movieInfo):
+            return
+        logger.action("update metadata: %s", metadataFile)
+        if self.dryRun:
+            return
+        ET.ElementTree(root).write(metadataFile, encoding="utf-8", xml_declaration=True)
+
+    def _resetMovieMetadataForFile(self, videoFile: Path) -> str:
+        """Repair metadata and canonical naming for one stored movie file."""
+        with self._suppressResetNoiseLogs():
+            mcmHints = self._readMovieMcmHints(videoFile)
+            parsedMovieInfo = self.parseMovieFilename(videoFile.name)
+            sourceMovieInfo = self._applyMovieMcmHints(
+                parsedMovieInfo, mcmHints, videoFile
+            ) or parsedMovieInfo
+            sourceMovieInfo = self._normaliseMovieMetadata(sourceMovieInfo)
+            if not sourceMovieInfo:
+                return "skipped"
+            resolvedMovieInfo = (
+                self._enrichMovieMetadata(sourceMovieInfo) or sourceMovieInfo
+            )
+
+        movieDir = videoFile.parent
+        with self._suppressResetMetadataPreserveLogs():
+            movieXml = movieDir / "movie.xml"
+            if movieXml.exists():
+                self._updateMovieMetadataFile(movieXml, resolvedMovieInfo)
+            else:
+                self._ensureMovieMetadata(movieDir, resolvedMovieInfo)
+            self._ensureMovieDvdIdMetadata(movieDir, resolvedMovieInfo)
+            self._fetchMovieArtwork(resolvedMovieInfo, movieDir)
+
+        destinationName = self._buildMovieDestinationFilename(
+            videoFile, resolvedMovieInfo
+        )
+        if destinationName == videoFile.name:
+            return "skipped"
+
+        destinationPath = videoFile.with_name(destinationName)
+        if destinationPath.exists():
+            logger.error("rescan movie target already exists: %s", destinationPath)
+            return "errors"
+
+        logger.multiline(["renaming movie", videoFile.name, destinationPath.name])
+        if self.dryRun:
+            self._recordSummaryRename(videoFile, destinationPath)
+            return "renamed"
+
+        videoFile.rename(destinationPath)
+        self._recordSummaryRename(videoFile, destinationPath)
+        return "renamed"
+
+    def _maybeRenameResetMovieFolder(self, movieFolder: Path, videoFiles: list[Path]):
+        """Return updated movie folder and paths after canonical folder rename."""
+        if not movieFolder.is_dir() or not videoFiles:
+            return movieFolder, videoFiles
+
+        movieInfo = self._readMovieMcmHints(videoFiles[0]) or self.parseMovieFilename(
+            videoFiles[0].name
+        )
+        movieInfo = self._normaliseMovieMetadata(movieInfo)
+        if not movieInfo or not movieInfo.get("title") or not movieInfo.get("year"):
+            return movieFolder, videoFiles
+
+        destinationDir = movieFolder.with_name(
+            f"{movieInfo['title']} ({movieInfo['year']})"
+        )
+        if destinationDir == movieFolder:
+            return movieFolder, videoFiles
+        if destinationDir.exists():
+            logger.error("rescan movie folder target already exists: %s", destinationDir)
+            return movieFolder, videoFiles
+
+        logger.action(
+            "renaming movie folder: %s (from %s)",
+            destinationDir.name,
+            movieFolder.name,
+        )
+        self._recordSummaryRename(movieFolder, destinationDir)
+        if self.dryRun:
+            return destinationDir, [
+                destinationDir / videoFile.relative_to(movieFolder)
+                for videoFile in videoFiles
+            ]
+
+        try:
+            movieFolder.rename(destinationDir)
+        except OSError as error:
+            logger.error("could not rename movie folder %s: %s", movieFolder, error)
+            return movieFolder, videoFiles
+
+        return destinationDir, [
+            destinationDir / videoFile.relative_to(movieFolder)
+            for videoFile in videoFiles
+        ]
+
     def _resetTvEpisodeTitleForFile(self, videoFile: Path) -> str:
         """Rename one stored TV episode file when better title metadata is available."""
         parsedTvInfo = self.parseTvFilename(videoFile.name)
@@ -795,13 +962,14 @@ class VideoRescanMixin:
             self._updateEpisodeMetadataFile(destinationMetadataFile, resolvedTvInfo)
         return "renamed"
 
-    def resetTvEpisodeTitles(self) -> dict:
+    def resetTvEpisodeTitles(self, videoDirs: Optional[list[Path]] = None) -> dict:
         """Retitle stored TV episodes whose filename suffix still looks noisy."""
         stats = {"renamed": 0, "skipped": 0, "errors": 0}
 
-        with self._suppressResetNoiseLogs():
-            movieDirs, videoDirs = self.scanStorageLocations()
-            self._prepareMetadataLibrary(movieDirs, videoDirs)
+        if videoDirs is None:
+            with self._suppressResetNoiseLogs():
+                movieDirs, videoDirs = self.scanStorageLocations()
+                self._prepareMetadataLibrary(movieDirs, videoDirs)
         if not videoDirs:
             logger.error("No TV storage locations found!")
             self._writeSummaryReport()
@@ -851,3 +1019,60 @@ class VideoRescanMixin:
 
         self._writeSummaryReport()
         return stats
+
+    def resetMovieMetadata(self, movieDirs: Optional[list[Path]] = None) -> dict:
+        """Repair stored movie metadata and canonical movie filenames."""
+        stats = {"renamed": 0, "skipped": 0, "errors": 0}
+
+        if movieDirs is None:
+            with self._suppressResetNoiseLogs():
+                movieDirs, videoDirs = self.scanStorageLocations()
+                self._prepareMetadataLibrary(movieDirs, videoDirs)
+
+        if not movieDirs:
+            logger.error("No movie storage locations found!")
+            return stats
+
+        for movieDir in movieDirs:
+            for movieFolder, videoFiles in self._iterResetMovieFiles(movieDir):
+                logger.action(f"rescanning movie: {movieFolder.name}")
+                movieFolder, videoFiles = self._maybeRenameResetMovieFolder(
+                    movieFolder, videoFiles
+                )
+                for videoFile in videoFiles:
+                    outcome = self._resetMovieMetadataForFile(videoFile)
+                    stats[outcome] += 1
+
+        return stats
+
+    def resetLibraryMetadata(self, target: str = "both") -> dict:
+        """Repair stored movie metadata, TV metadata, or both."""
+        target = (target or "both").casefold()
+        if target == "movie":
+            target = "movies"
+        if target not in {"both", "movies", "tv"}:
+            raise ValueError(f"unknown rescan target: {target}")
+
+        with self._suppressResetNoiseLogs():
+            movieDirs, videoDirs = self.scanStorageLocations()
+            metadataMovieDirs = movieDirs if target in {"both", "movies"} else []
+            metadataVideoDirs = videoDirs if target in {"both", "tv"} else []
+            self._prepareMetadataLibrary(metadataMovieDirs, metadataVideoDirs)
+
+        emptyStats = {"renamed": 0, "skipped": 0, "errors": 0}
+        movieStats = dict(emptyStats)
+        tvStats = {"renamed": 0, "skipped": 0, "errors": 0}
+
+        if target in {"both", "movies"}:
+            movieStats = self.resetMovieMetadata(movieDirs)
+
+        if target in {"both", "tv"}:
+            if videoDirs:
+                tvStats = self.resetTvEpisodeTitles(videoDirs)
+            else:
+                logger.error("No TV storage locations found!")
+                self._writeSummaryReport()
+        else:
+            self._writeSummaryReport()
+
+        return {"movies": movieStats, "tv": tvStats}

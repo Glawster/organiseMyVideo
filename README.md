@@ -64,7 +64,9 @@ python organiseMyVideo.py --torrent --clean --confirm
 | `--clean` | Clean the source directory, or when combined with `--torrent`, also clean prefixed `.torrent` names |
 | `--non-interactive` | Skip prompts for files that cannot be auto-detected |
 | `--refresh` | Rebuild the saved metadata library from storage before processing files |
-| `--rescan` | Scan existing TV library files and rename episodes whose filename title still looks like release noise; when run interactively it can also prompt to merge duplicate show folders and choose the master folder |
+| `--rescan` | Scan existing movie and TV libraries, repair movie metadata/artwork, canonicalise movie names, and rename TV episodes whose filename title still looks like release noise |
+| `--movie` | With `--rescan`, limit repairs to movies |
+| `--video` | With `--rescan`, limit repairs to TV/video episodes |
 | `--no-curses` | Use line-based prompts instead of the default curses single-key menus |
 | `--torrent` | Run torrent cleanup against the `Downloads` folder that sits next to the source directory |
 | `--debug` | Enable debug logging, including TVDB title payload debug lines |
@@ -73,7 +75,7 @@ The metadata library is saved in `~/.config/organiseMyVideo/metadataLibrary.json
 
 `--auto` reuses the normal organiser logic without prompts and appends a plain-text summary in `~/.config/organiseMyVideo/summary.yyyymmdd.txt`, including whether each entry was a dry-run or an actual run plus any file moves, renames, cleanup tasks, and possible duplicate TV show folders found that day.
 
-`--rescan` scans the existing TV library roots, normalises retitled episodes to the newer space-style show/title fragments, capitalises lowercase TV show folders when needed, and only falls back to scraper lookups when the current filename suffix still looks like release noise or is missing. It also warns when multiple show folders share the same stored SeriesID so likely duplicates are easier to spot, and interactive runs can prompt to merge those duplicate folders while choosing which one remains the master. If you answer that a prompted group is not a duplicate, that choice is saved in `~/.config/organiseMyVideo/config.json` and future runs suppress the same warning. When an episode is retitled, matching same-stem `.xml` and `.jpg` companion files are renamed with it. Console output is otherwise limited to `rescanning: ...` lines plus any actual rescan rename lines.
+`--rescan` scans the existing movie and TV library roots. Use `--rescan --movie` when you only need movie metadata/name repair, and `--rescan --video` when you only need the TV episode pass. For movies it refreshes or creates MCM-style `movie.xml` and `mcm_id__*.dvdid.xml` files when metadata is available, fetches missing artwork from configured providers, and renames stored movie files/folders to the canonical `Title (Year)` shape when safe. For TV it normalises retitled episodes to the newer space-style show/title fragments, capitalises lowercase TV show folders when needed, and only falls back to scraper lookups when the current filename suffix still looks like release noise or is missing. It also warns when multiple show folders share the same stored SeriesID so likely duplicates are easier to spot, and interactive runs can prompt to merge those duplicate folders while choosing which one remains the master. If you answer that a prompted group is not a duplicate, that choice is saved in `~/.config/organiseMyVideo/config.json` and future runs suppress the same warning. When an episode is retitled, matching same-stem `.xml` and `.jpg` companion files are renamed with it. Console output is otherwise limited to `rescanning: ...` lines plus any actual rescan rename lines.
 
 ---
 
