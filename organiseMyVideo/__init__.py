@@ -77,5 +77,9 @@ class VideoOrganizer(MetadataMixin, VideoMixin, TorrentMixin):
         self.tvdbApiKeyPrompt = None
         self._tvdbApiKeyPromptAttempted = False
         self.summaryReportPath = None
+        self.summaryReportMode = None
         self._summaryTransfers = []
         self._summaryRenames = []
+        self._summaryCleanupTasks = []
+        self._summaryDuplicateTvShows = []
+        self._resetIgnoredDuplicateTvShowGroups = None

@@ -282,6 +282,9 @@ class VideoMoveMixin:
             showName = result["name"]
             tvInfo["showName"] = showName
 
+        showName = self._capitaliseLowercaseTvShowTitle(showName) or showName
+        tvInfo["showName"] = showName
+
         # Find existing show directory or choose storage location
         existingShowDir = self.findExistingTvShowDir(showName, videoDirs)
 
@@ -298,7 +301,13 @@ class VideoMoveMixin:
 
         # Create season directory
         seasonDir = showDir / f"Season {season:02d}"
-        destFile = seasonDir / self._buildTvDestinationFilename(sourceFile, tvInfo)
+        destFile = seasonDir / self._buildTvDestinationFilename(
+            sourceFile,
+            tvInfo,
+            preferSpaceStyle=bool(
+                tvInfo.get("metadataSource") and tvInfo.get("episodeTitle")
+            ),
+        )
 
         logger.action(
             f"moving TV show:\n" f"     {sourceFile.name}\n" f"     -> {destFile}"
@@ -373,6 +382,7 @@ class VideoMoveMixin:
 
         if not videoFiles:
             logger.value("no video files found in", self.sourceDir)
+            self._writeSummaryReport()
             return
 
         logger.info(f"found {len(videoFiles)} video file(s) to process")

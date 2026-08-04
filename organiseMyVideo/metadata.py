@@ -241,7 +241,9 @@ class MetadataMixin:
         normalised["showName"] = normalised.get("showName") or None
         normalised["season"] = self._normaliseEpisodeValue(normalised.get("season"))
         normalised["episode"] = self._normaliseEpisodeValue(normalised.get("episode"))
-        episodeTitle = self._normaliseTimedTvEpisodeTitle(normalised.get("episodeTitle"))
+        episodeTitle = self._normaliseTimedTvEpisodeTitle(
+            normalised.get("episodeTitle")
+        )
         normalised["episodeTitle"] = episodeTitle or None
         normalised["imdbId"] = normalised.get("imdbId") or None
         normalised["seriesId"] = self._normaliseIdValue(normalised.get("seriesId"))

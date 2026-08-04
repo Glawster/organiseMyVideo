@@ -5,6 +5,7 @@ import argparse
 import json
 import logging
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -79,19 +80,8 @@ def _promptForTvdbApiKey(configPath: Path) -> Optional[str]:
 
 def _getSummaryReportPath(sourcePath: str, mode: str) -> Path:
     """Return the summary-report path for auto/rescan runs."""
-    suffix = "rescan" if mode == "rescan" else "auto"
-    reportPath = Path(sourcePath) / f"organiseMyVideo-{suffix}-summary.txt"
-    if not reportPath.exists():
-        return reportPath
-
-    for index in range(1, 100):
-        incrementedPath = reportPath.with_name(
-            f"{reportPath.stem}.{index:02d}{reportPath.suffix}"
-        )
-        if not incrementedPath.exists():
-            return incrementedPath
-
-    raise FileExistsError(f"no available summary report name for {reportPath}")
+    del sourcePath, mode
+    return APP_CONFIG_FILE.parent / f"summary.{datetime.now().strftime('%Y%m%d')}.txt"
 
 
 def main():
@@ -115,7 +105,7 @@ def main():
     parser.add_argument(
         "--auto",
         action="store_true",
-        help="run without prompts and write a text summary of transfers/renames into the source directory",
+        help="run without prompts and append a dated text summary in the application directory",
     )
     parser.add_argument(
         "--clean",
@@ -233,6 +223,7 @@ def main():
     )
     if args.auto or selectedMode == "rescan":
         organizer.summaryReportPath = _getSummaryReportPath(args.source, selectedMode)
+        organizer.summaryReportMode = selectedMode
     logger.done("video organizer initialized")
 
     if args.torrent:

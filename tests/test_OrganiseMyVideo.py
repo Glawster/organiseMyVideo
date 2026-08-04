@@ -48,6 +48,14 @@ def confirmedOrganizer(sourceDir: Path) -> VideoOrganizer:
     return VideoOrganizer(sourceDir=str(sourceDir), dryRun=False)
 
 
+@pytest.fixture(autouse=True)
+def isolateDuplicateTvShowConfig(tmp_path: Path):
+    """Keep duplicate-folder persistence isolated from the real home directory."""
+    configFile = tmp_path / "config" / "config.json"
+    with patch("organiseMyVideo.video_rescan.APP_CONFIG_FILE", configFile):
+        yield configFile
+
+
 # ---------------------------------------------------------------------------
 # VideoOrganizer.__init__
 # ---------------------------------------------------------------------------
@@ -980,6 +988,7 @@ def testProcessFilesRenamesExtrasFolderToFeaturettes(
     extrasDir.mkdir()
     extraFile = extrasDir / "Bonus.Feature.2026.mp4"
     extraFile.write_bytes(b"x" * 100)
+    confirmedOrganizer.summaryReportPath = tmp_path / "summaryt.20260529.txt"
 
     movieStorage = tmp_path / "movie1"
     movieStorage.mkdir()
@@ -1002,6 +1011,10 @@ def testProcessFilesRenamesExtrasFolderToFeaturettes(
     assert featurettesDir.exists()
     assert (featurettesDir / "Bonus.Feature.2026.mp4").exists()
     mockMoveMovie.assert_not_called()
+    assert (
+        f"- {extrasDir} -> {featurettesDir}"
+        in confirmedOrganizer.summaryReportPath.read_text(encoding="utf-8")
+    )
 
 
 def testProcessFilesUsesMovieMcmHintsWhenFilenameCannotBeParsed(
@@ -1149,7 +1162,7 @@ def testProcessFilesUsesTvMcmHintsWhenFilenameCannotBeParsed(
         tvStorage
         / "After Life"
         / "Season 01"
-        / "After.Life.S01E04.Sic.Semper.Systema.mkv"
+        / "After Life.S01E04.Sic Semper Systema.mkv"
     )
     assert destFile.exists()
     assert not srcFile.exists()
@@ -1198,7 +1211,7 @@ def testProcessFilesPrefersTvMcmShowNameOverFilenameMismatch(
         confirmedOrganizer.processFiles(interactive=False)
 
     destFile = (
-        tvStorage / "Breaking Bad" / "Season 01" / "Breaking.Bad.S01E01.Pilot.mkv"
+        tvStorage / "Breaking Bad" / "Season 01" / "Breaking Bad.S01E01.Pilot.mkv"
     )
     assert destFile.exists()
     assert not srcFile.exists()
@@ -1323,7 +1336,7 @@ def testProcessFilesUsesMetadataLibraryToRenameLaterScan(tmp_path: Path):
         tvStorage
         / "After Life"
         / "Season 01"
-        / "After.Life.S01E04.Sic.Semper.Systema.mkv"
+        / "After Life.S01E04.Sic Semper Systema.mkv"
     )
     assert destFile.exists()
     assert not secondFile.exists()
@@ -1379,8 +1392,8 @@ def testProcessFilesScrapesMissingEpisodeTitleAndWritesItBack(
                 confirmedOrganizer.processFiles(interactive=False)
 
     destSeasonDir = tvStorage / "Virgin River" / "Season 06"
-    destFile = destSeasonDir / "Virgin.River.S06E01.The.Beginning.mkv"
-    episodeXml = destSeasonDir / "metadata" / "Virgin.River.S06E01.The.Beginning.xml"
+    destFile = destSeasonDir / "Virgin River.S06E01.The Beginning.mkv"
+    episodeXml = destSeasonDir / "metadata" / "Virgin River.S06E01.The Beginning.xml"
     assert destFile.exists()
     assert not srcFile.exists()
     assert episodeXml.exists()
@@ -1456,7 +1469,7 @@ def testProcessFilesUsesLibraryCanonicalShowNameForPunctuationVariants(
                 confirmedOrganizer.processFiles(interactive=False)
 
     destFile = (
-        tvStorage / "Law & Order: SVU" / "Season 03" / "Law.Order.SVU.S03E02.Wrath.mkv"
+        tvStorage / "Law & Order: SVU" / "Season 03" / "Law Order SVU.S03E02.Wrath.mkv"
     )
     assert destFile.exists()
     assert not srcFile.exists()
@@ -1711,7 +1724,7 @@ def testProcessFilesBuildsMetadataLibraryFromStorageBeforeSourceProcessing(
         tvStorage
         / "After Life"
         / "Season 01"
-        / "After.Life.S01E04.Sic.Semper.Systema.mkv"
+        / "After Life.S01E04.Sic Semper Systema.mkv"
     )
     assert destFile.exists()
     assert not srcFile.exists()
@@ -1809,7 +1822,7 @@ def testProcessFilesUsesSavedMetadataLibraryWithoutStorageRescan(
         tvStorage
         / "After Life"
         / "Season 01"
-        / "After.Life.S01E04.Sic.Semper.Systema.mkv"
+        / "After Life.S01E04.Sic Semper Systema.mkv"
     )
     assert destFile.exists()
     assert not srcFile.exists()
@@ -2523,7 +2536,7 @@ def testProcessFilesCachesImdbFallbackEpisodeTitleForLaterRuns(tmp_path: Path):
         tvStorage
         / "Virgin River"
         / "Season 06"
-        / "Virgin.River.S06E01.The.Beginning.mkv"
+        / "Virgin River.S06E01.The Beginning.mkv"
     )
     assert cachedDest.exists()
     assert not secondFile.exists()
@@ -3298,7 +3311,7 @@ def testMoveTvShowDryRunReturnsTrueWithoutMoving(
     mockMove.assert_not_called()
     assert srcFile.exists()
     expectedDest = (
-        tvStorage / "Breaking Bad" / "Season 01" / "Breaking.Bad.S01E01.Pilot.mkv"
+        tvStorage / "Breaking Bad" / "Season 01" / "Breaking Bad.S01E01.Pilot.mkv"
     )
     assert (
         f"...moving TV show:\n"
@@ -3435,7 +3448,35 @@ def testMoveTvShowConfirmMovesFile(tmp_path: Path, confirmedOrganizer: VideoOrga
 
     assert result is True
     destFile = (
-        tvStorage / "Breaking Bad" / "Season 01" / "Breaking.Bad.S01E01.Pilot.mkv"
+        tvStorage / "Breaking Bad" / "Season 01" / "Breaking Bad.S01E01.Pilot.mkv"
+    )
+    assert destFile.exists()
+    assert not srcFile.exists()
+
+
+def testMoveTvShowCapitalisesLowercaseShowNames(
+    tmp_path: Path, confirmedOrganizer: VideoOrganizer
+):
+    srcFile = confirmedOrganizer.sourceDir / "breaking.bad.S01E01.Pilot.mkv"
+    srcFile.write_bytes(b"x" * 100)
+
+    tvStorage = tmp_path / "video1" / "TV"
+    tvStorage.mkdir(parents=True)
+
+    tvInfo = {
+        "showName": "breaking bad",
+        "season": 1,
+        "episode": 1,
+        "extension": ".mkv",
+        "type": "tv",
+    }
+    result = confirmedOrganizer.moveTvShow(
+        srcFile, tvInfo, [tvStorage], interactive=False
+    )
+
+    assert result is True
+    destFile = (
+        tvStorage / "Breaking Bad" / "Season 01" / "Breaking Bad.S01E01.Pilot.mkv"
     )
     assert destFile.exists()
     assert not srcFile.exists()
@@ -3904,7 +3945,7 @@ def testMoveTvShowUsesScrapedEpisodeTitleToRenameNoisyFilename(
         tvStorage
         / "Pitt, The"
         / "Season 02"
-        / "The.Pitt.S02E05.A.Better.Episode.Title.mkv"
+        / "The Pitt.S02E05.A Better Episode Title.mkv"
     )
     assert destFile.exists()
     assert not srcFile.exists()
@@ -4297,7 +4338,7 @@ def testMoveTvShowUsesDefaultWhenUserEntersBlank(
     assert result is True
     assert not srcFile.exists()
     destFile = (
-        tvStorage / "Breaking Bad" / "Season 01" / "Breaking.Bad.S01E01.Pilot.mkv"
+        tvStorage / "Breaking Bad" / "Season 01" / "Breaking Bad.S01E01.Pilot.mkv"
     )
     assert destFile.exists()
 
@@ -5004,6 +5045,40 @@ def testResetTvEpisodeTitlesPreservesMixedCaseShowNamesFromSeriesMetadata(
     assert "renaming TV show: iZombie (from izombie)" in caplog.text
 
 
+def testResetTvEpisodeTitlesDoesNotLowercaseReadableShowNamesFromSeriesMetadata(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    showDir = tvStorage / "Supernatural"
+    seasonDir = showDir / "Season 01"
+    seasonDir.mkdir(parents=True)
+    (showDir / "series.xml").write_text(
+        "<Series><SeriesName>supernatural</SeriesName></Series>", encoding="utf-8"
+    )
+    episodeFile = seasonDir / "Supernatural.S01E01.Pilot.mkv"
+    episodeFile.write_bytes(b"x" * 20)
+
+    with patch.object(
+        confirmedOrganizer,
+        "_fetchTvMetadataFromScraper",
+        side_effect=AssertionError("scraper lookup should not run"),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ):
+            with caplog.at_level("INFO"):
+                stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
+    assert (tvStorage / "Supernatural" / "Season 01" / episodeFile.name).exists()
+    assert not (tvStorage / "supernatural").exists()
+    assert "renaming TV show: supernatural (from Supernatural)" not in caplog.text
+
+
 def testResetTvEpisodeTitlesIgnoresAllCapsSeriesMetadataForMixedCaseFolder(
     tmp_path: Path,
     confirmedOrganizer: VideoOrganizer,
@@ -5036,6 +5111,44 @@ def testResetTvEpisodeTitlesIgnoresAllCapsSeriesMetadataForMixedCaseFolder(
     assert (tvStorage / "Outlander" / "Season 01" / episodeFile.name).exists()
     assert not (tvStorage / "OUTLANDER").exists()
     assert "renaming TV show: OUTLANDER (from Outlander)" not in caplog.text
+
+
+def testResetTvEpisodeTitlesDoesNotForceShortAllCapsShowFolders(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    showDir = tvStorage / "from"
+    seasonDir = showDir / "Season 01"
+    seasonDir.mkdir(parents=True)
+    (showDir / "series.xml").write_text(
+        "<Series><SeriesName>FROM</SeriesName><LocalTitle>From</LocalTitle></Series>",
+        encoding="utf-8",
+    )
+    episodeFile = seasonDir / "from.S01E01.Long.Day's.Journey.Into.Night.mkv"
+    episodeFile.write_bytes(b"x" * 20)
+
+    with patch.object(
+        confirmedOrganizer,
+        "_fetchTvMetadataFromScraper",
+        side_effect=AssertionError("scraper lookup should not run"),
+    ):
+        with patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ):
+            with caplog.at_level("INFO"):
+                stats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    renamedSeasonDir = tvStorage / "From" / "Season 01"
+    assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
+    assert renamedSeasonDir.exists()
+    assert (renamedSeasonDir / "from.S01E01.Long.Day's.Journey.Into.Night.mkv").exists()
+    assert not (tvStorage / "FROM").exists()
+    assert "renaming TV show: From (from from)" in caplog.text
+    assert "rescanning: From" in caplog.text
 
 
 def testResetTvEpisodeTitlesRegeneratesCorruptEpisodeMetadataXml(
@@ -5543,6 +5656,75 @@ def testResetTvEpisodeTitlesPromptsSeriesIdDuplicateOnlyOnce(
     )
 
 
+def testResetTvEpisodeTitlesRemembersNotDuplicateChoice(
+    tmp_path: Path,
+    confirmedOrganizer: VideoOrganizer,
+    caplog: pytest.LogCaptureFixture,
+):
+    tvStorage = tmp_path / "video1" / "TV"
+    configFile = tmp_path / "config" / "config.json"
+
+    for showName, filename in (
+        ("Grimm", "Grimm.S01E01.Pilot.mkv"),
+        ("Grimm (2011)", "Grimm.S01E02.Bears.Will.Be.Bears.mkv"),
+    ):
+        seasonDir = tvStorage / showName / "Season 01"
+        seasonDir.mkdir(parents=True)
+        (seasonDir / filename).write_bytes(b"x" * 20)
+
+    with (
+        patch.object(
+            confirmedOrganizer,
+            "_fetchTvMetadataFromScraper",
+            side_effect=AssertionError("scraper lookup should not run"),
+        ),
+        patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ),
+        patch.object(
+            confirmedOrganizer, "_shouldPromptInteractively", return_value=True
+        ),
+        patch.object(confirmedOrganizer, "_readMenuChoice", return_value="n"),
+        patch("organiseMyVideo.video_rescan.APP_CONFIG_FILE", configFile),
+    ):
+        with caplog.at_level("INFO"):
+            firstStats = confirmedOrganizer.resetTvEpisodeTitles()
+
+    assert firstStats == {"renamed": 0, "skipped": 2, "errors": 0}
+    assert json.loads(configFile.read_text(encoding="utf-8")) == {
+        "ignored_tv_show_duplicates": [["Grimm", "Grimm (2011)"]]
+    }
+    caplog.clear()
+
+    followupSourceDir = tmp_path / "source2"
+    followupSourceDir.mkdir()
+    followupOrganizer = VideoOrganizer(sourceDir=str(followupSourceDir), dryRun=False)
+
+    with (
+        patch.object(
+            followupOrganizer,
+            "_fetchTvMetadataFromScraper",
+            side_effect=AssertionError("scraper lookup should not run"),
+        ),
+        patch.object(
+            followupOrganizer,
+            "scanStorageLocations",
+            return_value=([], [tvStorage]),
+        ),
+        patch.object(
+            followupOrganizer, "_shouldPromptInteractively", return_value=False
+        ),
+        patch("organiseMyVideo.video_rescan.APP_CONFIG_FILE", configFile),
+    ):
+        with caplog.at_level("INFO"):
+            secondStats = followupOrganizer.resetTvEpisodeTitles()
+
+    assert secondStats == {"renamed": 0, "skipped": 2, "errors": 0}
+    assert "possible duplicate TV show folders" not in caplog.text
+
+
 def testResetTvEpisodeTitlesLogsCleanupWhenMergeLeavesConflictsBehind(
     tmp_path: Path,
     confirmedOrganizer: VideoOrganizer,
@@ -6004,36 +6186,22 @@ def testMainAutoModeDisablesPromptsAndSetsSummaryPath():
         refreshMetadataLibrary=False,
         useCurses=True,
     )
-    assert organizerInstance.summaryReportPath == Path(
-        "/tmp/source/organiseMyVideo-auto-summary.txt"
+    assert organizerInstance.summaryReportPath == (
+        omv_main.APP_CONFIG_FILE.parent
+        / f"summary.{omv_main.datetime.now().strftime('%Y%m%d')}.txt"
     )
+    assert organizerInstance.summaryReportMode == "process"
     organizerInstance.processFiles.assert_called_once_with(interactive=False)
 
 
-def testGetSummaryReportPathAddsIncrementWhenAutoSummaryExists(tmp_path: Path):
-    sourceDir = tmp_path / "source"
-    sourceDir.mkdir()
-    (sourceDir / "organiseMyVideo-auto-summary.txt").write_text(
-        "existing", encoding="utf-8"
-    )
+def testGetSummaryReportPathUsesApplicationDirectory(tmp_path: Path):
+    configFile = tmp_path / "config" / "config.json"
 
-    assert omv_main._getSummaryReportPath(str(sourceDir), "process") == (
-        sourceDir / "organiseMyVideo-auto-summary.01.txt"
-    )
+    with patch.object(omv_main, "APP_CONFIG_FILE", configFile):
+        reportPath = omv_main._getSummaryReportPath("/tmp/source", "process")
 
-
-def testGetSummaryReportPathSkipsUsedAutoSummaryIncrements(tmp_path: Path):
-    sourceDir = tmp_path / "source"
-    sourceDir.mkdir()
-    (sourceDir / "organiseMyVideo-auto-summary.txt").write_text(
-        "existing", encoding="utf-8"
-    )
-    (sourceDir / "organiseMyVideo-auto-summary.01.txt").write_text(
-        "existing", encoding="utf-8"
-    )
-
-    assert omv_main._getSummaryReportPath(str(sourceDir), "process") == (
-        sourceDir / "organiseMyVideo-auto-summary.02.txt"
+    assert reportPath == (
+        configFile.parent / f"summary.{omv_main.datetime.now().strftime('%Y%m%d')}.txt"
     )
 
 
@@ -6055,23 +6223,57 @@ def testMainRescanModeCallsResetTvEpisodeTitlesAndSetsSummaryPath():
         refreshMetadataLibrary=False,
         useCurses=True,
     )
-    assert organizerInstance.summaryReportPath == Path(
-        "/tmp/source/organiseMyVideo-rescan-summary.txt"
+    assert organizerInstance.summaryReportPath == (
+        omv_main.APP_CONFIG_FILE.parent
+        / f"summary.{omv_main.datetime.now().strftime('%Y%m%d')}.txt"
     )
+    assert organizerInstance.summaryReportMode == "rescan"
     organizerInstance.resetTvEpisodeTitles.assert_called_once_with()
     organizerInstance.processFiles.assert_not_called()
 
 
-def testGetSummaryReportPathAddsIncrementWhenRescanSummaryExists(tmp_path: Path):
-    sourceDir = tmp_path / "source"
-    sourceDir.mkdir()
-    (sourceDir / "organiseMyVideo-rescan-summary.txt").write_text(
-        "existing", encoding="utf-8"
+def testWriteSummaryReportAppendsTransfersRenamesAndCleanup(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    reportPath = tmp_path / "summaryt.20260529.txt"
+    organizer.summaryReportPath = reportPath
+    organizer.summaryReportMode = "process"
+    organizer._recordSummaryTransfer(
+        Path("/tmp/source/movie.mkv"), Path("/library/movie.mkv")
     )
+    organizer._recordSummaryRename(
+        Path("/tmp/source/Extras"), Path("/tmp/source/Featurettes")
+    )
+    organizer._recordSummaryCleanup("remove empty folder: /tmp/source/old")
+    organizer._recordSummaryDuplicateTvShow(
+        "possible duplicate TV show folders: Grimm",
+        ["Grimm", "Grimm (2011)"],
+    )
+    organizer._writeSummaryReport()
 
-    assert omv_main._getSummaryReportPath(str(sourceDir), "rescan") == (
-        sourceDir / "organiseMyVideo-rescan-summary.01.txt"
-    )
+    organizer._summaryTransfers = []
+    organizer._summaryRenames = []
+    organizer._summaryCleanupTasks = []
+    organizer._summaryDuplicateTvShows = []
+    organizer.dryRun = False
+    organizer.summaryReportMode = "rescan"
+    organizer._recordSummaryCleanup("cleanup needed: /tmp/source/duplicate")
+    organizer._writeSummaryReport()
+
+    reportText = reportPath.read_text(encoding="utf-8")
+    assert reportText.count("organiseMyVideo") == 2
+    assert "organiseMyVideo DRY-RUN process summary" in reportText
+    assert "organiseMyVideo ACTUAL-RUN rescan summary" in reportText
+    assert "Transfers:\n- /tmp/source/movie.mkv -> /library/movie.mkv" in reportText
+    assert "Renames:\n- /tmp/source/Extras -> /tmp/source/Featurettes" in reportText
+    assert "Cleanup:\n- remove empty folder: /tmp/source/old" in reportText
+    assert (
+        "Possible duplicate TV shows:\n"
+        "- possible duplicate TV show folders: Grimm\n"
+        "  - Grimm\n"
+        "  - Grimm (2011)"
+    ) in reportText
+    assert "- cleanup needed: /tmp/source/duplicate" in reportText
 
 
 def testMainConfiguresConsoleTimestampWithoutMilliseconds():

@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 import difflib
+import json
 import re
 import shutil
 import sys
@@ -12,9 +13,10 @@ from typing import Iterable, Optional
 
 from organiseMyProjects.logUtils import getLogger  # type: ignore
 
-from .constants import VIDEO_EXTENSIONS
+from .constants import APP_CONFIG_FILE, VIDEO_EXTENSIONS
 
 logger = getLogger()
+_IGNORED_TV_SHOW_DUPLICATES_CONFIG_KEY = "ignored_tv_show_duplicates"
 
 
 class VideoRescanMixin:
@@ -181,6 +183,108 @@ class VideoRescanMixin:
             "duplicateGroups": duplicateGroups,
         }
 
+    def _loadResetIgnoredDuplicateTvShowGroups(self) -> list[frozenset[str]]:
+        """Return persisted duplicate-folder groups the user marked as non-duplicates."""
+        cachedGroups = getattr(self, "_resetIgnoredDuplicateTvShowGroups", None)
+        if cachedGroups is not None:
+            return cachedGroups
+
+        config = {}
+        if APP_CONFIG_FILE.exists():
+            try:
+                loaded = json.loads(APP_CONFIG_FILE.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+                logger.warning(
+                    "could not read duplicate TV show config %s: %s",
+                    APP_CONFIG_FILE,
+                    error,
+                )
+            else:
+                if isinstance(loaded, dict):
+                    config = loaded
+
+        ignoredGroups = []
+        for item in config.get(_IGNORED_TV_SHOW_DUPLICATES_CONFIG_KEY, []):
+            if not isinstance(item, list):
+                continue
+            cleanedGroup = {
+                showName.strip()
+                for showName in item
+                if isinstance(showName, str) and showName.strip()
+            }
+            if len(cleanedGroup) < 2:
+                continue
+            ignoredGroups.append(frozenset(cleanedGroup))
+
+        self._resetIgnoredDuplicateTvShowGroups = ignoredGroups
+        return ignoredGroups
+
+    def _saveResetIgnoredDuplicateTvShowGroups(
+        self, ignoredGroups: list[frozenset[str]]
+    ) -> None:
+        """Persist duplicate-folder groups the user marked as non-duplicates."""
+        config = {}
+        if APP_CONFIG_FILE.exists():
+            try:
+                loaded = json.loads(APP_CONFIG_FILE.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+                logger.warning(
+                    "could not read duplicate TV show config %s: %s",
+                    APP_CONFIG_FILE,
+                    error,
+                )
+            else:
+                if isinstance(loaded, dict):
+                    config = loaded
+
+        config[_IGNORED_TV_SHOW_DUPLICATES_CONFIG_KEY] = [
+            self._sortResetDuplicateShowNames(group)
+            for group in sorted(
+                ignoredGroups,
+                key=lambda group: self._sortResetDuplicateShowNames(group),
+            )
+        ]
+        APP_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        APP_CONFIG_FILE.write_text(
+            json.dumps(config, indent=2, sort_keys=True), encoding="utf-8"
+        )
+        self._resetIgnoredDuplicateTvShowGroups = ignoredGroups
+
+    def _rememberResetDuplicateTvShowGroupIsNotDuplicate(
+        self, showNames: Iterable[str]
+    ) -> None:
+        """Persist that the supplied duplicate-folder group should be ignored."""
+        ignoredGroups = list(self._loadResetIgnoredDuplicateTvShowGroups())
+        ignoredGroup = frozenset(self._sortResetDuplicateShowNames(showNames))
+        if len(ignoredGroup) < 2 or ignoredGroup in ignoredGroups:
+            return
+        ignoredGroups.append(ignoredGroup)
+        self._saveResetIgnoredDuplicateTvShowGroups(ignoredGroups)
+
+    def _shouldIgnoreResetDuplicateTvShowGroup(self, showNames: Iterable[str]) -> bool:
+        """Return True when the group was previously marked as not duplicate."""
+        showNameSet = {
+            showName.strip()
+            for showName in showNames
+            if isinstance(showName, str) and showName.strip()
+        }
+        if len(showNameSet) < 2:
+            return False
+        return any(
+            showNameSet.issubset(ignoredGroup)
+            for ignoredGroup in self._loadResetIgnoredDuplicateTvShowGroups()
+        )
+
+    def _filterIgnoredResetDuplicateTvShowGroups(
+        self, duplicateGroups: Iterable[list[str]]
+    ) -> list[list[str]]:
+        """Drop duplicate-folder groups the user previously marked as valid."""
+        return [
+            group
+            for group in duplicateGroups
+            if not self._shouldIgnoreResetDuplicateTvShowGroup(group)
+        ]
+
     def _logResetDuplicateTvShowWarnings(
         self, showDirsBySeriesId: dict, canonicalNameGroups: list[dict]
     ) -> None:
@@ -203,6 +307,8 @@ class VideoRescanMixin:
             uniqueShowNames = sorted(set(showNames), key=str.casefold)
             if len(uniqueShowNames) < 2:
                 continue
+            if self._shouldIgnoreResetDuplicateTvShowGroup(uniqueShowNames):
+                continue
             yield {
                 "label": f"possible duplicate TV show folders: {seriesId}",
                 "showNames": uniqueShowNames,
@@ -214,10 +320,21 @@ class VideoRescanMixin:
             uniqueShowNames = sorted(set(group["showNames"]), key=str.casefold)
             if len(uniqueShowNames) < 2:
                 continue
+            if self._shouldIgnoreResetDuplicateTvShowGroup(uniqueShowNames):
+                continue
             yield {
                 "label": f"possible duplicate TV show folders: {group['canonicalName']}",
                 "showNames": uniqueShowNames,
             }
+
+    def _recordSummaryDuplicateTvShowWarnings(
+        self, showDirsBySeriesId: dict, canonicalNameGroups: list[dict]
+    ) -> None:
+        """Capture duplicate-folder warnings for the optional summary report."""
+        for warning in self._iterResetDuplicateTvShowWarnings(
+            showDirsBySeriesId, canonicalNameGroups
+        ):
+            self._recordSummaryDuplicateTvShow(warning["label"], warning["showNames"])
 
     def _logResetDuplicateTvShowFolders(self, tvDir: Path) -> None:
         """Warn when multiple stored TV show folders look like duplicates."""
@@ -263,7 +380,9 @@ class VideoRescanMixin:
     ) -> list[list[str]]:
         """Return connected groups of possibly-duplicate TV show folders."""
         duplicateAnalysis = self._buildResetDuplicateTvShowAnalysis(showEntries)
-        return duplicateAnalysis["duplicateGroups"]
+        return self._filterIgnoredResetDuplicateTvShowGroups(
+            duplicateAnalysis["duplicateGroups"]
+        )
 
     def _promptResetDuplicateTvShowMerge(
         self, showNames: list[str]
@@ -278,6 +397,7 @@ class VideoRescanMixin:
             logger.info("user requested to quit")
             sys.exit(0)
         if shouldMerge != "y":
+            self._rememberResetDuplicateTvShowGroupIsNotDuplicate(orderedShowNames)
             return None
 
         selectionKeys = "123456789abcdefghijklmnopqrstuvwxyz"
@@ -329,6 +449,9 @@ class VideoRescanMixin:
                     self._mergeResetTvShowFolderContents(sourcePath, destinationPath)
                     try:
                         sourcePath.rmdir()
+                        self._recordSummaryCleanup(
+                            f"removed empty folder: {sourcePath}"
+                        )
                     except OSError:
                         pass
                     continue
@@ -336,14 +459,19 @@ class VideoRescanMixin:
                     "skipping rescan merge; destination already exists: %s",
                     destinationPath,
                 )
+                self._recordSummaryCleanup(
+                    f"cleanup needed: {sourcePath} conflicts with existing {destinationPath}"
+                )
                 continue
             logger.multiline(
                 ["merging TV show folder item", sourcePath, destinationPath]
             )
+            self._recordSummaryTransfer(sourcePath, destinationPath)
             shutil.move(str(sourcePath), str(destinationPath))
 
         try:
             sourceDir.rmdir()
+            self._recordSummaryCleanup(f"removed empty folder: {sourceDir}")
         except OSError:
             pass
 
@@ -396,6 +524,9 @@ class VideoRescanMixin:
                 destinationDir = tvDir / masterShowName
                 logger.multiline(["merging TV show folders", masterShowName, showName])
                 if self.dryRun:
+                    self._recordSummaryCleanup(
+                        f"merge TV show folders needed: {sourceDir} -> {destinationDir}"
+                    )
                     continue
 
                 self._mergeResetTvShowFolderContents(sourceDir, destinationDir)
@@ -439,6 +570,8 @@ class VideoRescanMixin:
             _mergePromptedGroup(*promptResult)
 
         if leftoverMergedDirs:
+            for path in sorted(leftoverMergedDirs):
+                self._recordSummaryCleanup(f"cleanup needed: {path}")
             logger.multiline(
                 [
                     "rescan merge cleanup still needed",
@@ -678,15 +811,28 @@ class VideoRescanMixin:
             if self._shouldPromptInteractively():
                 showEntries = self._buildResetDuplicateTvShowEntries(tvDir)
                 duplicateAnalysis = self._buildResetDuplicateTvShowAnalysis(showEntries)
+                self._recordSummaryDuplicateTvShowWarnings(
+                    duplicateAnalysis["showNamesBySeriesId"],
+                    duplicateAnalysis["canonicalNameGroups"],
+                )
                 self._mergeResetDuplicateTvShowFolders(
                     tvDir,
                     showEntries,
-                    duplicateAnalysis["duplicateGroups"],
+                    self._filterIgnoredResetDuplicateTvShowGroups(
+                        duplicateAnalysis["duplicateGroups"]
+                    ),
                     duplicateAnalysis["showNamesBySeriesId"],
                     duplicateAnalysis["canonicalNameGroups"],
                 )
                 showEntryIterator = self._iterResetTvShowFiles(tvDir)
             else:
+                duplicateAnalysis = self._buildResetDuplicateTvShowAnalysis(
+                    self._buildResetDuplicateTvShowEntries(tvDir)
+                )
+                self._recordSummaryDuplicateTvShowWarnings(
+                    duplicateAnalysis["showNamesBySeriesId"],
+                    duplicateAnalysis["canonicalNameGroups"],
+                )
                 self._logResetDuplicateTvShowFolders(tvDir)
                 showEntryIterator = self._iterResetTvShowFiles(tvDir)
 

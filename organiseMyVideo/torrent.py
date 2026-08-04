@@ -13,7 +13,9 @@ logger = getLogger()
 class TorrentMixin:
     """Methods for managing torrent files in the download directory."""
 
-    def removeTorrentsInLibrary(self, torrentDir: str = "/mnt/video2/Downloads") -> dict:
+    def removeTorrentsInLibrary(
+        self, torrentDir: str = "/mnt/video2/Downloads"
+    ) -> dict:
         """
         Scan the download directory for .torrent files and delete those
         belonging to movies or TV shows already present in the library.
@@ -57,7 +59,9 @@ class TorrentMixin:
             stem = _PREFIX_REGEX.sub("", entry.stem, count=1).strip()
             fallback = stem + ".mkv"
             tvInfo = self.parseTvFilename(stem) or self.parseTvFilename(fallback)
-            movieInfo = self.parseMovieFilename(stem) or self.parseMovieFilename(fallback)
+            movieInfo = self.parseMovieFilename(stem) or self.parseMovieFilename(
+                fallback
+            )
 
             inLibrary = False
 
@@ -65,32 +69,44 @@ class TorrentMixin:
                 existingDir = self.findExistingTvShowDir(tvInfo["showName"], videoDirs)
                 if existingDir:
                     inLibrary = True
-                    logger.value("torrent matches TV show", f"{entry.name} → {existingDir}")
+                    logger.value(
+                        "torrent matches TV show", f"{entry.name} → {existingDir}"
+                    )
 
             if not inLibrary and movieInfo and movieDirs:
-                existingDir = self.findExistingMovieDir(movieInfo["title"], movieInfo["year"], movieDirs)
+                existingDir = self.findExistingMovieDir(
+                    movieInfo["title"], movieInfo["year"], movieDirs
+                )
                 if existingDir:
                     inLibrary = True
-                    logger.value("torrent matches Movie", f"{entry.name} → {existingDir}")
+                    logger.value(
+                        "torrent matches Movie", f"{entry.name} → {existingDir}"
+                    )
 
             if inLibrary:
                 downloadSubDir = entry.parent if entry.parent != downloadPath else None
                 if self.dryRun:
                     if downloadSubDir is not None:
                         logger.action(f"delete folder: {downloadSubDir.name}")
+                        self._recordSummaryCleanup(f"delete folder: {downloadSubDir}")
                         removedDirs.add(downloadSubDir)
                     else:
                         logger.action(f"delete torrent: {entry.name}")
+                        self._recordSummaryCleanup(f"delete torrent: {entry}")
                     stats["deleted"] += 1
                 else:
                     try:
                         if downloadSubDir is not None:
                             shutil.rmtree(downloadSubDir)
                             logger.action(f"deleted folder: {downloadSubDir.name}")
+                            self._recordSummaryCleanup(
+                                f"deleted folder: {downloadSubDir}"
+                            )
                             removedDirs.add(downloadSubDir)
                         else:
                             entry.unlink()
                             logger.action(f"deleted torrent: {entry.name}")
+                            self._recordSummaryCleanup(f"deleted torrent: {entry}")
                         stats["deleted"] += 1
                     except Exception as e:
                         logger.error(f"failed to delete {entry.name}: {e}")
@@ -141,12 +157,14 @@ class TorrentMixin:
 
             if self.dryRun:
                 logger.action(f"rename torrent: {oldName} → {newName}")
+                self._recordSummaryRename(entry, newPath)
                 stats["renamed"] += 1
                 continue
 
             try:
                 entry.rename(newPath)
                 logger.action(f"renamed torrent: {oldName} → {newName}")
+                self._recordSummaryRename(entry, newPath)
                 stats["renamed"] += 1
             except FileExistsError:
                 logger.error(f"target already exists, skipping: {newName}")
