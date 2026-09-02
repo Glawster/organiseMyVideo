@@ -36,10 +36,19 @@ GROK_MEDIA_EXTENSIONS = {
     ".gif",
     ".webp",
 }
+GROK_IMAGE_MODEL = "grok-imagine-image-2.0"
+GROK_VIDEO_MODEL = "grok-imagine-video-1.5"
+GROK_CATALOG_FILE = Path.home() / ".config" / "organiseMyVideo" / "grokCatalog.json"
+GROK_DOWNLOAD_DIR = Path.home() / "Downloads" / "Grok"
 GROK_USER_CONTENT_DOMAINS = {"imagine-public.x.ai", "images-public.x.ai"}
 GROK_CREDENTIALS_FILE = (
     Path.home() / ".config" / "organiseMyVideo" / "grokCredentials.json"
 )
+GROK_SESSION_FILE = Path.home() / ".config" / "organiseMyVideo" / "grokSession.json"
+_PLAYWRIGHT_INIT_SCRIPT = (
+    "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+)
+_GROK_SAVED_URL = "https://grok.com/imagine/saved"
 METADATA_LIBRARY_FILE = (
     Path.home() / ".config" / "organiseMyVideo" / "metadataLibrary.json"
 )
@@ -47,20 +56,6 @@ APP_CONFIG_FILE = Path.home() / ".config" / "organiseMyVideo" / "config.json"
 TVDB_API_BASE_URL = "https://api4.thetvdb.com/v4"
 TMDB_API_BASE_URL = "https://api.themoviedb.org/3"
 TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/original"
-
-# JavaScript snippet injected into every page of every context to remove the
-# navigator.webdriver property that Playwright exposes by default.
-_PLAYWRIGHT_INIT_SCRIPT = (
-    "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-)
-# Playwright storage-state file (cookies + localStorage) persisted after login.
-# When this file exists the browser starts already authenticated and no
-# username/password interaction is needed.  Delete this file to force a fresh
-# login (e.g. after a session expires or credentials change).
-GROK_SESSION_FILE = Path.home() / ".config" / "organiseMyVideo" / "grokSession.json"
-# URL of the Grok saved-images gallery — used both for navigation and as the
-# post-login verification URL.
-_GROK_SAVED_URL = "https://grok.com/imagine/saved"
 
 # Known torrent/index prefixes to strip from file and directory names
 PREFIX_PATTERNS = [

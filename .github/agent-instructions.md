@@ -1,4 +1,4 @@
-<!-- deployed from Glawster/organiseMyProjects release 0.5 -- do not edit directly -->
+<!-- deployed from Glawster/organiseMyProjects release 0.6 -- do not edit directly -->
 # Agent Instructions -- Master Development Guidelines (v2)
 
 ## Table of Contents
@@ -22,6 +22,11 @@
 ## Overview
 
 These are master development guidelines for all projects.
+
+Read `documentation/requirementsManagement.md`.
+Read `documentation/repositoryLayout.md` before adding or moving repository content.
+Read `documentation/testingProcess.md` before planning or reviewing tests.
+Read `documentation/howToRelease.md` before planning or reviewing releases.
 
 Project-specific details belong in:
 
@@ -288,7 +293,7 @@ class Example:
 ## Project Structure Standard
 
 Before adding or moving repository content, read the repository layout
-definition at `.github/repositoryLayout.md`. That document is authoritative
+definition at `documentation/repositoryLayout.md`. That document is authoritative
 for project-specific directory and file placement. This file remains
 authoritative for universal development and safety rules.
 Repository-specific layout exceptions belong in
@@ -301,35 +306,26 @@ Choose the entry-point pattern according to what is being built:
   entry point;
 - a packaged CLI uses a declared console-script entry point, normally targeting
   a `main()` function inside the package;
-- a standalone application uses `main.py` at its project root.
+- a GUI or standalone application exposes its entry point from the project
+  package, for example `python -m projectName` via `package/__main__.py`.
 
-A standalone application therefore uses this baseline:
+New OMP Python projects use a root-level package named after the project:
 
     projectName/
-    ├── main.py
+    ├── projectName/
+    │   └── __init__.py
+    ├── documentation/
+    ├── project/
     ├── tests/
-    ├── requirements.txt
+    ├── pyproject.toml
+    ├── projectNameEnvironment.yml
     ├── README.md
     └── .github/
         └── additional-instructions.md
 
-Larger applications may also use `src/`, `ui/`, and `qt/` folders:
-
-    projectName/
-    ├── main.py
-    ├── src/
-    │   └── projectName/
-    │       ├── __init__.py
-    │       ├── core/
-    │       ├── utils/
-    │       └── patterns/
-    ├── ui/
-    ├── qt/
-    ├── tests/
-    ├── requirements.txt
-    ├── README.md
-    └── .github/
-        └── additional-instructions.md
+Do not introduce a generic `src/` directory or a root `main.py` in a newly
+scaffolded OMP project. Existing projects that already use those layouts are
+not automatically reorganised.
 
 Rules:
 
@@ -337,10 +333,10 @@ Rules:
 - Reserve repository-level folders for shared concerns, repository tooling and cross-project integration; project-specific tests belong in that project's `tests/` folder\
 - Reusable library modules and packages do not require `main.py` or an executable entry point\
 - Packaged CLIs use declared console-script entry points, normally targeting a package-level `main()` function\
-- Standalone applications keep `main.py` at their project root\
+- GUI and standalone applications expose an entry point from the project package\
 - The application entry point sets the application logging context with `setApplication()`\
-- `src/` is optional and should be used for larger apps, reusable core logic, or UI-based apps\
-- `ui/` is optional and should contain UI orchestration/assets where useful\
+- Application and domain Python modules belong inside the project package\
+- Optional UI or Qt scaffolds belong inside the project package\
 - Documentation rule: only `README.md` may be at the project root; all other documentation must live under `documentation/`, and documentation file names should use camelCase except for `README.md`\
 - The README must include a near-top Documentation section that links to every living guide in the repo so it remains the canonical entry point for all docs\
 - Any routine that produces output files must place them in an `output/` folder directly under the project root\
@@ -348,20 +344,13 @@ Rules:
 
 ### Shared Runtime Modules
 
-Projects may contain an `omp` package.
+The canonical runtime package is `organiseMyProjects`. Import logging and
+related helpers from that package:
 
-`omp` stands for **organiseMyProjects**.
+    from organiseMyProjects.logUtils import getLogger, setApplication
 
-The package contains synchronised runtime infrastructure copied from the
-canonical `organiseMyProjects` repository.
-
-Agents should:
-
-- import runtime utilities from `omp`
-- never introduce a runtime dependency on `organiseMyProjects`
-- treat `omp` files as synchronised assets
-- propose changes in `organiseMyProjects` before propagating them to
-  consuming repositories
+Do not add a second runtime package named `omp` inside the
+`organiseMyProjects` repository. That name already refers to this project.
 
 ## CLI Design Standards
 
@@ -501,7 +490,9 @@ All CLI applications should:
 ## Environment & Dependency Policy
 
 - Target Python 3.10+\
-- Use requirements.txt unless packaged\
+- Use `pyproject.toml` as the authoritative packaged-Python dependency definition\
+- Use a project-specific camelCase Conda environment file and editable install\
+- Do not make `requirements.txt` the primary dependency mechanism for new packaged projects\
 - Do not auto-install dependencies at runtime\
 - Fail fast if external tools are missing\
 - Validate system requirements explicitly
@@ -822,6 +813,9 @@ Rules:
 
 ## Testing Standards
 
+- Follow `documentation/testingProcess.md` as the authoritative testing process.\
+- Name Python test modules `test_camelCaseName.py`; pytest discovery must use
+  `python_files = test_[a-z]*.py`.\
 - Core logic \>90% coverage\
 - Critical functions 100% coverage\
 - Use Arrange--Act--Assert\
@@ -842,6 +836,37 @@ Refactor when:
 - Class \> 300 lines\
 - Nesting \> 3 levels\
 - Repeated logic appears twice
+
+## Development Status and Documentation Ownership
+
+Status has one owner. Requirements describe obligations, design documentation
+describes behaviour, and Git records delivery history.
+`project/currentIncrement.md` alone records transient implementation status.
+
+When implementing or completing an increment, update
+`project/currentIncrement.md` with the active increment, objective, scope,
+acceptance work, verification still required and immediate next action. Replace
+the previous increment's transient detail when the next increment starts; do
+not turn the file into a running delivery history.
+
+Do not propagate implementation-status statements into requirements, README
+files, ADRs or design documentation unless the work changes the durable truth
+that document is responsible for describing:
+
+- requirements record durable obligations and acceptance criteria; supported
+  lifecycle metadata such as `ToDo`, `InProgress` and `Completed` may remain;
+- ADRs record architectural decisions and rationale;
+- `documentation/` describes durable implemented behaviour and changes when
+  that behaviour or design changes;
+- `README.md` provides a stable introduction, capabilities and navigation, and
+  changes for meaningful durable capability or release changes where useful;
+- tests provide executable acceptance and regression evidence; and
+- commits, pull requests, tags and releases record what was delivered and when.
+
+For example, an algorithm behaviour change updates its durable design guide; a
+requirement scope change updates the requirement; completing one increment and
+starting another updates `project/currentIncrement.md` and relies on Git for
+the delivery history.
 
 ## Common Principles to Always Follow
 

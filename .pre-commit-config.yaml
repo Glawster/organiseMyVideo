@@ -14,3 +14,13 @@ repos:
         entry: runLinter
         language: python
         types: [python]
+
+# OMP-MANAGED-BEGIN
+  - repo: local
+    hooks:
+      - id: gui-naming-linter
+        name: GUI Naming Linter
+        entry: runLinter
+        language: python
+        types: [python]
+# OMP-MANAGED-END

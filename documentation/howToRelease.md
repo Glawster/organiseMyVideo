@@ -1,4 +1,4 @@
-<!-- deployed from Glawster/organiseMyProjects release 0.5 -- do not edit directly -->
+<!-- deployed from Glawster/organiseMyProjects release 0.6 -- do not edit directly -->
 # Release Process
 
 ## Purpose
@@ -8,15 +8,15 @@ This guide defines a safe, repeatable release workflow for this repository.
 ## Versioning Policy
 
 - Released versions are immutable once published.
-- Existing tag `0.3` is retained as a historical release tag.
+- Existing tags `0.3` and `0.4` are retained as historical release tags.
 - Standard release tags use `vX.Y`.
 - Patch tags `vX.Y.Z` are allowed when needed for exceptional hotfix releases.
-- Pre-release builds use tags such as `v0.4-rc1`.
+- Pre-release builds use tags such as `v0.5-rc1`.
 
 ## Branch Model
 
 - `main` represents the latest released production state.
-- Active development continues on release branches such as `release/0.4`.
+- Active development continues on release branches such as `release/0.5`.
 - Changes land on `main` only when they are release-ready.
 
 ## Repository Protection Rules
@@ -32,16 +32,18 @@ This guide defines a safe, repeatable release workflow for this repository.
 1. Confirm the target release branch is green in CI.
 2. Run local validation:
    - `pytest`
+   - `runLinter .`
    - `runLinter --markup`
    - If markup issues are reported, run `runLinter --markup --fix` and then
      rerun `runLinter --markup`.
-3. Update release notes and documentation.
+3. Confirm `organiseMyProjects/version.py`, package metadata, release notes and
+   documentation all identify the intended release.
 4. Merge the release branch into `main` through a pull request.
 5. Pull latest `main` locally with `git pull --ff-only`.
 6. Create an annotated release tag:
-   - `git tag -a v0.4 -m "Release v0.4"`
+   - `git tag -a v0.5 -m "Release v0.5"`
 7. Push the tag:
-   - `git push origin v0.4`
+   - `git push origin v0.5`
 8. Verify the GitHub release artifacts and notes.
 
 ## Hotfix Workflow
@@ -61,13 +63,13 @@ Use this checklist only when a protected release tag must be corrected.
 2. In GitHub Rulesets, temporarily allow tag update or deletion for the exact
    tag (or use an admin bypass if your ruleset allows it).
 3. Delete the existing remote tag:
-   - `git push origin :refs/tags/v0.4`
+   - `git push origin :refs/tags/v0.5`
 4. Delete the local tag copy:
-   - `git tag -d v0.4`
+   - `git tag -d v0.5`
 5. Recreate the tag at the intended commit:
-   - `git tag -a v0.4 <commit> -m "Release v0.4"`
+   - `git tag -a v0.5 <commit> -m "Release v0.5"`
 6. Push the corrected tag:
-   - `git push origin v0.4`
+   - `git push origin v0.5`
 7. Verify the tag points to the expected commit locally and remotely.
 8. Re-enable strict tag protection immediately.
 
@@ -78,8 +80,8 @@ Rulesets note:
 
 Verification commands:
 
-- `git rev-parse v0.4^{}`
-- `git ls-remote --tags origin v0.4 v0.4^{}`
+- `git rev-parse v0.5^{}`
+- `git ls-remote --tags origin v0.5 v0.5^{}`
 
 ## Tag Conflict Prevention
 

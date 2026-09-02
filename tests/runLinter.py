@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# deployed from Glawster/organiseMyProjects release 0.5 -- do not edit directly
+# deployed from Glawster/organiseMyProjects release 0.6 -- do not edit directly
 """CLI entry point for the GUI Naming Linter."""
 
 import argparse
@@ -91,6 +91,7 @@ def main() -> None:
 
         if not found:
             _lintTarget(".")
+
 
 if __name__ == "__main__":
     main()

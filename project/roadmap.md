@@ -18,15 +18,16 @@ not itself a substitute for acceptance evidence.
 
 ## Current priority
 
-Create and refine REQ-003 for Phase 2. It should cover `pyproject.toml`, the
+Create and refine REQ-004 for Phase 2. It should cover `pyproject.toml`, the
 console-script entry point, declared dependencies, `environment.yml`, clean
 installation, pytest/pre-commit configuration, and corrected ignore rules.
 REQ-002 captures the Qt media-library browser as a separate product outcome;
 it remains `ToDo` pending its open product decisions and ADR-004.
+REQ-003 captures the official Imagine API archive (`grok generate|list|download`)
+and replaces the inactive grok.com scraper.
 
 ## Deferred decisions
 
 - Phase 3: duration and removal criteria for legacy CLI flags.
 - Phase 4: cleanup quarantine location, retention, and permanent-deletion cases.
-- Phase 7: ownership of `rugbyAudit.py`, the root XML artifact, and inactive
-  Grok functionality.
+- Phase 7: ownership of `rugbyAudit.py` and the root XML artifact.

@@ -9,13 +9,14 @@ The README is the canonical entry point for repository documentation. The living
 - [Project coding guidelines](documentation/projectGuidelines.md)
 - [Master agent instructions](.github/agent-instructions.md)
 - [Copilot compatibility instructions](.github/copilot-instructions.md)
-- [Repository layout](.github/repositoryLayout.md)
-- [Requirements management](.github/requirementsManagement.md)
+- [Repository layout](documentation/repositoryLayout.md)
+- [Requirements management](documentation/requirementsManagement.md)
 - [Repository-specific agent instructions](.github/additional-instructions.md)
-- [Requirements index](project/requirements/README.md)
-- [Architecture decisions](project/adr/README.md)
+- [Requirements index](project/requirements/requirementsIndex.md)
+- [Architecture decisions](project/adr/adrIndex.md)
 - [Standards adoption roadmap](project/roadmap.md)
-- [Point-in-time reviews](project/reviews/README.md)
+- [Point-in-time reviews](project/reviews/reviewsIndex.md)
+- [Imagine API archive](documentation/imagineArchive.md)
 
 - **Movies** → `/mnt/movie<n>/Title (Year)/`
 - **TV shows** → `/mnt/video<n>/TV/Show Name/Season NN/` (`The Name` folders are stored as `Name, The`)
@@ -85,6 +86,40 @@ python organiseMyVideo.py --torrent --clean --confirm
 | `--no-curses` | Use line-based prompts instead of the default curses single-key menus |
 | `--torrent` | Run torrent cleanup against the `Downloads` folder that sits next to the source directory |
 | `--debug` | Enable debug logging, including TVDB title payload debug lines |
+| `--grok` | Download saved grok.com Imagine images and videos to `~/Downloads/Grok` |
+| `--import-firefox-session` | Import grok.com cookies from Firefox after logging in at grok.com/imagine/saved |
+| `--reset-grok` | Delete saved grok.com session files so the next `--grok` run logs in again |
+| `grok generate\|list\|download` | Imagine API archive: generate with `storage_options`, list stored media, or download it. See [Imagine API archive](documentation/imagineArchive.md) |
+
+### Download generated grok.com Imagine media
+
+This retrieves **your** Imagine library (workspace assets and Imagine
+conversations). It does not download the public explore feed.
+
+```bash
+# 1. Log into grok.com in Firefox
+python -m organiseMyVideo --import-firefox-session --confirm
+# 2. Download your generated images and videos into ~/Downloads/Grok
+python -m organiseMyVideo --grok
+python -m organiseMyVideo --grok --confirm
+```
+
+Dry-run is the default. If the session is missing, `--grok` opens Firefox so
+you can log in.
+
+### Generate, list, and download Imagine media
+
+```bash
+export XAI_API_KEY="your_api_key"
+python -m organiseMyVideo grok generate "a quiet harbour at dusk"
+python -m organiseMyVideo grok generate "a quiet harbour at dusk" --confirm
+python -m organiseMyVideo grok generate "slow pan across the harbour" --kind video --confirm
+python -m organiseMyVideo grok list
+python -m organiseMyVideo grok download --confirm
+```
+
+This uses the official xAI Imagine API with `storage_options`. It does not log
+into grok.com. See [Imagine API archive](documentation/imagineArchive.md).
 
 The metadata library is saved in `~/.config/organiseMyVideo/metadataLibrary.json` and reused on later runs. Use `--refresh` when you want to rescan the existing movie and TV storage roots and rebuild that cache.
 

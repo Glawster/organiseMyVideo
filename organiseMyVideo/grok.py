@@ -1,880 +1,461 @@
-"""Grok scraper: authentication, Firefox session import, and media download."""
+"""Official xAI Imagine archive: generate with storage_options, list, download."""
 
+from __future__ import annotations
+
+import base64
+import json
 import os
 import re
-import json
-import shutil
-import platform
-import sqlite3
-import subprocess
-import tempfile
-import configparser
-import urllib.parse
-import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Optional
+from urllib.parse import urlparse
 
 from organiseMyProjects.logUtils import getLogger  # type: ignore
 
-# Playwright is an optional dependency used only by --grok.  We import it at
-# module level so tests can patch ``organiseMyVideo.grok.sync_playwright``.
-try:
-    from playwright.sync_api import sync_playwright  # type: ignore
-except ImportError:
-    sync_playwright = None  # type: ignore
-
 from .constants import (
+    GROK_CATALOG_FILE,
+    GROK_DOWNLOAD_DIR,
+    GROK_IMAGE_MODEL,
     GROK_MEDIA_EXTENSIONS,
-    GROK_USER_CONTENT_DOMAINS,
-    GROK_CREDENTIALS_FILE,
-    GROK_SESSION_FILE,
-    _GROK_SAVED_URL,
-    _PLAYWRIGHT_INIT_SCRIPT,
+    GROK_VIDEO_MODEL,
 )
 
 logger = getLogger()
 
-# Playwright's maximum allowed cookie expires value (from kMaxCookieExpiresDateInSeconds
-# in playwright/driver/package/lib/server/network.js).  Any timestamp beyond this
-# (9999-12-31 23:59:59 UTC) is rejected by Playwright's rewriteCookies() with the
-# "Cookie should have a valid expires" error, even though the value is a positive integer.
-_PLAYWRIGHT_MAX_COOKIE_EXPIRES = 253402300799
+_IMAGE_MIME_BY_SUFFIX = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+}
 
 
-class GrokMixin:
-    """Methods for authenticating with Grok and scraping saved Imagine media."""
+class ImagineArchive:
+    """Generate, list, and download Imagine media through the xAI API."""
 
-    def _extractMediaUrlsFromHtml(self, html: str) -> List[str]:
-        """Extract likely media URLs from Grok saved-image HTML."""
-        mediaUrls = set()
-        for match in re.findall(r'https?://[^\s"\']+', html, re.IGNORECASE):
-            parsed = urllib.parse.urlparse(match)
-            ext = Path(parsed.path).suffix.lower()
-            if ext in GROK_MEDIA_EXTENSIONS:
-                mediaUrls.add(match)
-        return sorted(mediaUrls)
-
-    def _extractMediaUrlsFromPage(self, page) -> List[str]:
-        """Extract the user's saved Imagine media URLs from a live Playwright page.
-
-        Uses DOM querying to read ``src`` attributes directly from ``<img>`` and
-        ``<video>``/``<source>`` elements rather than regex-scanning the full HTML.
-        Results are filtered to the known Grok user-content CDN domains so that
-        system UI icons, marketing images, and promotional videos embedded in the
-        page template are excluded.
-        """
-        rawUrls: List[str] = page.eval_on_selector_all(
-            "img[src], video[src], source[src]",
-            "els => els.map(el => el.src)",
-        )
-        mediaUrls = set()
-        for url in rawUrls:
-            if not url:
-                continue
-            parsed = urllib.parse.urlparse(url)
-            ext = Path(parsed.path).suffix.lower()
-            if ext not in GROK_MEDIA_EXTENSIONS:
-                continue
-            hostname = parsed.hostname or ""
-            if hostname in GROK_USER_CONTENT_DOMAINS:
-                mediaUrls.add(url)
-        return sorted(mediaUrls)
-
-    def _collectPostUrls(self, page) -> List[str]:
-        """Return all unique ``/imagine/post/{uuid}`` URLs found on the current page.
-
-        Queries the live DOM for anchor elements whose ``href`` contains
-        ``/imagine/post/`` and returns a deduplicated, sorted list of absolute
-        URLs.  Empty strings and duplicates are removed automatically.  Called
-        on the saved-gallery page so that the scraper can then visit each post
-        page individually to capture full-resolution media (including videos
-        that are not loaded as part of the thumbnail grid).
-        """
-        hrefs: List[str] = page.eval_on_selector_all(
-            "a[href*='/imagine/post/']",
-            "els => els.map(el => el.href)",
-        )
-        return sorted({h for h in hrefs if h})
-
-    def _isGrokMediaResponse(self, url: str, contentType: str) -> bool:
-        """Return True when a Playwright network response should be captured as user media.
-
-        Only responses from the known Grok user-content CDN domains
-        (:data:`GROK_USER_CONTENT_DOMAINS`) are considered user-generated media.
-        Everything else — the app's own domain, third-party CDNs hosting profile
-        pictures, analytics pixels, ad networks, etc. — is excluded.
-
-        A response qualifies when BOTH of the following are true:
-
-        * The hostname is in :data:`GROK_USER_CONTENT_DOMAINS`.
-        * The URL path has a recognised media extension **or** the
-          ``Content-Type`` header indicates an image or video.
-
-        This is used by the ``page.on("response", ...)`` listener inside
-        :meth:`scrapeGrokSavedMedia` and is extracted here so it can be tested
-        without a live Playwright session.
-        """
-        parsed = urllib.parse.urlparse(url)
-        hostname = parsed.hostname or ""
-        if not hostname or hostname not in GROK_USER_CONTENT_DOMAINS:
-            return False
-        ext = Path(parsed.path).suffix.lower()
-        return ext in GROK_MEDIA_EXTENSIONS or contentType.startswith(
-            ("image/", "video/")
-        )
-
-    def _downloadMediaFiles(self, mediaUrls: List[str], playwrightContext=None) -> dict:
-        """Download URLs into ~/Downloads/Grok and return download stats.
+    def __init__(
+        self,
+        dryRun: bool = True,
+        client: Any = None,
+        apiKey: Optional[str] = None,
+        catalogPath: Optional[Path] = None,
+        downloadDir: Optional[Path] = None,
+        pageSize: int = 100,
+    ):
+        """Initialise the archive client.
 
         Args:
-            mediaUrls: List of media URLs to download.
-            playwrightContext: An active Playwright ``BrowserContext``.  When
-                provided, downloads are made via the authenticated browser
-                session so that session cookies are included in each request,
-                avoiding 403 responses from CDN URLs that require authentication.
-                Falls back to ``urllib`` when *None*.
+            dryRun: When True, log planned generate/download work without doing it.
+            client: Optional injected xAI client. Tests pass a fake here.
+            apiKey: Optional API key. Defaults to ``XAI_API_KEY``.
+            catalogPath: Local JSON catalog of generated assets.
+            downloadDir: Directory that receives downloaded media files.
+            pageSize: Files API page size used while listing stored media.
+        """
+        self.dryRun = dryRun
+        self._client = client
+        self._apiKey = apiKey
+        self.catalogPath = Path(catalogPath) if catalogPath else GROK_CATALOG_FILE
+        self.downloadDir = Path(downloadDir) if downloadDir else GROK_DOWNLOAD_DIR
+        self.pageSize = pageSize
+
+    ## download
+
+    def fileDownload(self, fileId: Optional[str] = None) -> dict:
+        """Download stored Imagine media into the download directory.
+
+        Args:
+            fileId: Download only this Files API id. When omitted, download every
+                listed image and video.
+
+        Returns:
+            Counts for downloaded, skipped, and error items.
         """
         stats = {"downloaded": 0, "skipped": 0, "errors": 0}
-        destDir = Path.home() / "Downloads" / "Grok"
-        destDir.mkdir(parents=True, exist_ok=True)
+        records = self.fileList()
+        if fileId:
+            records = [record for record in records if record["fileId"] == fileId]
+            if not records:
+                raise RuntimeError(f"no stored imagine media matched file id {fileId}")
 
-        for mediaUrl in mediaUrls:
-            parsed = urllib.parse.urlparse(mediaUrl)
-            filename = (
-                Path(parsed.path).name
-                or f"grok_media_{stats['downloaded'] + stats['errors'] + 1}"
-            )
-            dest = destDir / filename
+        logger.doing("downloading imagine media")
+        logger.value("download directory", self.downloadDir)
+        logger.value("files", len(records))
 
+        if not self.dryRun:
+            self.downloadDir.mkdir(parents=True, exist_ok=True)
+
+        client = None if self.dryRun else self._clientGet()
+        for record in records:
+            dest = self._downloadDestination(record)
             if dest.exists():
-                logger.value("grok media already exists, skipping", dest)
+                logger.value("imagine media already exists, skipping", dest)
                 stats["skipped"] += 1
                 continue
 
+            logger.action(f"download imagine media: {record['fileId']} -> {dest}")
             if self.dryRun:
-                logger.action(f"would download grok media: {mediaUrl} -> {dest}")
                 stats["downloaded"] += 1
                 continue
 
             try:
-                if playwrightContext is not None:
-                    response = playwrightContext.request.get(
-                        mediaUrl,
-                        headers={"Referer": "https://grok.com/"},
-                    )
-                    if not response.ok:
-                        raise RuntimeError(f"HTTP {response.status}")
-                    dest.write_bytes(response.body())
-                else:
-                    with urllib.request.urlopen(mediaUrl, timeout=30) as response:
-                        dest.write_bytes(response.read())
-                logger.action(f"downloaded grok media: {dest}")
+                dest.write_bytes(client.files.content(record["fileId"]))
+                self._catalogLocalPathUpdate(record["fileId"], dest)
                 stats["downloaded"] += 1
-            except Exception as e:
-                logger.error(f"failed downloading {mediaUrl}: {e}")
+            except Exception as error:
+                logger.error("failed downloading %s: %s", record["fileId"], error)
                 stats["errors"] += 1
 
+        logger.done("imagine download complete")
         return stats
 
-    @staticmethod
-    def _sanitizeStorageState(sessionFile: Path) -> None:
-        """Fix cookie ``expires`` values in a Playwright storage-state JSON file.
+    ## generate
 
-        Playwright requires cookie ``expires`` to be either ``-1`` (session
-        cookie / no expiry) or a **positive integer no greater than
-        253402300799** (9999-12-31 23:59:59 UTC, Playwright's internal maximum).
-        Values outside this range cause ``new_context()`` to raise:
-
-        ``Error setting storage state: Cookie should have a valid expires``
-
-        Specific fixups applied:
-
-        * ``None``, ``0``, ``False``, or any other non-numeric value → ``-1``
-        * Negative numbers other than ``-1`` → ``-1``
-        * Floats → truncated to ``int`` (Playwright requires a plain JSON
-          integer, not ``1742000000.0``).  A float that truncates to ``0`` or a
-          negative value is converted to ``-1`` instead.
-        * Integers greater than ``253402300799`` → clamped to ``253402300799``
-
-        This helper reads the file, normalises every cookie's ``expires``
-        in-place, and writes the file back.  It is called immediately after
-        writing any session file and again just before loading it, so that
-        sessions written by an older version of Playwright (which emitted
-        ``0`` for session cookies) or by sites that set far-future expiry dates
-        are also fixed transparently.
-
-        Args:
-            sessionFile: Path to the Playwright storage-state JSON file to fix.
-        """
-        try:
-            data = json.loads(sessionFile.read_text(encoding="utf-8"))
-        except Exception:
-            return  # file missing or unparseable — caller will handle the error
-        changed = False
-        for cookie in data.get("cookies", []):
-            raw = cookie.get("expires")
-            # ---- booleans: True/False serialize to JSON true/false, not numbers
-            if isinstance(raw, bool):
-                cookie["expires"] = -1
-                changed = True
-            # ---- None, 0, or any negative except -1 → session cookie sentinel
-            elif (
-                raw is None
-                or raw == 0
-                or (isinstance(raw, (int, float)) and raw < 0 and raw != -1)
-            ):
-                cookie["expires"] = -1
-                changed = True
-            elif isinstance(raw, float):
-                # Convert any float (whole-number or fractional) to int.
-                # json.dumps serialises 1742000000.0 as "1742000000.0" which
-                # Playwright rejects — it requires a plain JSON integer.
-                # A float that truncates to 0 or a negative is treated as a
-                # session cookie.  A float beyond the max is clamped.
-                int_val = int(raw)
-                if int_val == 0 or int_val < -1:
-                    cookie["expires"] = -1
-                elif int_val > _PLAYWRIGHT_MAX_COOKIE_EXPIRES:
-                    cookie["expires"] = _PLAYWRIGHT_MAX_COOKIE_EXPIRES
-                else:
-                    cookie["expires"] = int_val
-                changed = True
-            elif isinstance(raw, int) and raw > _PLAYWRIGHT_MAX_COOKIE_EXPIRES:
-                # Timestamps beyond year 9999 are rejected by Playwright's
-                # rewriteCookies() validation.  Clamp to the allowed maximum.
-                cookie["expires"] = _PLAYWRIGHT_MAX_COOKIE_EXPIRES
-                changed = True
-        if changed:
-            sessionFile.write_text(json.dumps(data, indent=2), encoding="utf-8")
-
-    def _openFirefoxWindow(self, url: str) -> None:
-        """Open the user's system Firefox browser at *url*.
-
-        Uses platform-appropriate commands:
-
-        * Linux: ``firefox`` or ``firefox-esr`` (whichever is found on PATH)
-        * macOS: ``open -a Firefox``
-        * Windows: ``cmd /c start <url>``
-
-        Only ``https://`` and ``http://`` URLs are accepted; any other value
-        raises ``ValueError`` to prevent command injection.
-
-        If Firefox cannot be located on the system, a warning is logged and
-        the user is expected to open Firefox manually and navigate to *url*.
-
-        Args:
-            url: The URL to open in Firefox.  Must begin with ``https://`` or
-                 ``http://``.
-
-        Raises:
-            ValueError: If *url* does not start with ``https://`` or
-                        ``http://``.
-        """
-        if not url.startswith(("https://", "http://")):
-            raise ValueError(f"refusing to open non-http URL: {url!r}")
-
-        system = platform.system()
-        if system == "Windows":
-            # Use cmd /c start to avoid shell=True with a plain string.
-            subprocess.Popen(["cmd", "/c", "start", "", url])
-        elif system == "Darwin":
-            subprocess.Popen(["open", "-a", "Firefox", url])
-        else:
-            for candidate in ("firefox", "firefox-esr", "firefox-bin"):
-                firefox = shutil.which(candidate)
-                if firefox:
-                    subprocess.Popen([firefox, "--new-window", url])
-                    return
-            logger.warning(
-                f"Firefox not found on PATH; please open Firefox manually and navigate to {url}"
-            )
-
-    @staticmethod
-    def _firefoxLaunch(playwright) -> object:
-        """Launch Playwright Firefox headless, raising a clear error if not installed.
-
-        Playwright's default error for a missing browser binary contains a raw
-        file path and a generic "please run playwright install" hint buried in
-        an ASCII box — easy to miss.  This wrapper intercepts that specific
-        error and re-raises it as a plain :class:`RuntimeError` with an
-        actionable message so users see exactly what to run.
-
-        All other exceptions are re-raised unchanged.
-
-        Args:
-            playwright: The Playwright instance from ``sync_playwright()``.
-
-        Returns:
-            A Playwright ``Browser`` instance.
-
-        Raises:
-            RuntimeError: When the Firefox browser binary has not been
-                          installed via ``playwright install firefox``.
-        """
-        try:
-            return playwright.firefox.launch(headless=True)
-        except Exception as e:
-            msg = str(e)
-            msg_lower = msg.lower()
-            if (
-                "executable" in msg_lower
-                and ("exist" in msg_lower or "found" in msg_lower)
-            ) or "playwright install" in msg_lower:
-                raise RuntimeError(
-                    "Playwright Firefox browser is not installed.\n"
-                    "Run: playwright install firefox"
-                ) from e
-            raise
-
-    @staticmethod
-    def _firefoxBaseCandidates(system: str) -> List[Path]:
-        """Return candidate Firefox base directories for the given OS, in priority order.
-
-        On Linux, multiple installation methods are covered:
-
-        * Traditional package-manager install (``~/.mozilla/firefox``)
-        * Ubuntu/Debian Snap package (``~/snap/firefox/common/.mozilla/firefox``
-          and ``~/snap/firefox/current/.mozilla/firefox``)
-        * Flatpak (``~/.var/app/org.mozilla.firefox/.mozilla/firefox``)
-        """
-        home = Path.home()
-        if system == "Windows":
-            appdata = os.environ.get("APPDATA")
-            if not appdata:
-                return []
-            return [Path(appdata) / "Mozilla" / "Firefox"]
-        if system == "Darwin":
-            return [home / "Library" / "Application Support" / "Firefox"]
-        # Linux — try all common install locations
-        return [
-            home / ".mozilla" / "firefox",
-            home / "snap" / "firefox" / "common" / ".mozilla" / "firefox",
-            home / "snap" / "firefox" / "current" / ".mozilla" / "firefox",
-            home / ".var" / "app" / "org.mozilla.firefox" / ".mozilla" / "firefox",
-        ]
-
-    @staticmethod
-    def _findProfileInBase(
-        firefoxBase: Path, requireCookies: bool = False
-    ) -> Optional[Path]:
-        """Return the best profile directory found under *firefoxBase*.
-
-        Reads ``profiles.ini`` and returns the profile marked ``Default=1``,
-        or the first ``Profile`` section if none is flagged.  When
-        *requireCookies* is ``True`` the profile is only returned if it
-        contains ``cookies.sqlite``.
-
-        Args:
-            firefoxBase: Firefox configuration base directory (containing
-                         ``profiles.ini``).
-            requireCookies: When ``True``, only return a profile that has a
-                            ``cookies.sqlite`` file.
-
-        Returns:
-            Path to the profile directory, or ``None``.
-        """
-        profilesIni = firefoxBase / "profiles.ini"
-        if not profilesIni.exists():
-            return None
-
-        config = configparser.ConfigParser()
-        config.read(str(profilesIni))
-
-        def _resolve(section: str) -> Optional[Path]:
-            path = config.get(section, "Path", fallback=None)
-            if not path:
-                return None
-            if config.get(section, "IsRelative", fallback="0") == "1":
-                return firefoxBase / path
-            return Path(path)
-
-        def _accept(p: Optional[Path]) -> bool:
-            if p is None:
-                return False
-            if requireCookies:
-                return (p / "cookies.sqlite").exists()
-            return True
-
-        # Prefer the profile explicitly marked as the default.
-        for section in config.sections():
-            if config.get(section, "Default", fallback="0") == "1":
-                resolved = _resolve(section)
-                if _accept(resolved):
-                    return resolved
-
-        # Fall back to the first Profile section.
-        for section in config.sections():
-            if section.startswith("Profile"):
-                resolved = _resolve(section)
-                if _accept(resolved):
-                    return resolved
-
-        return None
-
-    def _findFirefoxProfile(
-        self, _firefoxBase: Optional[Path] = None
-    ) -> Optional[Path]:
-        """Locate the best Firefox profile directory on the current OS.
-
-        When *_firefoxBase* is provided (unit-test override), that single base
-        directory is searched and its profile returned.
-
-        Otherwise, all platform-appropriate Firefox install locations are
-        searched (see :meth:`_firefoxBaseCandidates`).  Within each candidate
-        base the search runs in two passes:
-
-        1. **With cookies** — prefer any profile that already has
-           ``cookies.sqlite`` (meaning the user has actually browsed with it).
-           The candidate with the most recently modified ``cookies.sqlite``
-           wins, so if both a traditional and Snap install are present the one
-           the user actively uses is selected.
-        2. **Without cookies** — fall back to the default/first profile even if
-           ``cookies.sqlite`` is absent, so the existing warning message in
-           :meth:`importFirefoxSession` is still shown.
-
-        Args:
-            _firefoxBase: Override the candidate list with a single base
-                          directory.  Intended for unit tests only.
-
-        Returns:
-            Path to the best profile directory, or ``None`` if no Firefox
-            install is found.
-        """
-        if _firefoxBase is not None:
-            # Unit-test fast path: single base, no cookies preference.
-            return self._findProfileInBase(_firefoxBase)
-
-        candidates = self._firefoxBaseCandidates(platform.system())
-
-        # Pass 1: prefer profile that has cookies.sqlite, picking the most
-        # recently modified one so the actively-used install wins.
-        best: Optional[Path] = None
-        bestMtime: float = -1.0
-        for base in candidates:
-            profile = self._findProfileInBase(base, requireCookies=True)
-            if profile is not None:
-                mtime = (profile / "cookies.sqlite").stat().st_mtime
-                if mtime > bestMtime:
-                    bestMtime = mtime
-                    best = profile
-        if best is not None:
-            return best
-
-        # Pass 2: no profile with cookies found — return the default/first
-        # profile from the first candidate that has profiles.ini.
-        for base in candidates:
-            profile = self._findProfileInBase(base)
-            if profile is not None:
-                return profile
-
-        return None
-
-    def importFirefoxSession(
+    def imageGenerate(
         self,
-        sessionFile: Path = GROK_SESSION_FILE,
-        profilePath: Optional[Path] = None,
-    ) -> bool:
-        """Import Grok cookies from the user's Firefox profile.
-
-        Reads the cookies for ``grok.com`` and ``x.ai`` from Firefox's
-        ``cookies.sqlite`` database and writes them as a Playwright
-        ``storage_state`` JSON file at *sessionFile*.
-
-        This lets you authenticate the scraper by simply logging into
-        ``grok.com`` in your regular Firefox browser — no Playwright login
-        flow (and no Cloudflare Turnstile challenge) is needed.
-
-        The Firefox ``cookies.sqlite`` database is copied to a temporary file
-        before being read so that the operation is safe even when Firefox is
-        currently open.
+        prompt: str,
+        filename: Optional[str] = None,
+        imagePath: Optional[str] = None,
+    ) -> dict:
+        """Generate an image and persist it with storage_options.
 
         Args:
-            sessionFile: Destination path for the Playwright storage-state JSON.
-            profilePath: Firefox profile directory.  Auto-detected from the
-                         default Firefox profile when omitted.
+            prompt: Text prompt.
+            filename: Optional Files API filename. A timestamped name is used
+                when omitted.
+            imagePath: Optional local path or URL used as an edit reference.
 
         Returns:
-            True if cookies were found and written successfully; False otherwise.
+            Catalog record for the stored file. In dry-run the file id is empty.
         """
-        if profilePath is None:
-            profilePath = self._findFirefoxProfile()
-        if profilePath is None:
-            logger.warning(
-                "could not locate a Firefox profile; skipping Firefox session import"
-            )
-            return False
-
-        cookiesDb = profilePath / "cookies.sqlite"
-        if not cookiesDb.exists():
-            logger.warning(f"Firefox cookies database not found at {cookiesDb}")
-            return False
-
-        # Copy to a temp file to avoid "database is locked" errors when Firefox
-        # is currently open and holding a write lock on cookies.sqlite.
-        tmpPath = None
-        try:
-            with tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False) as tmp:
-                tmpPath = Path(tmp.name)
-            shutil.copy2(str(cookiesDb), str(tmpPath))
-
-            conn = sqlite3.connect(str(tmpPath))
-            cursor = conn.cursor()
-            # Match exact host 'grok.com' / 'x.ai' plus any subdomain
-            # (e.g. '.grok.com', 'accounts.x.ai').  The LIKE patterns use a
-            # leading dot/% pair so they cannot match unrelated suffixes such
-            # as 'fakegrok.com'.
-            cursor.execute("""
-                SELECT name, value, host, path, expiry, isSecure, isHttpOnly, sameSite
-                FROM moz_cookies
-                WHERE host = 'grok.com'  OR host LIKE '%.grok.com'
-                   OR host = 'x.ai'      OR host LIKE '%.x.ai'
-                """)
-            rows = cursor.fetchall()
-            conn.close()
-        finally:
-            if tmpPath is not None:
-                tmpPath.unlink(missing_ok=True)
-
-        if not rows:
-            logger.warning(
-                "no Grok/X.ai cookies found in Firefox profile; "
-                "please log into grok.com in Firefox first"
-            )
-            return False
-
-        # Firefox sameSite integers → Playwright string values
-        _SAMESITE = {0: "None", 1: "Lax", 2: "Strict"}
-        cookies = [
-            {
-                "name": name,
-                "value": value,
-                "domain": host,
-                "path": path,
-                # Firefox stores session cookies (no expiry) with expiry=0.
-                # Playwright requires -1 for "no expiry"; 0 is rejected.
-                # SQLite may return INTEGER columns as Python floats when stored
-                # as REAL affinity — always cast to int so JSON never writes
-                # "1742000000.0", which Playwright also rejects.
-                # Some sites set extremely far-future expiry timestamps.
-                # Playwright rejects any expires > 253402300799 (year 9999).
-                "expires": (
-                    min(int(expiry), _PLAYWRIGHT_MAX_COOKIE_EXPIRES)
-                    if expiry > 0
-                    else -1
-                ),
-                "httpOnly": bool(isHttpOnly),
-                "secure": bool(isSecure),
-                "sameSite": _SAMESITE.get(sameSite, "None"),
-            }
-            for name, value, host, path, expiry, isSecure, isHttpOnly, sameSite in rows
-        ]
-
-        storageState = {"cookies": cookies, "origins": []}
-        sessionFile.parent.mkdir(parents=True, exist_ok=True)
-        sessionFile.write_text(json.dumps(storageState, indent=2))
-        sessionFile.chmod(0o600)
-        self._sanitizeStorageState(sessionFile)
-        logger.value(
-            f"imported {len(cookies)} cookies from Firefox to", str(sessionFile)
+        return self._mediaGenerate(
+            kind="image",
+            prompt=prompt,
+            filename=filename,
+            imagePath=imagePath,
         )
-        return True
 
-    def resetGrokConfig(
+    def videoGenerate(
         self,
-        sessionFile: Path = GROK_SESSION_FILE,
-        credentialsFile: Path = GROK_CREDENTIALS_FILE,
+        prompt: str,
+        filename: Optional[str] = None,
+        imagePath: Optional[str] = None,
+        duration: int = 6,
     ) -> dict:
-        """Delete saved Grok session and credentials config files.
-
-        Removes *sessionFile* and *credentialsFile* if they exist so that the
-        next ``--grok`` run will prompt for a fresh manual login.
+        """Generate a video and persist it with storage_options.
 
         Args:
-            sessionFile: Path to the Playwright storage-state file.
-            credentialsFile: Path to the JSON credentials file.
+            prompt: Text prompt.
+            filename: Optional Files API filename.
+            imagePath: Optional still image path or URL for image-to-video.
+            duration: Clip length in seconds.
 
         Returns:
-            Dict with keys ``deleted`` (list of deleted paths) and
-            ``notFound`` (list of paths that did not exist).
+            Catalog record for the stored file. In dry-run the file id is empty.
         """
-        deleted = []
-        notFound = []
-        for path in (sessionFile, credentialsFile):
-            if path.exists():
-                if not self.dryRun:
-                    path.unlink()
-                logger.action(f"deleted Grok config file: {path}")
-                deleted.append(str(path))
-            else:
-                logger.info(f"Grok config file not found (skipping): {path}")
-                notFound.append(str(path))
-        return {"deleted": deleted, "notFound": notFound}
+        return self._mediaGenerate(
+            kind="video",
+            prompt=prompt,
+            filename=filename,
+            imagePath=imagePath,
+            duration=duration,
+        )
 
-    def scrapeGrokSavedMedia(
-        self,
-        sessionFile: Path = GROK_SESSION_FILE,
-        credentialsFile: Path = GROK_CREDENTIALS_FILE,
-    ) -> dict:
-        """Scrape saved Imagine media from Grok, downloading to ~/Downloads/Grok.
+    ## list
 
-        Authentication uses Playwright Firefox ``storage_state`` (cookies +
-        localStorage) persisted at *sessionFile*.  When no valid session is
-        available the user's system Firefox browser is opened at
-        ``grok.com/imagine/saved`` so the user can log in without being blocked
-        by Cloudflare verification; cookies are then imported from the Firefox
-        profile and used to run the headless scrape.
+    def fileList(self) -> list[dict]:
+        """Return stored Imagine image and video files from the Files API."""
+        self._apiKeyRequire()
+        client = self._clientGet()
+        logger.doing("listing stored imagine media")
+        records: list[dict] = []
+        token = None
+        while True:
+            kwargs: dict[str, Any] = {
+                "limit": self.pageSize,
+                "order": "desc",
+                "sort_by": "created_at",
+            }
+            if token:
+                kwargs["pagination_token"] = token
+            response = client.files.list(**kwargs)
+            page = list(getattr(response, "data", None) or [])
+            for item in page:
+                record = _fileRecord(item)
+                if _isMediaFile(record):
+                    records.append(record)
+            if len(page) < self.pageSize:
+                break
+            token = getattr(response, "pagination_token", None)
+            if not token:
+                break
+        logger.value("imagine media files", len(records))
+        logger.done("imagine list complete")
+        return records
 
-        *credentialsFile* is retained for API compatibility but is no longer
-        used in the authentication flow — login is now always handled via the
-        user's system Firefox browser.
+    ## catalog
 
-        Authentication priority:
+    def _catalogLoad(self) -> dict:
+        """Return the local catalog object, or an empty catalog when missing."""
+        if not self.catalogPath.exists():
+            return {"version": 1, "items": []}
+        try:
+            loaded = json.loads(self.catalogPath.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:
+            logger.warning("could not read grok catalog %s: %s", self.catalogPath, error)
+            return {"version": 1, "items": []}
+        if not isinstance(loaded, dict):
+            return {"version": 1, "items": []}
+        items = loaded.get("items")
+        if not isinstance(items, list):
+            loaded["items"] = []
+        loaded.setdefault("version", 1)
+        return loaded
 
-        1. Load saved session from *sessionFile*.
-        2. Import cookies from the user's Firefox profile.
-        3. Open system Firefox at ``grok.com/imagine/saved`` and wait for the
-           user to log in, then import the resulting cookies.
+    def _catalogLocalPathUpdate(self, fileId: str, dest: Path) -> None:
+        """Record the local download path for *fileId* when the catalog has it."""
+        catalog = self._catalogLoad()
+        changed = False
+        for item in catalog["items"]:
+            if item.get("fileId") == fileId:
+                item["localPath"] = str(dest)
+                changed = True
+                break
+        if changed:
+            self._catalogSave(catalog)
 
-        After authentication the scrape runs in two phases:
+    def _catalogRecord(self, record: dict) -> None:
+        """Append *record* to the local catalog."""
+        catalog = self._catalogLoad()
+        catalog["items"].append(record)
+        self._catalogSave(catalog)
 
-        1. **Gallery phase** — navigates to ``grok.com/imagine/saved`` and
-           scrolls to the bottom so that all post thumbnails are rendered.
-           Collects every ``/imagine/post/{uuid}`` link found in the DOM.
+    def _catalogSave(self, catalog: dict) -> None:
+        """Write *catalog* JSON to disk."""
+        self.catalogPath.parent.mkdir(parents=True, exist_ok=True)
+        self.catalogPath.write_text(
+            json.dumps(catalog, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
 
-        2. **Post phase** — visits each post page in turn and collects media
-           via two complementary strategies:
+    ## client
 
-           a. Network-response interception (fires for any resource the browser
-              actually fetches from :data:`GROK_USER_CONTENT_DOMAINS`).
-
-           b. DOM query (:meth:`_extractMediaUrlsFromPage`) reads ``<video
-              src>`` and ``<source src>`` attributes directly — essential
-              because video elements only fetch their media when they play, so
-              the response listener alone misses them.
-
-        All captured media URLs are then downloaded to ``~/Downloads/Grok``.
-        """
-        if sync_playwright is None:
+    def _apiKeyRequire(self) -> None:
+        """Fail fast when no client was injected and XAI_API_KEY is missing."""
+        if self._client is not None:
+            return
+        apiKey = (self._apiKey or os.environ.get("XAI_API_KEY") or "").strip()
+        if not apiKey:
             raise RuntimeError(
-                "Playwright is required for --grok: "
-                "pip install playwright && playwright install firefox"
+                "XAI_API_KEY is not set; create a key at https://console.x.ai"
             )
+        self._apiKey = apiKey
 
-        logger.doing("starting Grok scrape for saved Imagine media")
-        with sync_playwright() as playwright:
-            browser = None
-            context = None
+    def _clientGet(self) -> Any:
+        """Return the injected client or construct one from XAI_API_KEY."""
+        if self._client is not None:
+            return self._client
+        self._apiKeyRequire()
+        apiKey = self._apiKey
+        try:
+            from xai_sdk import Client
+        except ImportError as error:
+            raise RuntimeError(
+                "xai-sdk is required for grok commands: pip install xai-sdk"
+            ) from error
+        self._client = Client(api_key=apiKey)
+        return self._client
 
-            # ------------------------------------------------------------------
-            # Authentication — prefer a saved session so that the full login
-            # flow is only required once.
-            # ------------------------------------------------------------------
-            if sessionFile.exists():
-                try:
-                    logger.info("loading saved Grok session")
-                    self._sanitizeStorageState(sessionFile)
-                    browser = self._firefoxLaunch(playwright)
-                    context = browser.new_context(storage_state=str(sessionFile))
-                    context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
-                except RuntimeError:
-                    raise  # Firefox not installed — propagate immediately
-                except Exception as e:
-                    logger.warning(
-                        f"saved session could not be loaded ({e}); "
-                        "falling back to Firefox import"
-                    )
-                    if browser:
-                        browser.close()
-                    sessionFile.unlink(missing_ok=True)
-                    context = None
-                    browser = None
+    ## generate internals
 
-            if context is None:
-                # No saved session — try importing cookies from the user's
-                # Firefox profile.  This avoids any Cloudflare challenge because
-                # the cookies were issued to a real Firefox browser.
-                if self.importFirefoxSession(sessionFile=sessionFile):
-                    try:
-                        self._sanitizeStorageState(sessionFile)
-                        browser = self._firefoxLaunch(playwright)
-                        context = browser.new_context(storage_state=str(sessionFile))
-                        context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
-                    except RuntimeError:
-                        raise  # Firefox not installed — propagate immediately
-                    except Exception as e:
-                        logger.warning(
-                            f"imported Firefox session could not be loaded ({e}); "
-                            "falling back to manual Firefox login"
-                        )
-                        if browser:
-                            browser.close()
-                        sessionFile.unlink(missing_ok=True)
-                        context = None
-                        browser = None
+    def _mediaGenerate(
+        self,
+        kind: str,
+        prompt: str,
+        filename: Optional[str] = None,
+        imagePath: Optional[str] = None,
+        duration: int = 6,
+    ) -> dict:
+        """Run one persisted image or video generation."""
+        cleanedPrompt = prompt.strip()
+        if not cleanedPrompt:
+            raise RuntimeError("prompt is required for grok generate")
+        if kind not in {"image", "video"}:
+            raise RuntimeError(f"unsupported imagine kind: {kind}")
+        if duration < 1 or duration > 15:
+            raise RuntimeError("video duration must be between 1 and 15 seconds")
 
-            if context is None:
-                # No valid session at all — open the user's system Firefox so
-                # they can log in without Cloudflare blocking the browser.
-                self._openFirefoxWindow(_GROK_SAVED_URL)
-                print(
-                    "\nFirefox has been opened at grok.com/imagine/saved.\n"
-                    "Please log in and navigate to the saved Imagine page.\n"
-                    "Press Enter here when you are logged in and on that page...",
-                    flush=True,
-                )
-                input()
-
-                if not self.importFirefoxSession(sessionFile=sessionFile):
-                    logger.warning(
-                        "could not import Grok cookies from Firefox; "
-                        "make sure you are logged in to grok.com in Firefox first"
-                    )
-                    raise SystemExit(1)
-
-                self._sanitizeStorageState(sessionFile)
-                browser = self._firefoxLaunch(playwright)
-                context = browser.new_context(storage_state=str(sessionFile))
-                context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
-
-            capturedUrls: set = set()
-
-            def _onResponse(response) -> None:
-                contentType = response.headers.get("content-type", "")
-                if self._isGrokMediaResponse(response.url, contentType):
-                    capturedUrls.add(response.url)
-
-            def _navigateToSaved(pg) -> None:
-                """Attach the response listener and navigate to /imagine/saved."""
-                pg.on("response", _onResponse)
-                pg.goto(_GROK_SAVED_URL, wait_until="domcontentloaded")
-                pg.wait_for_timeout(2000)
-
-            # ------------------------------------------------------------------
-            # Phase 1: Gallery — scroll /imagine/saved to render all post cards
-            # and collect their individual post-page links.
-            #
-            # Stall detection tracks the number of post links visible in the
-            # DOM (not capturedUrls) because gallery thumbnails may not come
-            # from GROK_USER_CONTENT_DOMAINS, so capturedUrls could stay at
-            # zero and cause the scroll to abort after just two passes.
-            # ------------------------------------------------------------------
-            page = context.new_page()
-            _navigateToSaved(page)
-
-            # Detect session expiry: an expired (or invalid) session causes
-            # Grok to redirect the browser to the login page instead of loading
-            # /imagine/saved.  Open system Firefox for re-login and import fresh
-            # cookies.
-            if urllib.parse.urlparse(page.url).path != "/imagine/saved":
-                logger.warning(
-                    f"session appears expired (redirected to {page.url!r}); "
-                    "opening Firefox for re-login"
-                )
-                context.close()
-                browser.close()
-                sessionFile.unlink(missing_ok=True)
-
-                self._openFirefoxWindow(_GROK_SAVED_URL)
-                print(
-                    "\nYour Grok session has expired. Firefox has been opened.\n"
-                    "Please log in and navigate to grok.com/imagine/saved.\n"
-                    "Press Enter here when you are ready...",
-                    flush=True,
-                )
-                input()
-
-                if not self.importFirefoxSession(sessionFile=sessionFile):
-                    logger.warning(
-                        "could not import Grok cookies from Firefox after re-login"
-                    )
-                    raise SystemExit(1)
-
-                self._sanitizeStorageState(sessionFile)
-                browser = self._firefoxLaunch(playwright)
-                context = browser.new_context(storage_state=str(sessionFile))
-                context.add_init_script(_PLAYWRIGHT_INIT_SCRIPT)
-                page = context.new_page()
-                _navigateToSaved(page)
-
-                if urllib.parse.urlparse(page.url).path != "/imagine/saved":
-                    logger.warning(
-                        f"still not authenticated after re-login "
-                        f"(redirected to {page.url!r}); aborting"
-                    )
-                    raise SystemExit(1)
-
-                # Persist the refreshed session.
-                sessionFile.parent.mkdir(parents=True, exist_ok=True)
-                context.storage_state(path=str(sessionFile))
-                if sessionFile.exists():
-                    sessionFile.chmod(0o600)
-                    self._sanitizeStorageState(sessionFile)
-                logger.value("saved refreshed Grok session to", str(sessionFile))
-
-            previousLinkCount = 0
-            stallCount = 0
-            for _ in range(20):
-                page.mouse.wheel(0, 2500)
-                page.wait_for_timeout(900)
-                currentLinkCount = len(self._collectPostUrls(page))
-                if currentLinkCount == previousLinkCount:
-                    stallCount += 1
-                    if stallCount >= 2:
-                        break
-                else:
-                    stallCount = 0
-                previousLinkCount = currentLinkCount
-
-            postUrls = self._collectPostUrls(page)
-            logger.value("found Grok post pages", len(postUrls))
-
-            # ------------------------------------------------------------------
-            # Phase 2: Post pages — visit each post and collect media via two
-            # complementary strategies:
-            #
-            # a) Network-response listener (_onResponse, already active) fires
-            #    for any resource that the browser fetches from
-            #    GROK_USER_CONTENT_DOMAINS while the page loads.
-            #
-            # b) DOM query (_extractMediaUrlsFromPage) reads <video src> and
-            #    <source src> attributes directly.  This is essential because
-            #    <video> elements do not start fetching their media until they
-            #    play, so the response listener alone misses them.
-            #
-            # We wait for "networkidle" (not just "domcontentloaded") so that
-            # the React app has time to finish its API call and render the
-            # video elements into the DOM before we query them.
-            # ------------------------------------------------------------------
-            for i, postUrl in enumerate(postUrls, 1):
-                logger.doing(f"scraping post {i}/{len(postUrls)}: {postUrl}")
-                page.goto(postUrl, wait_until="networkidle")
-                page.wait_for_timeout(1000)
-                for url in self._extractMediaUrlsFromPage(page):
-                    capturedUrls.add(url)
-
-            page.remove_listener("response", _onResponse)
-            mediaUrls = sorted(capturedUrls)
-            logger.value("found Grok media URLs", len(mediaUrls))
-
-            # Refresh the session on disk so it stays current.
-            context.storage_state(path=str(sessionFile))
-            if sessionFile.exists():
-                self._sanitizeStorageState(sessionFile)
-
-            if not postUrls:
-                logger.warning(
-                    "no posts found — check that you are logged in; "
-                    f"if the session has expired, delete {sessionFile} and re-run"
-                )
-
-            downloadStats = self._downloadMediaFiles(
-                mediaUrls, playwrightContext=context
-            )
-            browser.close()
-
-        logger.done("Grok scrape complete")
-        return {
-            "postsFound": len(postUrls),
-            "urlsFound": len(mediaUrls),
-            **downloadStats,
+        model = GROK_IMAGE_MODEL if kind == "image" else GROK_VIDEO_MODEL
+        suffix = ".jpg" if kind == "image" else ".mp4"
+        storedName = filename.strip() if filename else _filenameFromPrompt(cleanedPrompt, suffix)
+        record = {
+            "fileId": "",
+            "filename": storedName,
+            "prompt": cleanedPrompt,
+            "kind": kind,
+            "model": model,
+            "createdAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "localPath": None,
         }
+
+        logger.doing(f"generating imagine {kind}")
+        logger.value("model", model)
+        logger.value("filename", storedName)
+        logger.action(f"generate imagine {kind}: {cleanedPrompt}")
+        self._apiKeyRequire()
+
+        if self.dryRun:
+            logger.done(f"imagine {kind} generation skipped")
+            return record
+
+        client = self._clientGet()
+        storageOptions = {"filename": storedName}
+        imageUrl = _imageUrlFromPath(imagePath) if imagePath else None
+        if kind == "image":
+            sampleKwargs: dict[str, Any] = {
+                "prompt": cleanedPrompt,
+                "model": model,
+                "storage_options": storageOptions,
+            }
+            if imageUrl:
+                sampleKwargs["image_url"] = imageUrl
+            response = client.image.sample(**sampleKwargs)
+        else:
+            generateKwargs: dict[str, Any] = {
+                "prompt": cleanedPrompt,
+                "model": model,
+                "duration": duration,
+                "storage_options": storageOptions,
+            }
+            if imageUrl:
+                generateKwargs["image_url"] = imageUrl
+            response = client.video.generate(**generateKwargs)
+
+        storageError = getattr(response, "storage_error", None)
+        if storageError:
+            raise RuntimeError(f"imagine storage failed: {storageError}")
+        fileOutput = getattr(response, "file_output", None)
+        fileId = getattr(fileOutput, "file_id", None) if fileOutput is not None else None
+        if not fileId:
+            raise RuntimeError(
+                "generation succeeded but no file_output was returned; "
+                "storage_options may have failed"
+            )
+        record["fileId"] = fileId
+        record["filename"] = getattr(fileOutput, "filename", None) or storedName
+        self._catalogRecord(record)
+        logger.value("file id", fileId)
+        logger.done(f"imagine {kind} generation complete")
+        return record
+
+    ## utilities
+
+    def _downloadDestination(self, record: dict) -> Path:
+        """Return the local path for *record*."""
+        filename = Path(record.get("filename") or record["fileId"]).name
+        return self.downloadDir / filename
+
+
+def grokCommandRun(args: Any, dryRun: bool) -> dict:
+    """Dispatch a parsed ``grok`` CLI action.
+
+    Args:
+        args: argparse namespace from ``buildParser``.
+        dryRun: When True, generate and download do not change remote or local
+            state. List still reads the Files API.
+
+    Returns:
+        Action result payload (catalog record, file list, or download stats).
+    """
+    archive = ImagineArchive(dryRun=dryRun)
+    action = getattr(args, "grokAction", None)
+    if action == "generate":
+        kind = getattr(args, "kind", "image") or "image"
+        prompt = getattr(args, "prompt", "") or ""
+        filename = getattr(args, "filename", None)
+        imagePath = getattr(args, "image", None)
+        if kind == "video":
+            duration = getattr(args, "duration", 6) or 6
+            return archive.videoGenerate(
+                prompt=prompt,
+                filename=filename,
+                imagePath=imagePath,
+                duration=duration,
+            )
+        return archive.imageGenerate(
+            prompt=prompt,
+            filename=filename,
+            imagePath=imagePath,
+        )
+    if action == "list":
+        records = archive.fileList()
+        _listPrint(records)
+        return {"files": records}
+    if action == "download":
+        return archive.fileDownload(fileId=getattr(args, "file_id", None))
+    raise RuntimeError(f"unknown grok action: {action}")
+
+
+def _filenameFromPrompt(prompt: str, suffix: str) -> str:
+    """Build a filesystem-safe storage filename from *prompt* and *suffix*."""
+    slug = re.sub(r"[^a-z0-9]+", "-", prompt.lower()).strip("-")[:48]
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return f"{stamp}-{slug or 'imagine'}{suffix}"
+
+
+def _fileRecord(item: Any) -> dict:
+    """Normalise a Files API object or fake into a plain record."""
+    fileId = getattr(item, "id", None) or getattr(item, "file_id", "") or ""
+    filename = getattr(item, "filename", "") or ""
+    sizeBytes = getattr(item, "size", None)
+    if sizeBytes is None:
+        sizeBytes = getattr(item, "bytes", 0) or 0
+    contentType = (
+        getattr(item, "content_type", None)
+        or getattr(item, "mime_type", None)
+        or ""
+    )
+    createdAt = getattr(item, "created_at", None)
+    return {
+        "fileId": fileId,
+        "filename": filename,
+        "sizeBytes": int(sizeBytes or 0),
+        "contentType": str(contentType),
+        "createdAt": str(createdAt) if createdAt is not None else "",
+    }
+
+
+def _imageUrlFromPath(imagePath: str) -> str:
+    """Return a URL or data URL for a local image path."""
+    cleaned = imagePath.strip()
+    parsed = urlparse(cleaned)
+    if parsed.scheme in {"http", "https", "data"}:
+        return cleaned
+    path = Path(cleaned).expanduser()
+    if not path.is_file():
+        raise RuntimeError(f"image file not found: {path}")
+    mime = _IMAGE_MIME_BY_SUFFIX.get(path.suffix.lower(), "image/png")
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{mime};base64,{encoded}"
+
+
+def _isMediaFile(record: dict) -> bool:
+    """Return True when *record* looks like an image or video file."""
+    contentType = (record.get("contentType") or "").lower()
+    if contentType.startswith("image/") or contentType.startswith("video/"):
+        return True
+    suffix = Path(record.get("filename") or "").suffix.lower()
+    return suffix in GROK_MEDIA_EXTENSIONS
+
+
+def _listPrint(records: list[dict]) -> None:
+    """Write a simple file listing to the logger."""
+    if not records:
+        logger.info("no stored imagine media files")
+        return
+    for record in records:
+        logger.info(
+            f"{record['fileId']}  {record['filename']}  {record['sizeBytes']} bytes"
+        )
