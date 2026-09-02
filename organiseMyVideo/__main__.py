@@ -78,29 +78,89 @@ def _promptForTvdbApiKey(configPath: Path) -> Optional[str]:
     return _persistTvdbApiKey(entered, configPath)
 
 
+def _runGrokGalleryCommand(args, gallery, sessionFile: Path) -> None:
+    """Run --reset-grok, --import-firefox-session, or --grok gallery download."""
+    if args.reset_grok:
+        logger.doing("resetting grok session files")
+        resetStats = gallery.resetGrokConfig()
+        deletedList = "\n".join(f"  {path}" for path in resetStats["deleted"]) or "  (none)"
+        notFoundList = "\n".join(f"  {path}" for path in resetStats["notFound"]) or "  (none)"
+        summary = f"""RESET GROK SUMMARY
+Deleted:
+{deletedList}
+Not found:
+{notFoundList}
+"""
+        drawBox(summary)
+        return
+    if args.import_firefox_session:
+        logger.doing("importing grok firefox session")
+        ok = gallery.importFirefoxSession()
+        if ok:
+            summary = (
+                f"FIREFOX SESSION IMPORTED\n"
+                f"  Session file: {sessionFile}\n\n"
+                f"Run --grok --confirm to download your Imagine media."
+            )
+        else:
+            summary = (
+                "FIREFOX SESSION IMPORT FAILED\n\n"
+                "Make sure you are logged into grok.com in Firefox,\n"
+                "then run --import-firefox-session again.\n\n"
+                "Alternatively, run --grok and Firefox will be opened automatically."
+            )
+        drawBox(summary)
+        return
+    logger.doing("downloading generated grok.com imagine media")
+    grokStats = gallery.downloadGeneratedMedia()
+    summary = f"""GROK SUMMARY
+Generated assets: {grokStats['assetsFound']}
+Files handled:    {grokStats['downloaded']}
+Already present:  {grokStats['skipped']}
+Errors:           {grokStats['errors']}
+Session file:     {sessionFile}
+  (delete with --reset-grok to force re-login)
+"""
+    drawBox(summary)
+
+
 def _getSummaryReportPath(sourcePath: str, mode: str) -> Path:
     """Return the summary-report path for auto/rescan runs."""
     del sourcePath, mode
     return APP_CONFIG_FILE.parent / f"summary.{datetime.now().strftime('%Y%m%d')}.txt"
 
 
-def main():
-    """Main entry point for the video organizer."""
+def _buildSharedFlags() -> argparse.ArgumentParser:
+    """Return flags shared by the organiser and grok subcommands."""
+    shared = argparse.ArgumentParser(add_help=False)
+    shared.add_argument(
+        "-y",
+        "--confirm",
+        "--y",
+        dest="confirm",
+        default=False,
+        action="store_true",
+        help="confirm execution — actually make changes (default is dry-run)",
+    )
+    shared.add_argument(
+        "--debug",
+        action="store_true",
+        help="enable debug logging",
+    )
+    return shared
+
+
+def buildParser() -> argparse.ArgumentParser:
+    """Return the public CLI parser, including the grok subcommand."""
     parser = argparse.ArgumentParser(
-        description="Organize video files into movies and TV show directories"
+        description="Organize video files into movies and TV show directories",
+        parents=[_buildSharedFlags()],
     )
     parser.add_argument(
         "-s",
         "--source",
         default="/mnt/video2/toFile",
         help="Source directory containing files to organize (default: /mnt/video2/toFile)",
-    )
-    parser.add_argument(
-        "-y",
-        "--confirm",
-        default=False,
-        action="store_true",
-        help="confirm execution — actually make changes (default is dry-run)",
     )
     parser.add_argument(
         "--auto",
@@ -156,10 +216,79 @@ def main():
         help="TVDB API key to save to ~/.config/organiseMyVideo/config.json",
     )
     parser.add_argument(
-        "--debug",
+        "--grok",
         action="store_true",
-        help="enable debug logging",
+        help="download this account's generated grok.com Imagine media to ~/Downloads/Grok",
     )
+    parser.add_argument(
+        "--import-firefox-session",
+        dest="import_firefox_session",
+        action="store_true",
+        help="import grok.com cookies from Firefox after logging in at grok.com/imagine/saved",
+    )
+    parser.add_argument(
+        "--reset-grok",
+        dest="reset_grok",
+        action="store_true",
+        help="delete saved grok.com session files so the next --grok run logs in again",
+    )
+    subparsers = parser.add_subparsers(dest="command")
+    grokParser = subparsers.add_parser(
+        "grok",
+        parents=[_buildSharedFlags()],
+        help="generate, list, and download Imagine media through the xAI API",
+    )
+    grokSub = grokParser.add_subparsers(dest="grokAction", required=True)
+    generateParser = grokSub.add_parser(
+        "generate",
+        parents=[_buildSharedFlags()],
+        help="generate an image or video and persist it with storage_options",
+    )
+    generateParser.add_argument(
+        "prompt",
+        help="text prompt for image or video generation",
+    )
+    generateParser.add_argument(
+        "--kind",
+        choices=("image", "video"),
+        default="image",
+        help="generation kind (default: image)",
+    )
+    generateParser.add_argument(
+        "--filename",
+        help="filename stored in the Files API (default: timestamp plus prompt slug)",
+    )
+    generateParser.add_argument(
+        "--image",
+        help="optional local image path or URL used as a reference",
+    )
+    generateParser.add_argument(
+        "--duration",
+        type=int,
+        default=6,
+        help="video duration in seconds, 1-15 (default: 6)",
+    )
+    grokSub.add_parser(
+        "list",
+        parents=[_buildSharedFlags()],
+        help="list stored Imagine images and videos",
+    )
+    downloadParser = grokSub.add_parser(
+        "download",
+        parents=[_buildSharedFlags()],
+        help="download stored Imagine media to the local archive",
+    )
+    downloadParser.add_argument(
+        "--file-id",
+        dest="file_id",
+        help="download only this Files API id",
+    )
+    return parser
+
+
+def main():
+    """Main entry point for the video organizer."""
+    parser = buildParser()
     args = parser.parse_args()
 
     dryRun = not args.confirm
@@ -196,6 +325,44 @@ def main():
         logger.info("entering dry-run mode, use --confirm to execute")
     else:
         logger.info("confirm mode, changes will be made")
+
+    if args.reset_grok or args.import_firefox_session or args.grok:
+        from .grokGallery import GROK_SESSION_FILE, GrokGallery
+
+        gallery = GrokGallery(dryRun=dryRun)
+        logger.value("mode", "grok-gallery")
+        try:
+            _runGrokGalleryCommand(args, gallery, GROK_SESSION_FILE)
+        except RuntimeError as error:
+            logger.error("%s", error)
+            raise SystemExit(1) from error
+        logger.done("organiseMyVideo complete")
+        return
+
+    if getattr(args, "command", None) == "grok":
+        from .grok import grokCommandRun
+
+        logger.value("mode", "grok")
+        logger.value("grok action", args.grokAction)
+        try:
+            result = grokCommandRun(args, dryRun=dryRun)
+        except RuntimeError as error:
+            logger.error("%s", error)
+            raise SystemExit(1) from error
+        if args.grokAction == "download":
+            summary = f"""GROK DOWNLOAD SUMMARY
+Downloaded: {result['downloaded']}
+Skipped:    {result['skipped']}
+Errors:     {result['errors']}
+"""
+            drawBox(summary)
+        elif args.grokAction == "list":
+            logger.value("listed files", len(result.get("files", [])))
+        elif args.grokAction == "generate":
+            logger.value("file id", result.get("fileId") or "(dry-run)")
+            logger.value("filename", result.get("filename"))
+        logger.done("organiseMyVideo complete")
+        return
 
     configPath = _getAppConfigPath()
     if args.key is not None:

@@ -13,6 +13,8 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 _DRY_RUN_PREFIX = "[] "
 
 # Ensure the project root is importable during test discovery (VS Code can invoke
@@ -102,3 +104,32 @@ def _stubOrganiseMyProjects() -> None:
 
 
 _stubOrganiseMyProjects()
+
+
+@pytest.fixture(autouse=True)
+def applicationStateIsolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep application configuration and cache writes inside the test sandbox."""
+    from organiseMyVideo import constants, grok, grokGallery, metadata, video, video_rescan
+    from organiseMyVideo import __main__ as applicationMain
+
+    configDir = tmp_path / "config"
+    applicationPaths = {
+        "APP_CONFIG_FILE": configDir / "config.json",
+        "GROK_CATALOG_FILE": configDir / "grokCatalog.json",
+        "GROK_CREDENTIALS_FILE": configDir / "grokCredentials.json",
+        "GROK_DOWNLOAD_DIR": tmp_path / "downloads" / "Grok",
+        "GROK_SESSION_FILE": configDir / "grokSession.json",
+        "METADATA_LIBRARY_FILE": configDir / "metadataLibrary.json",
+    }
+    modulesByPath = {
+        "APP_CONFIG_FILE": (constants, applicationMain, video, video_rescan),
+        "GROK_CATALOG_FILE": (constants, grok),
+        "GROK_CREDENTIALS_FILE": (constants, grokGallery),
+        "GROK_DOWNLOAD_DIR": (constants, grok, grokGallery),
+        "GROK_SESSION_FILE": (constants, grokGallery),
+        "METADATA_LIBRARY_FILE": (constants, metadata),
+    }
+
+    for pathName, pathValue in applicationPaths.items():
+        for module in modulesByPath[pathName]:
+            monkeypatch.setattr(module, pathName, pathValue)

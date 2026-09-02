@@ -6,8 +6,9 @@ Public surface
                      :class:`~organiseMyVideo.torrent.TorrentMixin`, via
                      multiple inheritance.
 
-The retained Grok code lives in :mod:`organiseMyVideo.grok`, but it is no
-longer wired into the main application package or CLI.
+Imagine generation, listing, and download live in :mod:`organiseMyVideo.grok`
+and are invoked through the ``grok`` CLI subcommand. They are not mixed into
+:class:`VideoOrganizer`.
 """
 
 import shutil  # re-exported so patch("organiseMyVideo.shutil.move") still works in tests

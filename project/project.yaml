@@ -1,0 +1,47 @@
+name: organiseMyVideo
+purpose: Safely organise staged media into structured movie, television, and music libraries.
+audience:
+  - Maintainers of the configured media library
+  - Operators running organisation, cleanup, and rescan workflows
+scope:
+  - Filename and metadata interpretation
+  - Dry-run planning and confirmed media operations
+  - Movie, television, music, torrent, and library-rescan workflows
+  - A Qt desktop interface for browsing supported media libraries
+  - Official xAI Imagine generation, listing, and download via storage_options
+outOfScope:
+  - Media playback and streaming
+  - Download acquisition
+  - grok.com login scraping and consumer-gallery export
+risks:
+  - Incorrect classification or destination selection can misplace user media
+  - Destructive cleanup can remove recoverable source material
+  - External metadata providers can be unavailable or return incorrect matches
+milestones:
+  - id: phase0
+    outcome: Establish a safe, reproducible baseline
+    status: Completed
+  - id: phase1
+    outcome: Bootstrap requirements and architecture governance
+    status: Completed
+  - id: phase2
+    outcome: Make installation and execution reproducible
+    status: ToDo
+  - id: phase3
+    outcome: Repair entry-point and CLI architecture
+    status: ToDo
+  - id: phase4
+    outcome: Centralise safe filesystem behaviour
+    status: ToDo
+  - id: phase5
+    outcome: Refactor by domain without changing behaviour
+    status: ToDo
+  - id: phase6
+    outcome: Make verification enforceable
+    status: ToDo
+  - id: phase7
+    outcome: Finish layout and documentation adoption
+    status: ToDo
+  - id: qtMediaBrowser
+    outcome: Browse supported media libraries through a Qt desktop interface
+    status: ToDo
