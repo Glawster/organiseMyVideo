@@ -5,8 +5,8 @@
 This repository contains a Python 3.10+ command-line application that organises
 movies, TV episodes, music, and torrent downloads. The shared rules in
 `.github/agent-instructions.md` take precedence. Repository layout and
-requirements work follow `.github/repositoryLayout.md` and
-`.github/requirementsManagement.md`.
+requirements work follow `documentation/repositoryLayout.md` and
+`documentation/requirementsManagement.md`.
 
 The existing `organiseMyVideo/` package is this repository's source-package
 directory. Keep its root launcher behaviour through `python -m organiseMyVideo`;
