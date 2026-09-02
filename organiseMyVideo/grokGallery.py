@@ -217,9 +217,7 @@ class GrokGallery:
                     "grok.com session expired or Cloudflare blocked the request; "
                     "log in with Firefox and run --import-firefox-session --confirm"
                 ) from error
-            raise RuntimeError(
-                f"grok.com request failed: HTTP {error.code}"
-            ) from error
+            raise RuntimeError(f"grok.com request failed: HTTP {error.code}") from error
 
     def _assetsQuery(
         self,
@@ -318,12 +316,7 @@ class GrokGallery:
         mime = str(asset.get("mimeType") or "")
         if mime == "application/octet-stream":
             return None
-        url = (
-            asset.get("hd1080Key")
-            or asset.get("hdKey")
-            or asset.get("url")
-            or ""
-        )
+        url = asset.get("hd1080Key") or asset.get("hdKey") or asset.get("url") or ""
         if url and not str(url).startswith("http"):
             url = self._assetDownloadUrl({"key": url, "assetId": assetId})
         if not url:
@@ -950,12 +943,14 @@ class GrokGallery:
             # (e.g. '.grok.com', 'accounts.x.ai').  The LIKE patterns use a
             # leading dot/% pair so they cannot match unrelated suffixes such
             # as 'fakegrok.com'.
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT name, value, host, path, expiry, isSecure, isHttpOnly, sameSite
                 FROM moz_cookies
                 WHERE host = 'grok.com'  OR host LIKE '%.grok.com'
                    OR host = 'x.ai'      OR host LIKE '%.x.ai'
-                """)
+                """
+            )
             rows = cursor.fetchall()
             conn.close()
         finally:

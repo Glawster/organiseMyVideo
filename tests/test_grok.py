@@ -163,9 +163,7 @@ def testFileListOmitsNonMediaAndPaginates():
 
 
 def testDownloadDryRunDoesNotWriteFiles(tmp_path):
-    listed = FakeListResponse(
-        [_mediaFile("file_img", "harbour.jpg", "image/jpeg")]
-    )
+    listed = FakeListResponse([_mediaFile("file_img", "harbour.jpg", "image/jpeg")])
     client = FakeClient(
         files=FakeFiles([listed], contents={"file_img": b"jpeg-bytes"}),
     )

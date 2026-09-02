@@ -170,17 +170,13 @@ def testDownloadMediaFilesDryRunDoesNotWrite(gallery: GrokGallery, tmp_path: Pat
     assert not (destDir / "image01.png").exists()
 
 
-def testDownloadMediaFilesSkipsExisting(
-    confirmedGallery: GrokGallery, tmp_path: Path
-):
+def testDownloadMediaFilesSkipsExisting(confirmedGallery: GrokGallery, tmp_path: Path):
     destDir = tmp_path / "Downloads" / "Grok"
     destDir.mkdir(parents=True)
     target = destDir / "image01.png"
     target.write_bytes(b"exists")
     confirmedGallery.downloadDir = destDir
-    stats = confirmedGallery._downloadMediaFiles(
-        ["https://example.com/image01.png"]
-    )
+    stats = confirmedGallery._downloadMediaFiles(["https://example.com/image01.png"])
     assert stats == {"downloaded": 0, "skipped": 1, "errors": 0}
 
 
@@ -319,9 +315,7 @@ def testSanitizeStorageStatePreservesValidExpires(tmp_path, gallery: GrokGallery
     assert data["cookies"][1]["expires"] == 1700000000
 
 
-def testSanitizeStorageStatePreservesExpiresAtMaxLimit(
-    tmp_path, gallery: GrokGallery
-):
+def testSanitizeStorageStatePreservesExpiresAtMaxLimit(tmp_path, gallery: GrokGallery):
     """An expires exactly equal to kMaxCookieExpiresDateInSeconds (253402300799) is valid
     and must be left unchanged."""
     f = tmp_path / "session.json"
@@ -362,9 +356,7 @@ def testSanitizeStorageStateClampsOverLimitFloat(tmp_path, gallery: GrokGallery)
     assert data["cookies"][0]["expires"] == 253402300799
 
 
-def testSanitizeStorageStateConvertsBooleanToMinusOne(
-    tmp_path, gallery: GrokGallery
-):
+def testSanitizeStorageStateConvertsBooleanToMinusOne(tmp_path, gallery: GrokGallery):
     """expires: True (Python bool) serialises to JSON true which Playwright cannot use
     as a numeric expires.  It must be normalised to -1."""
     f = tmp_path / "session.json"
@@ -463,9 +455,7 @@ def _make_firefox_base(tmp_path: Path, profiles: list) -> Path:
     return base
 
 
-def testFindFirefoxProfileReturnsDefaultProfile(
-    gallery: GrokGallery, tmp_path: Path
-):
+def testFindFirefoxProfileReturnsDefaultProfile(gallery: GrokGallery, tmp_path: Path):
     """The section with Default=1 is returned ahead of any other Profile section."""
     base = _make_firefox_base(
         tmp_path,
@@ -478,9 +468,7 @@ def testFindFirefoxProfileReturnsDefaultProfile(
     assert result == base / "profiles/default"
 
 
-def testFindFirefoxProfileReturnsFallbackProfile(
-    gallery: GrokGallery, tmp_path: Path
-):
+def testFindFirefoxProfileReturnsFallbackProfile(gallery: GrokGallery, tmp_path: Path):
     """When no Default=1 is set, the first Profile section is returned."""
     base = _make_firefox_base(
         tmp_path,
@@ -490,9 +478,7 @@ def testFindFirefoxProfileReturnsFallbackProfile(
     assert result == base / "profiles/first"
 
 
-def testFindFirefoxProfileReturnsNoneWhenNoIni(
-    gallery: GrokGallery, tmp_path: Path
-):
+def testFindFirefoxProfileReturnsNoneWhenNoIni(gallery: GrokGallery, tmp_path: Path):
     """None is returned when profiles.ini does not exist."""
     base = tmp_path / "firefox_missing"
     result = gallery._findFirefoxProfile(_firefoxBase=base)
@@ -575,9 +561,7 @@ def testFindFirefoxProfileReturnsNoneWhenNoInstallFound(
     assert result is None
 
 
-def testFindFirefoxProfilePicksMostRecentCookies(
-    gallery: GrokGallery, tmp_path: Path
-):
+def testFindFirefoxProfilePicksMostRecentCookies(gallery: GrokGallery, tmp_path: Path):
     """When two installs both have cookies.sqlite, the one with the most
     recently modified file is preferred (the actively-used install)."""
     import os
@@ -629,20 +613,20 @@ def _make_firefox_cookies_db(profile_dir: Path, cookies: list) -> None:
     """
     db_path = profile_dir / "cookies.sqlite"
     conn = sqlite3.connect(str(db_path))
-    conn.execute("""
+    conn.execute(
+        """
         CREATE TABLE moz_cookies (
             name TEXT, value TEXT, host TEXT, path TEXT,
             expiry INTEGER, isSecure INTEGER, isHttpOnly INTEGER, sameSite INTEGER
         )
-        """)
+        """
+    )
     conn.executemany("INSERT INTO moz_cookies VALUES (?,?,?,?,?,?,?,?)", cookies)
     conn.commit()
     conn.close()
 
 
-def testImportFirefoxSessionWritesStorageState(
-    gallery: GrokGallery, tmp_path: Path
-):
+def testImportFirefoxSessionWritesStorageState(gallery: GrokGallery, tmp_path: Path):
     """Cookies for grok.com are read and written as a Playwright storage-state JSON."""
     profileDir = tmp_path / "profile"
     profileDir.mkdir()
@@ -701,9 +685,7 @@ def testImportFirefoxSessionMapsZeroExpiryToMinusOne(
     assert cookies["persistent_cookie"]["expires"] == 9999999999
 
 
-def testImportFirefoxSessionClampsOverLimitExpiry(
-    gallery: GrokGallery, tmp_path: Path
-):
+def testImportFirefoxSessionClampsOverLimitExpiry(gallery: GrokGallery, tmp_path: Path):
     """Cookies with expiry > 253402300799 (Playwright's kMaxCookieExpiresDateInSeconds)
     must be clamped to 253402300799.
 
@@ -750,12 +732,14 @@ def testImportFirefoxSessionConvertsFloatExpiryToInt(
     # SQLite's dynamic typing.  This reproduces the bug where json.dumps writes
     # '1742000000.0' instead of '1742000000', which Playwright rejects.
     conn = sqlite3.connect(str(db_path))
-    conn.execute("""
+    conn.execute(
+        """
         CREATE TABLE moz_cookies (
             name TEXT, value TEXT, host TEXT, path TEXT,
             expiry REAL, isSecure INTEGER, isHttpOnly INTEGER, sameSite INTEGER
         )
-        """)
+        """
+    )
     conn.execute(
         "INSERT INTO moz_cookies VALUES (?,?,?,?,?,?,?,?)",
         ("float_cookie", "v", "grok.com", "/", 1742000000.0, 1, 0, 0),
@@ -1026,4 +1010,3 @@ def testSessionCookiesLoadRequiresGrokDomain(tmp_path: Path):
     gallery = GrokGallery(dryRun=True)
     with pytest.raises(RuntimeError, match="no grok.com cookies"):
         gallery._sessionCookiesLoad(sessionFile)
-

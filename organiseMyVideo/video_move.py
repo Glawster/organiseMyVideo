@@ -103,9 +103,7 @@ class VideoMoveMixin:
         artist = (
             self._cleanMusicField(parentParts[0]) if len(parentParts) >= 2 else None
         )
-        album = (
-            self._cleanMusicField(parentParts[1]) if len(parentParts) >= 2 else None
-        )
+        album = self._cleanMusicField(parentParts[1]) if len(parentParts) >= 2 else None
         if len(parentParts) == 1:
             album = self._cleanMusicField(parentParts[0])
 

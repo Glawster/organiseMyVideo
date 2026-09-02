@@ -26,11 +26,15 @@ generic layout example.
 
 ## Development and verification
 
-Install runtime and development dependencies with:
+Create or update the Conda development environment with:
 
 ```bash
-pip install -r requirements.txt -r dev-requirements.txt
+conda env create -f environment.yml
+conda activate application
 ```
+
+For an existing environment, run `pip install -e ".[dev]"`. The requirements
+files are compatibility exports; `pyproject.toml` is authoritative.
 
 Run the test suite with:
 

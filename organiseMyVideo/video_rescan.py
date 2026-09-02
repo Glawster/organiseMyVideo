@@ -721,9 +721,10 @@ class VideoRescanMixin:
         with self._suppressResetNoiseLogs():
             mcmHints = self._readMovieMcmHints(videoFile)
             parsedMovieInfo = self.parseMovieFilename(videoFile.name)
-            sourceMovieInfo = self._applyMovieMcmHints(
-                parsedMovieInfo, mcmHints, videoFile
-            ) or parsedMovieInfo
+            sourceMovieInfo = (
+                self._applyMovieMcmHints(parsedMovieInfo, mcmHints, videoFile)
+                or parsedMovieInfo
+            )
             sourceMovieInfo = self._normaliseMovieMetadata(sourceMovieInfo)
             if not sourceMovieInfo:
                 return "skipped"
@@ -779,7 +780,9 @@ class VideoRescanMixin:
         if destinationDir == movieFolder:
             return movieFolder, videoFiles
         if destinationDir.exists():
-            logger.error("rescan movie folder target already exists: %s", destinationDir)
+            logger.error(
+                "rescan movie folder target already exists: %s", destinationDir
+            )
             return movieFolder, videoFiles
 
         logger.action(

@@ -27,7 +27,7 @@ milestones:
     status: Completed
   - id: phase2
     outcome: Make installation and execution reproducible
-    status: ToDo
+    status: Completed
   - id: phase3
     outcome: Repair entry-point and CLI architecture
     status: ToDo

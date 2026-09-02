@@ -109,7 +109,14 @@ _stubOrganiseMyProjects()
 @pytest.fixture(autouse=True)
 def applicationStateIsolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep application configuration and cache writes inside the test sandbox."""
-    from organiseMyVideo import constants, grok, grokGallery, metadata, video, video_rescan
+    from organiseMyVideo import (
+        constants,
+        grok,
+        grokGallery,
+        metadata,
+        video,
+        video_rescan,
+    )
     from organiseMyVideo import __main__ as applicationMain
 
     configDir = tmp_path / "config"

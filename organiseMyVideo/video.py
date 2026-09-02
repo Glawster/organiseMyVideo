@@ -79,7 +79,9 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
                     continue
                 storageDir = _FILESYSTEM_PATH(value).expanduser()
                 if not storageDir.is_dir():
-                    logger.warning("configured storage location missing: %s", storageDir)
+                    logger.warning(
+                        "configured storage location missing: %s", storageDir
+                    )
                     continue
                 storageDirs.append(storageDir)
             return sorted(set(storageDirs))
@@ -170,9 +172,19 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         logger.info("scanning for storage locations")
 
         discoveredMovieDirs, discoveredVideoDirs = self._scanMountedStorageLocations()
-        configuredMovieDirs, configuredVideoDirs = self._loadConfiguredStorageLocations()
-        movieDirs = configuredMovieDirs if configuredMovieDirs is not None else discoveredMovieDirs
-        videoDirs = configuredVideoDirs if configuredVideoDirs is not None else discoveredVideoDirs
+        configuredMovieDirs, configuredVideoDirs = (
+            self._loadConfiguredStorageLocations()
+        )
+        movieDirs = (
+            configuredMovieDirs
+            if configuredMovieDirs is not None
+            else discoveredMovieDirs
+        )
+        videoDirs = (
+            configuredVideoDirs
+            if configuredVideoDirs is not None
+            else discoveredVideoDirs
+        )
 
         if configuredMovieDirs is not None:
             for movieDir in movieDirs:
@@ -853,9 +865,10 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         totalBytes = sourceFile.stat().st_size
         copiedBytes = 0
         try:
-            with sourceFile.open("rb") as sourceHandle, destFile.open(
-                "wb"
-            ) as destHandle:
+            with (
+                sourceFile.open("rb") as sourceHandle,
+                destFile.open("wb") as destHandle,
+            ):
                 self._renderMoveProgress(
                     progressStream, sourceFile.name, copiedBytes, totalBytes
                 )

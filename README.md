@@ -31,12 +31,12 @@ The README is the canonical entry point for repository documentation. The living
 ### Organise video files
 
 ```bash
-python organiseMyVideo.py
-python organiseMyVideo.py --source /path/to/staging
-python organiseMyVideo.py --source /path/to/staging --confirm
-python organiseMyVideo.py --source /path/to/staging --auto --confirm
-python organiseMyVideo.py --rescan --confirm
-python organiseMyVideo.py --debug
+python -m organiseMyVideo
+python -m organiseMyVideo --source /path/to/staging
+python -m organiseMyVideo --source /path/to/staging --confirm
+python -m organiseMyVideo --source /path/to/staging --auto --confirm
+python -m organiseMyVideo --rescan --confirm
+python -m organiseMyVideo --debug
 ```
 
 By default the script runs in **dry-run** mode. Add `--confirm` to actually make changes.
@@ -44,8 +44,8 @@ By default the script runs in **dry-run** mode. Add `--confirm` to actually make
 ### Clean source-folder names and remove empty folders
 
 ```bash
-python organiseMyVideo.py --clean
-python organiseMyVideo.py --clean --confirm
+python -m organiseMyVideo --clean
+python -m organiseMyVideo --clean --confirm
 ```
 
 `--clean` by itself works on the video source folder:
@@ -57,9 +57,9 @@ python organiseMyVideo.py --clean --confirm
 ### Clean torrent downloads
 
 ```bash
-python organiseMyVideo.py --torrent
-python organiseMyVideo.py --torrent --clean
-python organiseMyVideo.py --torrent --clean --confirm
+python -m organiseMyVideo --torrent
+python -m organiseMyVideo --torrent --clean
+python -m organiseMyVideo --torrent --clean --confirm
 ```
 
 `--torrent` switches the script to torrent cleanup mode and uses the sibling `Downloads` folder for the current source path.
@@ -170,8 +170,31 @@ Enter new name (blank for default, enter 'quit' to skip):
 
 ## Requirements
 
+Python 3.10 or newer and Conda are required for the primary development setup.
+
+### Conda development environment
+
 ```bash
-pip install -r requirements.txt
+conda env create -f environment.yml
+conda activate application
 ```
 
-Python 3.10+ required.
+The environment installs this repository in editable mode with its development
+extra. If the environment already exists, refresh the editable installation:
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+`pyproject.toml` is the authoritative package and dependency definition.
+`requirements.txt` and `dev-requirements.txt` are retained as compatibility
+exports for tools that still consume requirements files.
+
+### Running the installed command
+
+Both supported entry points call `organiseMyVideo.__main__:main`:
+
+```bash
+python -m organiseMyVideo --help
+organiseMyVideo --help
+```

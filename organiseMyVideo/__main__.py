@@ -83,8 +83,12 @@ def _runGrokGalleryCommand(args, gallery, sessionFile: Path) -> None:
     if args.reset_grok:
         logger.doing("resetting grok session files")
         resetStats = gallery.resetGrokConfig()
-        deletedList = "\n".join(f"  {path}" for path in resetStats["deleted"]) or "  (none)"
-        notFoundList = "\n".join(f"  {path}" for path in resetStats["notFound"]) or "  (none)"
+        deletedList = (
+            "\n".join(f"  {path}" for path in resetStats["deleted"]) or "  (none)"
+        )
+        notFoundList = (
+            "\n".join(f"  {path}" for path in resetStats["notFound"]) or "  (none)"
+        )
         summary = f"""RESET GROK SUMMARY
 Deleted:
 {deletedList}

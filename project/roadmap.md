@@ -9,7 +9,7 @@ not itself a substitute for acceptance evidence.
 | --- | --- | --- | --- |
 | 0 | Establish a safe, reproducible baseline | Completed | Managed process documentation adopted |
 | 1 | Bootstrap requirements and architecture governance | Completed | Phase 0 tests pass |
-| 2 | Make installation and execution reproducible | ToDo | Create REQ-003 from packaging audit findings |
+| 2 | Make installation and execution reproducible | Completed | REQ-005 verified |
 | 3 | Repair entry-point and CLI architecture | ToDo | Refine and accept ADR-002 |
 | 4 | Centralise safe filesystem behaviour | ToDo | Refine and accept ADR-003 |
 | 5 | Refactor by domain without changing behaviour | ToDo | Phases 2–4 provide stable boundaries |
@@ -18,9 +18,12 @@ not itself a substitute for acceptance evidence.
 
 ## Current priority
 
-Create and refine REQ-005 for Phase 2. It should cover `pyproject.toml`, the
-console-script entry point, declared dependencies, `environment.yml`, clean
-installation, pytest/pre-commit configuration, and corrected ignore rules.
+Create and refine the Phase 3 requirement for entry-point and CLI architecture.
+It should move logging initialization out of package import, decompose CLI
+orchestration, and deliver the compatibility approach proposed by ADR-002.
+REQ-005 completed Phase 2 with verified package distributions, a clean install,
+the console-script entry point, declared dependencies, Conda setup, consolidated
+pytest/pre-commit configuration, and corrected ignore rules.
 REQ-002 captures the Qt media-library browser as a separate product outcome;
 it remains `ToDo` pending its open product decisions and ADR-004.
 REQ-003 captures the official Imagine API archive (`grok generate|list|download`)

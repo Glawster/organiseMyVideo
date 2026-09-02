@@ -52,8 +52,9 @@ def confirmedOrganizer(sourceDir: Path) -> VideoOrganizer:
 def isolateDuplicateTvShowConfig(tmp_path: Path):
     """Keep duplicate-folder persistence isolated from the real home directory."""
     configFile = tmp_path / "config" / "config.json"
-    with patch("organiseMyVideo.video_rescan.APP_CONFIG_FILE", configFile), patch(
-        "organiseMyVideo.video.APP_CONFIG_FILE", configFile
+    with (
+        patch("organiseMyVideo.video_rescan.APP_CONFIG_FILE", configFile),
+        patch("organiseMyVideo.video.APP_CONFIG_FILE", configFile),
     ):
         yield configFile
 
@@ -1066,13 +1067,14 @@ def testProcessFilesMovesMusicFolderWithoutVideoStorage(
     srcFile.write_bytes(b"not a real mp3, but enough for move-path tests")
     musicRoot = tmp_path / "Music"
 
-    with patch.object(
-        confirmedOrganizer, "scanStorageLocations", return_value=([], [])
-    ), patch.object(confirmedOrganizer, "_prepareMetadataLibrary"), patch.object(
-        confirmedOrganizer, "_getMusicLibraryRoot", return_value=musicRoot
-    ), patch.object(
-        confirmedOrganizer, "_updateMusicTags"
-    ) as mockUpdateTags:
+    with (
+        patch.object(confirmedOrganizer, "scanStorageLocations", return_value=([], [])),
+        patch.object(confirmedOrganizer, "_prepareMetadataLibrary"),
+        patch.object(
+            confirmedOrganizer, "_getMusicLibraryRoot", return_value=musicRoot
+        ),
+        patch.object(confirmedOrganizer, "_updateMusicTags") as mockUpdateTags,
+    ):
         confirmedOrganizer.processFiles(interactive=False)
 
     destFile = musicRoot / "The Artist" / "The Album" / "1-01 Opening Track.mp3"
@@ -1097,17 +1099,25 @@ def testProcessFilesSkipsVideoInsideMusicFolder(
     tvStorage = tmp_path / "TV"
     tvStorage.mkdir()
 
-    with patch.object(
-        confirmedOrganizer,
-        "scanStorageLocations",
-        return_value=([movieStorage], [tvStorage]),
-    ), patch.object(confirmedOrganizer, "_prepareMetadataLibrary"), patch.object(
-        confirmedOrganizer,
-        "_classifyVideoFile",
-        return_value=(None, {"title": "One Mile", "year": "2026", "extension": ".mp4"}),
-    ), patch.object(
-        confirmedOrganizer, "moveMovie", return_value=True
-    ) as mockMoveMovie:
+    with (
+        patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([movieStorage], [tvStorage]),
+        ),
+        patch.object(confirmedOrganizer, "_prepareMetadataLibrary"),
+        patch.object(
+            confirmedOrganizer,
+            "_classifyVideoFile",
+            return_value=(
+                None,
+                {"title": "One Mile", "year": "2026", "extension": ".mp4"},
+            ),
+        ),
+        patch.object(
+            confirmedOrganizer, "moveMovie", return_value=True
+        ) as mockMoveMovie,
+    ):
         confirmedOrganizer.processFiles(interactive=False)
 
     assert [call.args[0] for call in mockMoveMovie.call_args_list] == [normalFile]
