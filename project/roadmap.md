@@ -18,13 +18,15 @@ not itself a substitute for acceptance evidence.
 
 ## Current priority
 
-Create and refine REQ-004 for Phase 2. It should cover `pyproject.toml`, the
+Create and refine REQ-005 for Phase 2. It should cover `pyproject.toml`, the
 console-script entry point, declared dependencies, `environment.yml`, clean
 installation, pytest/pre-commit configuration, and corrected ignore rules.
 REQ-002 captures the Qt media-library browser as a separate product outcome;
 it remains `ToDo` pending its open product decisions and ADR-004.
 REQ-003 captures the official Imagine API archive (`grok generate|list|download`)
 and replaces the inactive grok.com scraper.
+REQ-004 captures the agreed GoPro and DJI camera-media importer as a separate
+product outcome using Python services and a `camera import` subcommand.
 
 ## Deferred decisions
 

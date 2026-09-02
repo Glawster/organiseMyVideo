@@ -9,6 +9,7 @@ scope:
   - Movie, television, music, torrent, and library-rescan workflows
   - A Qt desktop interface for browsing supported media libraries
   - Official xAI Imagine generation, listing, and download via storage_options
+  - Verified GoPro and DJI camera-media import into the existing archives
 outOfScope:
   - Media playback and streaming
   - Download acquisition
@@ -44,4 +45,7 @@ milestones:
     status: ToDo
   - id: qtMediaBrowser
     outcome: Browse supported media libraries through a Qt desktop interface
+    status: ToDo
+  - id: cameraMediaImport
+    outcome: Import and verify GoPro and DJI originals through Python services
     status: ToDo

@@ -17,6 +17,7 @@ The README is the canonical entry point for repository documentation. The living
 - [Standards adoption roadmap](project/roadmap.md)
 - [Point-in-time reviews](project/reviews/reviewsIndex.md)
 - [Imagine API archive](documentation/imagineArchive.md)
+- [Camera media import development plan](documentation/cameraImport.md)
 
 - **Movies** → `/mnt/movie<n>/Title (Year)/`
 - **TV shows** → `/mnt/video<n>/TV/Show Name/Season NN/` (`The Name` folders are stored as `Name, The`)

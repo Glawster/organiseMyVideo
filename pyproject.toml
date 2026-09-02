@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "organiseMyVideo"
+version = "0.5.0"
+description = "Safely organise video, audio, torrent, and generated media libraries."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mutagen",
+    "organiseMyProjects>=0.5",
+    "playwright>=1.50.0",
+    "xai-sdk",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black",
+    "pre-commit",
+    "pytest",
+    "ruff",
+]
+
+[project.scripts]
+organiseMyVideo = "organiseMyVideo.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["organiseMyVideo*"]
+
+[tool.black]
+target-version = ["py310"]
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_[a-z]*.py"]
+python_functions = ["test*"]
+python_classes = ["Test*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "--disable-warnings",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
