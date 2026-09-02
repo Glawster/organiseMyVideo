@@ -3,11 +3,8 @@
 import shutil
 from pathlib import Path
 
-from organiseMyProjects.logUtils import getLogger  # type: ignore
-
 from .constants import _PREFIX_REGEX
-
-logger = getLogger()
+from .logging_utils import logger
 
 
 class TorrentMixin:

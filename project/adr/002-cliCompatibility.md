@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted — 2026-09-02
 
 ## Context
 
@@ -17,12 +17,14 @@ habits may depend on existing invocations.
    compatibility aliases for an agreed period.
 3. Keep the flat flag interface permanently as a repository exception.
 
-## Proposed decision
+## Decision
 
-Introduce canonical subcommands and retain existing mode flags as compatibility
-aliases. Emit a clear deprecation notice only after the replacement commands
-are stable and documented. The compatibility duration and removal criteria must
-be agreed in the Phase 3 requirement before this ADR is accepted.
+Introduce canonical subcommands and retain existing mode flags and the
+no-subcommand organiser invocation as compatibility aliases. Do not emit a
+deprecation notice during Phase 3. Canonical commands must remain stable and
+documented for at least one minor release before warnings begin. Legacy forms
+may be removed only in a later major release with a dedicated requirement,
+migration notes, and evidence that maintained automation has moved.
 
 ## Rationale
 
@@ -33,9 +35,10 @@ automation or familiar operator workflows.
 
 - Parser tests must prove equivalent behaviour for canonical and legacy forms.
 - Help output must identify one canonical invocation for each workflow.
-- Phase 3 cannot remove legacy flags until the unresolved compatibility policy
-  is approved.
+- Phase 3 preserves legacy forms without warnings.
+- Removal requires a later major release and its own approved requirement.
 
 ## Related requirements
 
 - [REQ-001: Standards adoption governance](../requirements/features/001-standardsAdoption.md)
+- [REQ-006: Entry-point and CLI architecture](../requirements/features/006-cliArchitecture.md)

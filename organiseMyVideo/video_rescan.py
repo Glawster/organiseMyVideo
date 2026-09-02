@@ -11,11 +11,9 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Iterable, Optional
 
-from organiseMyProjects.logUtils import getLogger  # type: ignore
-
 from .constants import APP_CONFIG_FILE, VIDEO_EXTENSIONS
+from .logging_utils import logger
 
-logger = getLogger()
 _IGNORED_TV_SHOW_DUPLICATES_CONFIG_KEY = "ignored_tv_show_duplicates"
 
 

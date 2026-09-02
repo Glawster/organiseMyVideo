@@ -10,16 +10,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
-from organiseMyProjects.logUtils import getLogger  # type: ignore
-
 from .constants import (
     METADATA_LIBRARY_FILE,
     TMDB_API_BASE_URL,
     TMDB_IMAGE_BASE_URL,
     TVDB_API_BASE_URL,
 )
+from .logging_utils import logger
 
-logger = getLogger()
 _METADATA_SCAN_PLACEHOLDER_FILENAME = "__metadata_scan__.mkv"
 _METADATA_SCAN_SUFFIX = Path(_METADATA_SCAN_PLACEHOLDER_FILENAME).suffix
 _METADATA_LIBRARY_LOG_CONTINUATION_PREFIX = " "

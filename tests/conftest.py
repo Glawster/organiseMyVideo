@@ -31,6 +31,18 @@ class _StubLogger:
         self, name: str = "OrganiseMyTool", dryRun: bool = False, **kwargs
     ) -> None:
         self._log = logging.getLogger(name)
+        self._log.setLevel(kwargs.get("level", logging.INFO))
+        if kwargs.get("includeConsole") and not any(
+            type(handler) is logging.StreamHandler for handler in self._log.handlers
+        ):
+            handler = logging.StreamHandler()
+            handler.setFormatter(
+                logging.Formatter(
+                    "%(asctime)s - %(levelname)s - %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S",
+                )
+            )
+            self._log.addHandler(handler)
         self._prefix = _DRY_RUN_PREFIX if dryRun else ""
         # Expose .logger so the console-handler workaround in main() can access
         # the underlying logging.Logger via logger.logger.handlers
@@ -118,6 +130,9 @@ def applicationStateIsolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
         video_rescan,
     )
     from organiseMyVideo import __main__ as applicationMain
+    from organiseMyVideo.logging_utils import resetLogging
+
+    resetLogging()
 
     configDir = tmp_path / "config"
     applicationPaths = {

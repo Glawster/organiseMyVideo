@@ -15,8 +15,6 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable, List, Optional
 
-from organiseMyProjects.logUtils import getLogger  # type: ignore
-
 # Playwright is an optional dependency used only by --grok.  We import it at
 # module level so tests can patch ``organiseMyVideo.grokGallery.sync_playwright``.
 try:
@@ -33,8 +31,7 @@ from .constants import (
     _GROK_SAVED_URL,
     _PLAYWRIGHT_INIT_SCRIPT,
 )
-
-logger = getLogger()
+from .logging_utils import logger
 
 # Playwright's maximum allowed cookie expires value (from kMaxCookieExpiresDateInSeconds
 # in playwright/driver/package/lib/server/network.js).  Any timestamp beyond this

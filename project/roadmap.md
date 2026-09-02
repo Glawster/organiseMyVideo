@@ -10,7 +10,7 @@ not itself a substitute for acceptance evidence.
 | 0 | Establish a safe, reproducible baseline | Completed | Managed process documentation adopted |
 | 1 | Bootstrap requirements and architecture governance | Completed | Phase 0 tests pass |
 | 2 | Make installation and execution reproducible | Completed | REQ-005 verified |
-| 3 | Repair entry-point and CLI architecture | ToDo | Refine and accept ADR-002 |
+| 3 | Repair entry-point and CLI architecture | Completed | REQ-006 verified |
 | 4 | Centralise safe filesystem behaviour | ToDo | Refine and accept ADR-003 |
 | 5 | Refactor by domain without changing behaviour | ToDo | Phases 2–4 provide stable boundaries |
 | 6 | Make verification enforceable | ToDo | Measurable package and domain boundaries exist |
@@ -18,9 +18,11 @@ not itself a substitute for acceptance evidence.
 
 ## Current priority
 
-Create and refine the Phase 3 requirement for entry-point and CLI architecture.
-It should move logging initialization out of package import, decompose CLI
-orchestration, and deliver the compatibility approach proposed by ADR-002.
+Create and refine the Phase 4 requirement for a central filesystem-operation
+boundary, including quarantine, retention, and cross-filesystem recovery
+decisions needed to accept ADR-003. REQ-006 completed Phase 3 with
+side-effect-free imports, decomposed CLI orchestration, canonical commands,
+legacy compatibility, universal options, validation, and reliable statuses.
 REQ-005 completed Phase 2 with verified package distributions, a clean install,
 the console-script entry point, declared dependencies, Conda setup, consolidated
 pytest/pre-commit configuration, and corrected ignore rules.

@@ -6,11 +6,8 @@ import unicodedata
 from pathlib import Path
 from typing import List, Optional
 
-from organiseMyProjects.logUtils import getLogger  # type: ignore
-
 from .constants import MUSIC_EXTENSIONS, MUSIC_FOLDER_NAMES, VIDEO_EXTENSIONS
-
-logger = getLogger()
+from .logging_utils import logger
 
 
 class VideoMoveMixin:

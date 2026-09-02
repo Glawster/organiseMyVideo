@@ -30,7 +30,7 @@ milestones:
     status: Completed
   - id: phase3
     outcome: Repair entry-point and CLI architecture
-    status: ToDo
+    status: Completed
   - id: phase4
     outcome: Centralise safe filesystem behaviour
     status: ToDo

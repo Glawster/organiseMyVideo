@@ -11,8 +11,6 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
 
-from organiseMyProjects.logUtils import getLogger  # type: ignore
-
 from .constants import (
     GROK_CATALOG_FILE,
     GROK_DOWNLOAD_DIR,
@@ -20,8 +18,7 @@ from .constants import (
     GROK_MEDIA_EXTENSIONS,
     GROK_VIDEO_MODEL,
 )
-
-logger = getLogger()
+from .logging_utils import logger
 
 _IMAGE_MIME_BY_SUFFIX = {
     ".jpg": "image/jpeg",

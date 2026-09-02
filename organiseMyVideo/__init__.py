@@ -16,11 +16,6 @@ from pathlib import (
     Path,
 )  # re-exported so patch("organiseMyVideo.Path") still works in tests
 
-from organiseMyProjects.logUtils import getLogger, setApplication  # type: ignore
-
-thisApplication = Path(__file__).parent.name
-setApplication(thisApplication)
-
 from .constants import (
     VIDEO_EXTENSIONS,
     METADATA_LIBRARY_FILE,
@@ -31,8 +26,7 @@ from .constants import (
 from .metadata import MetadataMixin
 from .torrent import TorrentMixin
 from .video import VideoMixin
-
-logger = getLogger()
+from .logging_utils import logger
 
 
 class VideoOrganizer(MetadataMixin, VideoMixin, TorrentMixin):

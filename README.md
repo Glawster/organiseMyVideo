@@ -18,6 +18,7 @@ The README is the canonical entry point for repository documentation. The living
 - [Point-in-time reviews](project/reviews/reviewsIndex.md)
 - [Imagine API archive](documentation/imagineArchive.md)
 - [Camera media import development plan](documentation/cameraImport.md)
+- [Command-line interface](documentation/commandLineInterface.md)
 
 - **Movies** → `/mnt/movie<n>/Title (Year)/`
 - **TV shows** → `/mnt/video<n>/TV/Show Name/Season NN/` (`The Name` folders are stored as `Name, The`)
@@ -27,6 +28,24 @@ The README is the canonical entry point for repository documentation. The living
 ---
 
 ## Usage
+
+### Canonical commands
+
+Use the object/action command hierarchy for new invocations:
+
+```bash
+organiseMyVideo media organise /path/to/staging
+organiseMyVideo media organise /path/to/staging --confirm
+organiseMyVideo media clean /path/to/staging
+organiseMyVideo library rescan /path/to/staging --target movies
+organiseMyVideo torrent maintain /path/to/staging --clean-names
+organiseMyVideo gallery download
+```
+
+Run `organiseMyVideo --help` or append `--help` at any command level. The
+existing flags below remain compatibility aliases without warnings. See the
+[command-line interface guide](documentation/commandLineInterface.md) for the
+complete mapping and compatibility policy.
 
 ### Organise video files
 
@@ -87,6 +106,9 @@ python -m organiseMyVideo --torrent --clean --confirm
 | `--no-curses` | Use line-based prompts instead of the default curses single-key menus |
 | `--torrent` | Run torrent cleanup against the `Downloads` folder that sits next to the source directory |
 | `--debug` | Enable debug logging, including TVDB title payload debug lines |
+| `--verbose` | Enable detailed logging; canonical replacement for `--debug` |
+| `--quiet` | Show errors only |
+| `--version` | Display the installed package version |
 | `--grok` | Download saved grok.com Imagine images and videos to `~/Downloads/Grok` |
 | `--import-firefox-session` | Import grok.com cookies from Firefox after logging in at grok.com/imagine/saved |
 | `--reset-grok` | Delete saved grok.com session files so the next `--grok` run logs in again |

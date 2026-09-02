@@ -6,17 +6,19 @@ import json
 import logging
 import os
 from datetime import datetime
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
-from organiseMyProjects.logUtils import getLogger, drawBox, setApplication  # type: ignore
+from organiseMyProjects.logUtils import drawBox  # type: ignore
 
 from .constants import APP_CONFIG_FILE
+from .logging_utils import initializeLogging, logger
 
-thisApplication = Path(__file__).parent.name
-setApplication(thisApplication)
-
-logger = getLogger(includeConsole=False)
+try:
+    APP_VERSION = version("organiseMyVideo")
+except PackageNotFoundError:
+    APP_VERSION = "0.5.0"
 
 
 def _getAppConfigPath() -> Path:
@@ -134,23 +136,30 @@ def _getSummaryReportPath(sourcePath: str, mode: str) -> Path:
     return APP_CONFIG_FILE.parent / f"summary.{datetime.now().strftime('%Y%m%d')}.txt"
 
 
-def _buildSharedFlags() -> argparse.ArgumentParser:
+def _buildSharedFlags(suppressDefaults: bool = False) -> argparse.ArgumentParser:
     """Return flags shared by the organiser and grok subcommands."""
-    shared = argparse.ArgumentParser(add_help=False)
+    shared = argparse.ArgumentParser(
+        add_help=False,
+        argument_default=(argparse.SUPPRESS if suppressDefaults else None),
+    )
     shared.add_argument(
         "-y",
         "--confirm",
         "--y",
         dest="confirm",
-        default=False,
         action="store_true",
         help="confirm execution — actually make changes (default is dry-run)",
     )
     shared.add_argument(
         "--debug",
         action="store_true",
-        help="enable debug logging",
+        help="legacy alias for --verbose",
     )
+    verbosity = shared.add_mutually_exclusive_group()
+    verbosity.add_argument(
+        "--verbose", action="store_true", help="enable detailed logging"
+    )
+    verbosity.add_argument("--quiet", action="store_true", help="show errors only")
     return shared
 
 
@@ -159,6 +168,9 @@ def buildParser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Organize video files into movies and TV show directories",
         parents=[_buildSharedFlags()],
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {APP_VERSION}"
     )
     parser.add_argument(
         "-s",
@@ -237,15 +249,63 @@ def buildParser() -> argparse.ArgumentParser:
         help="delete saved grok.com session files so the next --grok run logs in again",
     )
     subparsers = parser.add_subparsers(dest="command")
+    mediaParser = subparsers.add_parser("media", help="organise or clean staged media")
+    mediaSub = mediaParser.add_subparsers(dest="mediaAction", required=True)
+    mediaOrganise = mediaSub.add_parser(
+        "organise", parents=[_buildSharedFlags(True)], help="organise staged media"
+    )
+    mediaOrganise.add_argument("source", nargs="?", default="/mnt/video2/toFile")
+    mediaOrganise.add_argument("--auto", action="store_true")
+    mediaOrganise.add_argument("--non-interactive", action="store_true")
+    mediaOrganise.add_argument(
+        "--refresh", dest="refresh_metadata_library", action="store_true"
+    )
+    mediaOrganise.add_argument(
+        "--no-curses", dest="curses", action="store_false", default=True
+    )
+    mediaClean = mediaSub.add_parser(
+        "clean",
+        parents=[_buildSharedFlags(True)],
+        help="clean staged media names and folders",
+    )
+    mediaClean.add_argument("source", nargs="?", default="/mnt/video2/toFile")
+
+    libraryParser = subparsers.add_parser("library", help="maintain media libraries")
+    librarySub = libraryParser.add_subparsers(dest="libraryAction", required=True)
+    libraryRescan = librarySub.add_parser(
+        "rescan", parents=[_buildSharedFlags(True)], help="rescan movie and TV metadata"
+    )
+    libraryRescan.add_argument("source", nargs="?", default="/mnt/video2/toFile")
+    libraryRescan.add_argument(
+        "--target", choices=("both", "movies", "tv"), default="both"
+    )
+
+    torrentParser = subparsers.add_parser("torrent", help="maintain torrent downloads")
+    torrentSub = torrentParser.add_subparsers(dest="torrentAction", required=True)
+    torrentMaintain = torrentSub.add_parser(
+        "maintain",
+        parents=[_buildSharedFlags(True)],
+        help="remove obsolete torrent files",
+    )
+    torrentMaintain.add_argument("source", nargs="?", default="/mnt/video2/toFile")
+    torrentMaintain.add_argument("--clean-names", action="store_true")
+
+    galleryParser = subparsers.add_parser(
+        "gallery", help="maintain the legacy grok.com gallery"
+    )
+    gallerySub = galleryParser.add_subparsers(dest="galleryAction", required=True)
+    gallerySub.add_parser("download", parents=[_buildSharedFlags(True)])
+    gallerySub.add_parser("import-session", parents=[_buildSharedFlags(True)])
+    gallerySub.add_parser("reset-session", parents=[_buildSharedFlags(True)])
     grokParser = subparsers.add_parser(
         "grok",
-        parents=[_buildSharedFlags()],
+        parents=[_buildSharedFlags(True)],
         help="generate, list, and download Imagine media through the xAI API",
     )
     grokSub = grokParser.add_subparsers(dest="grokAction", required=True)
     generateParser = grokSub.add_parser(
         "generate",
-        parents=[_buildSharedFlags()],
+        parents=[_buildSharedFlags(True)],
         help="generate an image or video and persist it with storage_options",
     )
     generateParser.add_argument(
@@ -274,12 +334,12 @@ def buildParser() -> argparse.ArgumentParser:
     )
     grokSub.add_parser(
         "list",
-        parents=[_buildSharedFlags()],
+        parents=[_buildSharedFlags(True)],
         help="list stored Imagine images and videos",
     )
     downloadParser = grokSub.add_parser(
         "download",
-        parents=[_buildSharedFlags()],
+        parents=[_buildSharedFlags(True)],
         help="download stored Imagine media to the local archive",
     )
     downloadParser.add_argument(
@@ -290,84 +350,128 @@ def buildParser() -> argparse.ArgumentParser:
     return parser
 
 
-def main():
-    """Main entry point for the video organizer."""
-    parser = buildParser()
-    args = parser.parse_args()
+def _normalizeArguments(args: argparse.Namespace) -> argparse.Namespace:
+    """Map canonical commands onto the established workflow argument shape."""
+    command = getattr(args, "command", None)
+    if command == "media":
+        args.clean = args.mediaAction == "clean"
+    elif command == "library":
+        args.rescan = True
+        args.movie = args.target == "movies"
+        args.video = args.target == "tv"
+    elif command == "torrent":
+        args.torrent = True
+        args.clean = bool(args.clean_names)
+    elif command == "gallery":
+        args.grok = args.galleryAction == "download"
+        args.import_firefox_session = args.galleryAction == "import-session"
+        args.reset_grok = args.galleryAction == "reset-session"
+    return args
 
-    dryRun = not args.confirm
 
-    # Setup logging — dryRun passed so logger.action() applies [] prefix correctly.
-    # logUtils._setupLogging guards console handler with isinstance(h, StreamHandler)
-    # which also matches FileHandler (subclass); add console handler explicitly if absent.
-    global logger
-    logger = getLogger(includeConsole=True, dryRun=dryRun)
-    if args.debug:
-        logger.logger.setLevel(logging.DEBUG)
-    if not any(type(h) is logging.StreamHandler for h in logger.logger.handlers):
-        _ch = logging.StreamHandler()
-        _ch.setFormatter(
-            logging.Formatter(
-                "%(asctime)s - %(levelname)s - %(message)s",
-                datefmt="%Y-%m-%d %H:%M:%S",
-            )
+def _validateArguments(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> None:
+    """Reject conflicting modes and invalid canonical source paths."""
+    legacyModes = sum(
+        bool(value)
+        for value in (
+            args.rescan,
+            args.torrent,
+            args.grok,
+            args.import_firefox_session,
+            args.reset_grok,
         )
-        logger.logger.addHandler(_ch)
-    else:
-        # Update the existing console handler formatter to include timestamp
-        for h in logger.logger.handlers:
-            if type(h) is logging.StreamHandler:
-                h.setFormatter(
-                    logging.Formatter(
-                        "%(asctime)s - %(levelname)s - %(message)s",
-                        datefmt="%Y-%m-%d %H:%M:%S",
-                    )
-                )
-    logger.doing("organiseMyVideo starting")
+    )
+    if legacyModes > 1:
+        parser.error("select only one workflow mode")
+    if (
+        args.command
+        and args.command != "grok"
+        and legacyModes
+        and args.command
+        not in {
+            "library",
+            "torrent",
+            "gallery",
+        }
+    ):
+        parser.error("do not combine a canonical command with a legacy mode flag")
+    if args.command in {"media", "library", "torrent"}:
+        sourcePath = Path(args.source).expanduser()
+        if not sourcePath.is_dir():
+            parser.error(f"source directory does not exist: {sourcePath}")
+        args.source = str(sourcePath)
 
-    if dryRun:
-        logger.info("entering dry-run mode, use --confirm to execute")
-    else:
-        logger.info("confirm mode, changes will be made")
 
-    if args.reset_grok or args.import_firefox_session or args.grok:
-        from .grokGallery import GROK_SESSION_FILE, GrokGallery
+def _loggingLevel(args: argparse.Namespace) -> int:
+    """Return the requested process logging level."""
+    if args.quiet:
+        return logging.ERROR
+    if args.verbose or args.debug:
+        return logging.DEBUG
+    return logging.INFO
 
-        gallery = GrokGallery(dryRun=dryRun)
-        logger.value("mode", "grok-gallery")
-        try:
-            _runGrokGalleryCommand(args, gallery, GROK_SESSION_FILE)
-        except RuntimeError as error:
-            logger.error("%s", error)
-            raise SystemExit(1) from error
-        logger.done("organiseMyVideo complete")
-        return
 
-    if getattr(args, "command", None) == "grok":
-        from .grok import grokCommandRun
+def _configureLogging(args: argparse.Namespace, dryRun: bool) -> None:
+    """Initialize logging once from the executable entry point."""
+    initializeLogging(dryRun=dryRun, level=_loggingLevel(args), includeConsole=True)
 
-        logger.value("mode", "grok")
-        logger.value("grok action", args.grokAction)
-        try:
-            result = grokCommandRun(args, dryRun=dryRun)
-        except RuntimeError as error:
-            logger.error("%s", error)
-            raise SystemExit(1) from error
-        if args.grokAction == "download":
-            summary = f"""GROK DOWNLOAD SUMMARY
+
+def _selectedMode(args: argparse.Namespace) -> str:
+    """Return the normalized organiser workflow mode."""
+    if args.torrent:
+        return "torrent"
+    if args.rescan:
+        return "rescan"
+    if args.clean:
+        return "clean"
+    return "process"
+
+
+def _runGalleryWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
+    """Run a normalized legacy-gallery action."""
+    from .grokGallery import GROK_SESSION_FILE, GrokGallery
+
+    gallery = GrokGallery(dryRun=dryRun)
+    logger.value("mode", "grok-gallery")
+    try:
+        _runGrokGalleryCommand(args, gallery, GROK_SESSION_FILE)
+    except RuntimeError as error:
+        logger.error("%s", error)
+        return 1
+    return 0
+
+
+def _runGrokWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
+    """Run an official Imagine API action and render its summary."""
+    from .grok import grokCommandRun
+
+    logger.value("mode", "grok")
+    logger.value("grok action", args.grokAction)
+    try:
+        result = grokCommandRun(args, dryRun=dryRun)
+    except RuntimeError as error:
+        logger.error("%s", error)
+        return 1
+    if args.grokAction == "download":
+        drawBox(
+            f"""GROK DOWNLOAD SUMMARY
 Downloaded: {result['downloaded']}
 Skipped:    {result['skipped']}
 Errors:     {result['errors']}
 """
-            drawBox(summary)
-        elif args.grokAction == "list":
-            logger.value("listed files", len(result.get("files", [])))
-        elif args.grokAction == "generate":
-            logger.value("file id", result.get("fileId") or "(dry-run)")
-            logger.value("filename", result.get("filename"))
-        logger.done("organiseMyVideo complete")
-        return
+        )
+    elif args.grokAction == "list":
+        logger.value("listed files", len(result.get("files", [])))
+    else:
+        logger.value("file id", result.get("fileId") or "(dry-run)")
+        logger.value("filename", result.get("filename"))
+    return 0
 
+
+def _runOrganizerWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
+    """Construct the domain organizer and dispatch one normalized workflow."""
     configPath = _getAppConfigPath()
     if args.key is not None:
         if not _persistTvdbApiKey(args.key, configPath):
@@ -375,19 +479,9 @@ Errors:     {result['errors']}
     else:
         _loadTvdbApiKeyFromConfig(configPath)
 
-    if args.torrent:
-        selectedMode = "torrent"
-    elif args.rescan:
-        selectedMode = "rescan"
-    elif args.clean:
-        selectedMode = "clean"
-    else:
-        selectedMode = "process"
-
+    selectedMode = _selectedMode(args)
     logger.value("source directory", args.source)
     logger.value("mode", selectedMode)
-
-    # Create organizer and run the requested mode
     logger.doing("initializing video organizer")
     from . import VideoOrganizer
 
@@ -409,16 +503,13 @@ Errors:     {result['errors']}
 
     if args.torrent:
         logger.doing("running torrent maintenance")
-        torrentDir = (
-            organizer.sourceDir.parent / "Downloads"
-            if organizer.sourceDir
-            else Path("/mnt/video2/Downloads")
-        )
+        torrentDir = organizer.sourceDir.parent / "Downloads"
         nameStats = {"renamed": 0, "skipped": 0, "errors": 0}
         if args.clean:
             nameStats = organizer.cleanTorrentNames(torrentDir=torrentDir)
         removeStats = organizer.removeTorrentsInLibrary(torrentDir=torrentDir)
-        summary = f"""TORRENT SUMMARY
+        drawBox(
+            f"""TORRENT SUMMARY
 Torrents deleted: {removeStats['deleted']}
 Torrents kept:    {removeStats['skipped']}
 Delete errors:    {removeStats['errors']}
@@ -426,36 +517,58 @@ Names renamed:    {nameStats['renamed']}
 Names skipped:    {nameStats['skipped']}
 Rename errors:    {nameStats['errors']}
 """
-        drawBox(summary)
-
+        )
     elif args.clean:
         logger.doing("running clean mode")
         nameStats = organizer.cleanNames()
         cleanStats = organizer.cleanEmptyFolders()
-        summary = f"""CLEAN SUMMARY
+        drawBox(
+            f"""CLEAN SUMMARY
 Names renamed:   {nameStats['renamed']}
 Name errors:     {nameStats['errors']}
 Folders removed: {cleanStats['removed']}
 Folders kept:    {cleanStats['skipped']}
 Folder errors:   {cleanStats['errors']}
 """
-        drawBox(summary)
+        )
     elif args.rescan:
-        rescanTarget = "both"
-        if args.movie and args.video:
-            rescanTarget = "both"
-        elif args.movie:
-            rescanTarget = "movies"
-        elif args.video:
-            rescanTarget = "tv"
-        logger.doing(f"running rescan mode ({rescanTarget})")
-        organizer.resetLibraryMetadata(target=rescanTarget)
+        target = (
+            "movies"
+            if args.movie and not args.video
+            else "tv" if args.video and not args.movie else "both"
+        )
+        logger.doing(f"running rescan mode ({target})")
+        organizer.resetLibraryMetadata(target=target)
     else:
         logger.doing("running file organisation mode")
         organizer.processFiles(interactive=not (args.non_interactive or args.auto))
+    return 0
 
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    """Run the command-line application and return a process status."""
+    parser = buildParser()
+    args = _normalizeArguments(parser.parse_args(argv))
+    _validateArguments(parser, args)
+
+    dryRun = not args.confirm
+    _configureLogging(args, dryRun)
+    logger.doing("organiseMyVideo starting")
+
+    if dryRun:
+        logger.info("entering dry-run mode, use --confirm to execute")
+    else:
+        logger.info("confirm mode, changes will be made")
+
+    if args.reset_grok or args.import_firefox_session or args.grok:
+        status = _runGalleryWorkflow(args, dryRun)
+    elif getattr(args, "command", None) == "grok":
+        status = _runGrokWorkflow(args, dryRun)
+    else:
+        status = _runOrganizerWorkflow(args, dryRun)
     logger.done("organiseMyVideo complete")
+    return status
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

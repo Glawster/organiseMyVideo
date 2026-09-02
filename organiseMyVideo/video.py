@@ -15,13 +15,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable, List, Tuple, Optional, TextIO
 
-from organiseMyProjects.logUtils import getLogger  # type: ignore
-
 from .constants import APP_CONFIG_FILE, VIDEO_EXTENSIONS, _PREFIX_REGEX
+from .logging_utils import logger
 from .video_move import VideoMoveMixin
 from .video_rescan import VideoRescanMixin
 
-logger = getLogger()
 _FILESYSTEM_PATH = Path
 UNKNOWN_YEAR = "Unknown"
 _UTF8_BOM = b"\xef\xbb\xbf"
