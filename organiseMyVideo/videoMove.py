@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import List, Optional
 
 from .constants import MUSIC_EXTENSIONS, MUSIC_FOLDER_NAMES, VIDEO_EXTENSIONS
-from .logging_utils import logger
+from organiseMyProjects.logUtils import getLogger  # type: ignore
+
+logger = getLogger()
 
 
 class VideoMoveMixin:

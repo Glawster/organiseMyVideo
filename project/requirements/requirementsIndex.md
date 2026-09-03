@@ -12,7 +12,7 @@ Historical behaviour is not assigned invented retrospective requirements.
 | 003 | [Imagine API archive](features/003-imagineArchive.md) | Generate, list, and download Imagine images and videos through the official xAI API with `storage_options`. | Completed | [Prompt](prompt/003-imagineArchive.md) | [ADR-005](../adr/005-imagineApiStorage.md) |
 | 004 | [Camera media import](features/004-cameraMediaImport.md) | Safely import GoPro and DJI originals through Python services and a camera import subcommand. | ToDo | [Prompt](prompt/004-cameraMediaImport.md) | [ADR-006](../adr/006-cameraImportArchitecture.md) |
 | 005 | [Reproducible packaging and installation](features/005-reproduciblePackaging.md) | Make package installation, execution, tests, and hooks reproducible. | Completed | [Prompt](prompt/005-reproduciblePackaging.md) | [ADR-001](../adr/001-packagedCliLayout.md) |
-| 006 | [Entry-point and CLI architecture](features/006-cliArchitecture.md) | Provide side-effect-free imports and canonical commands with legacy compatibility. | Completed | [Prompt](prompt/006-cliArchitecture.md) | [ADR-001](../adr/001-packagedCliLayout.md), [ADR-002](../adr/002-cliCompatibility.md) |
+| 006 | [Entry-point and CLI architecture](features/006-cliArchitecture.md) | Use established logging and provide canonical commands with legacy compatibility. | Completed | [Prompt](prompt/006-cliArchitecture.md) | [ADR-001](../adr/001-packagedCliLayout.md), [ADR-002](../adr/002-cliCompatibility.md) |
 
 ## Prompt index
 

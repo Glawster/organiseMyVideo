@@ -31,7 +31,9 @@ from .constants import (
     _GROK_SAVED_URL,
     _PLAYWRIGHT_INIT_SCRIPT,
 )
-from .logging_utils import logger
+from organiseMyProjects.logUtils import getLogger  # type: ignore
+
+logger = getLogger()
 
 # Playwright's maximum allowed cookie expires value (from kMaxCookieExpiresDateInSeconds
 # in playwright/driver/package/lib/server/network.js).  Any timestamp beyond this

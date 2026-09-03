@@ -18,7 +18,9 @@ from .constants import (
     GROK_MEDIA_EXTENSIONS,
     GROK_VIDEO_MODEL,
 )
-from .logging_utils import logger
+from organiseMyProjects.logUtils import getLogger  # type: ignore
+
+logger = getLogger()
 
 _IMAGE_MIME_BY_SUFFIX = {
     ".jpg": "image/jpeg",

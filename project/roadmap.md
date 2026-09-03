@@ -21,8 +21,9 @@ not itself a substitute for acceptance evidence.
 Create and refine the Phase 4 requirement for a central filesystem-operation
 boundary, including quarantine, retention, and cross-filesystem recovery
 decisions needed to accept ADR-003. REQ-006 completed Phase 3 with
-side-effect-free imports, decomposed CLI orchestration, canonical commands,
-legacy compatibility, universal options, validation, and reliable statuses.
+established shared logging, media-safe imports, decomposed CLI orchestration,
+canonical commands, legacy compatibility, universal options, validation, and
+reliable statuses.
 REQ-005 completed Phase 2 with verified package distributions, a clean install,
 the console-script entry point, declared dependencies, Conda setup, consolidated
 pytest/pre-commit configuration, and corrected ignore rules.

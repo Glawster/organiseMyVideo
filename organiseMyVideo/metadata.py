@@ -16,7 +16,9 @@ from .constants import (
     TMDB_IMAGE_BASE_URL,
     TVDB_API_BASE_URL,
 )
-from .logging_utils import logger
+from organiseMyProjects.logUtils import getLogger  # type: ignore
+
+logger = getLogger()
 
 _METADATA_SCAN_PLACEHOLDER_FILENAME = "__metadata_scan__.mkv"
 _METADATA_SCAN_SUFFIX = Path(_METADATA_SCAN_PLACEHOLDER_FILENAME).suffix

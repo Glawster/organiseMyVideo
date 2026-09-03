@@ -1,8 +1,6 @@
 """Production-path and compatibility tests for the command-line architecture."""
 
-import os
-import subprocess
-import sys
+import importlib
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -87,20 +85,21 @@ def testUniversalVersionAndNestedHelpAreSuccessful(capsys):
     assert "rescan" in capsys.readouterr().out
 
 
-def testEntryPointInitializesLoggingOnce(tmp_path: Path):
+def testEntryPointConfiguresEstablishedLogging(tmp_path: Path):
     organizer = MagicMock()
+    configuredLogger = MagicMock()
 
     with patch("organiseMyVideo.VideoOrganizer", return_value=organizer):
-        with patch.object(applicationMain, "initializeLogging") as initialize:
+        with patch.object(
+            applicationMain, "getLogger", return_value=configuredLogger
+        ) as getLogger:
             status = applicationMain.main(
                 ["media", "organise", str(tmp_path), "--verbose"]
             )
 
     assert status == 0
-    initialize.assert_called_once_with(
-        dryRun=True,
-        level=applicationMain.logging.DEBUG,
-        includeConsole=True,
+    getLogger.assert_called_once_with(
+        includeConsole=True, dryRun=True, level=applicationMain.logging.DEBUG
     )
 
 
@@ -114,23 +113,12 @@ def testHandledGalleryFailureReturnsNonzeroStatus():
     assert status == 1
 
 
-def testPackageImportCreatesNoApplicationState(tmp_path: Path):
-    home = tmp_path / "home"
-    state = tmp_path / "state"
-    home.mkdir()
-    environment = os.environ.copy()
-    environment["HOME"] = str(home)
-    environment["XDG_STATE_HOME"] = str(state)
+def testPackageImportDoesNotMutateMedia(tmp_path: Path):
+    media = tmp_path / "camera-original.mp4"
+    media.write_bytes(b"original-media")
 
-    result = subprocess.run(
-        [sys.executable, "-c", "import organiseMyVideo"],
-        cwd=Path(__file__).resolve().parents[1],
-        env=environment,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    import organiseMyVideo
 
-    assert result.returncode == 0, result.stderr
-    assert list(home.iterdir()) == []
-    assert not state.exists()
+    importlib.reload(organiseMyVideo)
+
+    assert media.read_bytes() == b"original-media"

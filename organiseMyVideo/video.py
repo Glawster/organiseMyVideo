@@ -16,9 +16,12 @@ from pathlib import Path
 from typing import Iterable, List, Tuple, Optional, TextIO
 
 from .constants import APP_CONFIG_FILE, VIDEO_EXTENSIONS, _PREFIX_REGEX
-from .logging_utils import logger
-from .video_move import VideoMoveMixin
-from .video_rescan import VideoRescanMixin
+from organiseMyProjects.logUtils import getLogger  # type: ignore
+
+from .videoMove import VideoMoveMixin
+from .videoRescan import VideoRescanMixin
+
+logger = getLogger()
 
 _FILESYSTEM_PATH = Path
 UNKNOWN_YEAR = "Unknown"

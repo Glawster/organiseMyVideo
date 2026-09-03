@@ -127,12 +127,9 @@ def applicationStateIsolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
         grokGallery,
         metadata,
         video,
-        video_rescan,
+        videoRescan,
     )
     from organiseMyVideo import __main__ as applicationMain
-    from organiseMyVideo.logging_utils import resetLogging
-
-    resetLogging()
 
     configDir = tmp_path / "config"
     applicationPaths = {
@@ -144,7 +141,7 @@ def applicationStateIsolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
         "METADATA_LIBRARY_FILE": configDir / "metadataLibrary.json",
     }
     modulesByPath = {
-        "APP_CONFIG_FILE": (constants, applicationMain, video, video_rescan),
+        "APP_CONFIG_FILE": (constants, applicationMain, video, videoRescan),
         "GROK_CATALOG_FILE": (constants, grok),
         "GROK_CREDENTIALS_FILE": (constants, grokGallery),
         "GROK_DOWNLOAD_DIR": (constants, grok, grokGallery),

@@ -11,9 +11,9 @@ behaviour.
 
 ## Status
 
-Completed on 2026-09-02 — side-effect-free imports, entry-point logging,
-canonical commands, compatibility, validation, statuses, documentation,
-production paths, 353 tests, and both pre-commit hooks passed.
+Completed on 2026-09-03 — the invalid no-state-on-import constraint was
+corrected, direct shared logging was restored, camelCase module references were
+aligned, and the Phase 3 CLI behavior remains verified.
 
 ## Verification target
 

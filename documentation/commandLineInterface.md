@@ -9,10 +9,10 @@ python -m organiseMyVideo --help
 organiseMyVideo --help
 ```
 
-Both call `organiseMyVideo.__main__:main`. Importing `organiseMyVideo` as a
-library does not initialize application logging or create application-state
-directories; logging is initialized only after executable argument parsing and
-validation.
+Both call `organiseMyVideo.__main__:main`. The application uses
+`organiseMyProjects.logUtils` directly and intentionally maintains log and
+configuration files in its documented user-state locations. Importing the
+package must not copy, move, rename, or delete media.
 
 ## Canonical commands
 

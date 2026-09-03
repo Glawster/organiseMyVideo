@@ -6,21 +6,27 @@ Completed
 
 ## Outcome
 
-As an operator and Python-library user, I need side-effect-free imports and a
-discoverable, validated command hierarchy so that the application is safe to
-embed, script, and operate while existing command lines continue to work.
+As an operator and Python-library user, I need the established application
+logging and a discoverable, validated command hierarchy so that the application
+is observable, scriptable, and safe for media while existing command lines
+continue to work.
 
 ## Context
 
-Phase 3 of the standards-adoption roadmap addresses import-time logging,
-monolithic CLI orchestration, flat mode flags, missing universal options,
-late path validation, and inconsistent exit behaviour identified by the
-standards audit. ADR-002 governs the compatibility migration.
+Phase 3 of the standards-adoption roadmap addresses CLI orchestration, flat
+mode flags, missing universal options, late path validation, and inconsistent
+exit behaviour identified by the standards audit. ADR-002 governs the
+compatibility migration. The original requirement also prohibited log or state
+creation during package import. That constraint was rejected after review
+because this application intentionally maintains logs and configuration, and
+avoiding it required an unnecessary logging proxy.
 
 ## Scope
 
-- Make importing `organiseMyVideo` free of log-directory/file creation.
-- Initialise application logging only from an executable entry point.
+- Use `organiseMyProjects.logUtils` directly for application logging.
+- Permit logging and configuration state in their documented application
+  locations.
+- Ensure importing the package does not copy, move, rename, or delete media.
 - Separate parser construction, normalization, validation, logging setup,
   dispatch, and summary rendering into focused typed functions.
 - Add canonical object/action commands for organisation, cleanup, rescanning,
@@ -45,10 +51,11 @@ standards audit. ADR-002 governs the compatibility migration.
 
 ## Acceptance criteria
 
-1. Given a clean home/state directory, when `import organiseMyVideo` runs,
-   then it creates no application directories or log files.
-2. Given module or console-script execution, when the entry point starts, then
-   it initializes logging once before command dispatch.
+1. Given existing media, when `import organiseMyVideo` runs, then it does not
+   copy, move, rename, or delete that media; application logging/configuration
+   state is permitted.
+2. Given module or console-script execution, when the application runs, then
+   it uses the established `organiseMyProjects.logUtils` integration.
 3. Given root or nested `--help`, when help is requested, then canonical
    commands and actions are discoverable without performing application work.
 4. Given each legacy workflow invocation and its canonical replacement, when
@@ -76,10 +83,9 @@ standards audit. ADR-002 governs the compatibility migration.
 
 ## Verification
 
-- Isolated subprocess import with temporary HOME/XDG state created no
-  application state — passed on 2026-09-02.
-- Parser equivalence, canonical dispatch, validation, logging initialization,
-  nested help, version, handled-failure status, and import-side-effect tests
+- Package reload preserved a sentinel media file — passed on 2026-09-03.
+- Parser equivalence, canonical dispatch, validation, established logging,
+  nested help, version, handled-failure status, and media-safety tests
   are in `tests/test_cli.py`.
 - `pytest -q` — 353 passed on 2026-09-02.
 - `python -m organiseMyVideo --version` and nested module help — passed.
@@ -92,9 +98,8 @@ standards audit. ADR-002 governs the compatibility migration.
 
 ## Traceability
 
-- Implementation: `organiseMyVideo/__main__.py`,
-  `organiseMyVideo/logging_utils.py`, lazy logger adoption across package
-  modules
+- Implementation: `organiseMyVideo/__main__.py` and direct
+  `organiseMyProjects.logUtils` use across package modules
 - Tests: `tests/test_cli.py`, `tests/conftest.py`, existing CLI suites
 - Documentation: `documentation/commandLineInterface.md`, `README.md`
 - Pull request: pending
@@ -107,3 +112,6 @@ standards audit. ADR-002 governs the compatibility migration.
 - 2026-09-02: completed — verified side-effect-free imports, canonical and
   compatibility paths, universal options, statuses, tests, and production
   entry points.
+- 2026-09-03: corrected — removed the invalid prohibition on application log
+  and configuration state, restored direct shared logging, and retained the
+  meaningful requirement that importing must not mutate media.

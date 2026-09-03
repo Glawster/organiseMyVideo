@@ -4,7 +4,9 @@ import shutil
 from pathlib import Path
 
 from .constants import _PREFIX_REGEX
-from .logging_utils import logger
+from organiseMyProjects.logUtils import getLogger  # type: ignore
+
+logger = getLogger()
 
 
 class TorrentMixin:

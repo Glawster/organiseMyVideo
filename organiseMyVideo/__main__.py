@@ -10,10 +10,13 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Optional, Sequence
 
-from organiseMyProjects.logUtils import drawBox  # type: ignore
+from organiseMyProjects.logUtils import drawBox, getLogger, setApplication  # type: ignore
 
 from .constants import APP_CONFIG_FILE
-from .logging_utils import initializeLogging, logger
+
+thisApplication = Path(__file__).parent.name
+setApplication(thisApplication)
+logger = getLogger(includeConsole=False)
 
 try:
     APP_VERSION = version("organiseMyVideo")
@@ -414,8 +417,13 @@ def _loggingLevel(args: argparse.Namespace) -> int:
 
 
 def _configureLogging(args: argparse.Namespace, dryRun: bool) -> None:
-    """Initialize logging once from the executable entry point."""
-    initializeLogging(dryRun=dryRun, level=_loggingLevel(args), includeConsole=True)
+    """Configure the established application logger for CLI execution."""
+    global logger
+    logger = getLogger(
+        includeConsole=True,
+        dryRun=dryRun,
+        level=_loggingLevel(args),
+    )
 
 
 def _selectedMode(args: argparse.Namespace) -> str:

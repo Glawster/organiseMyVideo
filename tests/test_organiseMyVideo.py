@@ -16,8 +16,8 @@ import organiseMyVideo.__main__ as omv_main
 from organiseMyVideo import VideoOrganizer
 from organiseMyVideo import video as video_module
 from organiseMyVideo.video import VideoMixin
-from organiseMyVideo.video_move import VideoMoveMixin
-from organiseMyVideo.video_rescan import VideoRescanMixin
+from organiseMyVideo.videoMove import VideoMoveMixin
+from organiseMyVideo.videoRescan import VideoRescanMixin
 from organiseMyVideo.video import (
     _FILE_PROCESS_SEPARATOR,
     _XML_BINARY_CHECK_WINDOW,
@@ -53,7 +53,7 @@ def isolateDuplicateTvShowConfig(tmp_path: Path):
     """Keep duplicate-folder persistence isolated from the real home directory."""
     configFile = tmp_path / "config" / "config.json"
     with (
-        patch("organiseMyVideo.video_rescan.APP_CONFIG_FILE", configFile),
+        patch("organiseMyVideo.videoRescan.APP_CONFIG_FILE", configFile),
         patch("organiseMyVideo.video.APP_CONFIG_FILE", configFile),
     ):
         yield configFile
@@ -5982,7 +5982,7 @@ def testResetTvEpisodeTitlesRemembersNotDuplicateChoice(
             confirmedOrganizer, "_shouldPromptInteractively", return_value=True
         ),
         patch.object(confirmedOrganizer, "_readMenuChoice", return_value="n"),
-        patch("organiseMyVideo.video_rescan.APP_CONFIG_FILE", configFile),
+        patch("organiseMyVideo.videoRescan.APP_CONFIG_FILE", configFile),
     ):
         with caplog.at_level("INFO"):
             firstStats = confirmedOrganizer.resetTvEpisodeTitles()
@@ -6011,7 +6011,7 @@ def testResetTvEpisodeTitlesRemembersNotDuplicateChoice(
         patch.object(
             followupOrganizer, "_shouldPromptInteractively", return_value=False
         ),
-        patch("organiseMyVideo.video_rescan.APP_CONFIG_FILE", configFile),
+        patch("organiseMyVideo.videoRescan.APP_CONFIG_FILE", configFile),
     ):
         with caplog.at_level("INFO"):
             secondStats = followupOrganizer.resetTvEpisodeTitles()
