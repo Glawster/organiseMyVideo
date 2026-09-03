@@ -18,6 +18,7 @@ from .constants import (
     GROK_MEDIA_EXTENSIONS,
     GROK_VIDEO_MODEL,
 )
+from .filesystemOperations import FilesystemOperations
 from organiseMyProjects.logUtils import getLogger  # type: ignore
 
 logger = getLogger()
@@ -59,6 +60,8 @@ class ImagineArchive:
         self.catalogPath = Path(catalogPath) if catalogPath else GROK_CATALOG_FILE
         self.downloadDir = Path(downloadDir) if downloadDir else GROK_DOWNLOAD_DIR
         self.pageSize = pageSize
+        self.filesystem = FilesystemOperations(dryRun=dryRun)
+        self.stateFilesystem = FilesystemOperations(dryRun=False)
 
     ## download
 
@@ -83,9 +86,6 @@ class ImagineArchive:
         logger.value("download directory", self.downloadDir)
         logger.value("files", len(records))
 
-        if not self.dryRun:
-            self.downloadDir.mkdir(parents=True, exist_ok=True)
-
         client = None if self.dryRun else self._clientGet()
         for record in records:
             dest = self._downloadDestination(record)
@@ -100,7 +100,7 @@ class ImagineArchive:
                 continue
 
             try:
-                dest.write_bytes(client.files.content(record["fileId"]))
+                self.filesystem.writeBytes(dest, client.files.content(record["fileId"]))
                 self._catalogLocalPathUpdate(record["fileId"], dest)
                 stats["downloaded"] += 1
             except Exception as error:
@@ -235,10 +235,11 @@ class ImagineArchive:
 
     def _catalogSave(self, catalog: dict) -> None:
         """Write *catalog* JSON to disk."""
-        self.catalogPath.parent.mkdir(parents=True, exist_ok=True)
-        self.catalogPath.write_text(
+        self.stateFilesystem.writeText(
+            self.catalogPath,
             json.dumps(catalog, indent=2, sort_keys=True),
             encoding="utf-8",
+            stateKind="application-state",
         )
 
     ## client

@@ -11,16 +11,17 @@ not itself a substitute for acceptance evidence.
 | 1 | Bootstrap requirements and architecture governance | Completed | Phase 0 tests pass |
 | 2 | Make installation and execution reproducible | Completed | REQ-005 verified |
 | 3 | Repair entry-point and CLI architecture | Completed | REQ-006 verified |
-| 4 | Centralise safe filesystem behaviour | ToDo | Refine and accept ADR-003 |
+| 4 | Centralise safe filesystem behaviour | Completed | REQ-007 verified |
 | 5 | Refactor by domain without changing behaviour | ToDo | Phases 2–4 provide stable boundaries |
 | 6 | Make verification enforceable | ToDo | Measurable package and domain boundaries exist |
 | 7 | Finish layout and documentation adoption | ToDo | Ownership decisions for auxiliary files are agreed |
 
 ## Current priority
 
-Create and refine the Phase 4 requirement for a central filesystem-operation
-boundary, including quarantine, retention, and cross-filesystem recovery
-decisions needed to accept ADR-003. REQ-006 completed Phase 3 with
+REQ-007 completed Phase 4 with a central filesystem-operation boundary,
+source-filesystem quarantine, 30-day purge eligibility, and verified
+cross-filesystem recovery rules. Phase 5 is now the next standards-adoption
+priority. REQ-006 completed Phase 3 with
 established shared logging, media-safe imports, decomposed CLI orchestration,
 canonical commands, legacy compatibility, universal options, validation, and
 reliable statuses.
@@ -37,5 +38,5 @@ product outcome using Python services and a `camera import` subcommand.
 ## Deferred decisions
 
 - Phase 3: duration and removal criteria for legacy CLI flags.
-- Phase 4: cleanup quarantine location, retention, and permanent-deletion cases.
+- Phase 4: a future purge command and its permanent-deletion safeguards.
 - Phase 7: ownership of `rugbyAudit.py` and the root XML artifact.

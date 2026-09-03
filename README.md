@@ -15,6 +15,7 @@ The README is the canonical entry point for repository documentation. The living
 - [Requirements index](project/requirements/requirementsIndex.md)
 - [Architecture decisions](project/adr/adrIndex.md)
 - [Standards adoption roadmap](project/roadmap.md)
+- [Filesystem safety and quarantine](documentation/filesystemSafety.md)
 - [Point-in-time reviews](project/reviews/reviewsIndex.md)
 - [Imagine API archive](documentation/imagineArchive.md)
 - [Camera media import development plan](documentation/cameraImport.md)

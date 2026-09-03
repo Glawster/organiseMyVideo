@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted — 2026-09-03
 
 ## Context
 
@@ -18,16 +18,23 @@ prefers recoverable actions.
    preserving the current `pathlib`/`shutil` implementation underneath.
 3. Adopt an external transaction or filesystem abstraction dependency.
 
-## Proposed decision
+## Decision
 
 Introduce a small internal operation boundary that represents copy, move,
-rename, create, write, quarantine, and removal actions. It owns dry-run
-reporting, validation, collision policy, and failure cleanup. Prefer quarantine
-or trash for cleanup when practical; any permanent deletion requires an
-explicitly documented case and confirmed execution.
+rename, create, write, quarantine, and empty-directory removal actions. It owns
+dry-run planning, validation, collision policy, temporary-file cleanup, and
+verification.
 
-The quarantine location, retention policy, and cross-filesystem recovery rules
-must be agreed in the Phase 4 requirement before this ADR is accepted.
+Cleanup targets are moved to a unique hidden quarantine alongside the owning
+source root so the move normally remains on the same filesystem. Quarantined
+content becomes eligible for explicit purge after 30 days, but Phase 4 never
+purges automatically. Permanent deletion requires a later dedicated
+requirement and confirmed command.
+
+Cross-filesystem file moves use copy to a sibling temporary destination,
+flush/finalize, size and SHA-256 verification, atomic destination rename, and
+source removal only after verification. Any failure removes only incomplete
+temporary output and leaves the source intact.
 
 ## Rationale
 
@@ -45,3 +52,4 @@ a large dependency or forcing domain logic to understand storage mechanics.
 ## Related requirements
 
 - [REQ-001: Standards adoption governance](../requirements/features/001-standardsAdoption.md)
+- [REQ-007: Central filesystem safety](../requirements/features/007-filesystemSafety.md)

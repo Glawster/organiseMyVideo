@@ -1,6 +1,6 @@
 # Requirements
 
-Next available number: 007
+Next available number: 008
 
 Requirements created after adoption of the managed process are recorded here.
 Historical behaviour is not assigned invented retrospective requirements.
@@ -13,6 +13,7 @@ Historical behaviour is not assigned invented retrospective requirements.
 | 004 | [Camera media import](features/004-cameraMediaImport.md) | Safely import GoPro and DJI originals through Python services and a camera import subcommand. | ToDo | [Prompt](prompt/004-cameraMediaImport.md) | [ADR-006](../adr/006-cameraImportArchitecture.md) |
 | 005 | [Reproducible packaging and installation](features/005-reproduciblePackaging.md) | Make package installation, execution, tests, and hooks reproducible. | Completed | [Prompt](prompt/005-reproduciblePackaging.md) | [ADR-001](../adr/001-packagedCliLayout.md) |
 | 006 | [Entry-point and CLI architecture](features/006-cliArchitecture.md) | Use established logging and provide canonical commands with legacy compatibility. | Completed | [Prompt](prompt/006-cliArchitecture.md) | [ADR-001](../adr/001-packagedCliLayout.md), [ADR-002](../adr/002-cliCompatibility.md) |
+| 007 | [Central filesystem safety](features/007-filesystemSafety.md) | Route mutations through a dry-run-aware, recoverable operation boundary. | Completed | [Prompt](prompt/007-filesystemSafety.md) | [ADR-003](../adr/003-filesystemSafetyBoundary.md) |
 
 ## Prompt index
 
@@ -23,4 +24,5 @@ Historical behaviour is not assigned invented retrospective requirements.
 - [004-cameraMediaImport](prompt/004-cameraMediaImport.md)
 - [005-reproduciblePackaging](prompt/005-reproduciblePackaging.md)
 - [006-cliArchitecture](prompt/006-cliArchitecture.md)
+- [007-filesystemSafety](prompt/007-filesystemSafety.md)
 <!-- OMP-PROMPT-INDEX-END -->

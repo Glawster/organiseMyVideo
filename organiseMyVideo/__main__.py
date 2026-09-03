@@ -13,6 +13,7 @@ from typing import Optional, Sequence
 from organiseMyProjects.logUtils import drawBox, getLogger, setApplication  # type: ignore
 
 from .constants import APP_CONFIG_FILE
+from .filesystemOperations import FilesystemOperations
 
 thisApplication = Path(__file__).parent.name
 setApplication(thisApplication)
@@ -43,9 +44,11 @@ def _loadAppConfig(configPath: Path) -> dict:
 
 def _saveAppConfig(configPath: Path, config: dict) -> None:
     """Write *config* JSON data to *configPath*."""
-    configPath.parent.mkdir(parents=True, exist_ok=True)
-    configPath.write_text(
-        json.dumps(config, indent=2, sort_keys=True), encoding="utf-8"
+    FilesystemOperations(dryRun=False).writeText(
+        configPath,
+        json.dumps(config, indent=2, sort_keys=True),
+        encoding="utf-8",
+        stateKind="application-state",
     )
 
 

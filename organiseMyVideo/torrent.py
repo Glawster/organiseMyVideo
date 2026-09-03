@@ -1,6 +1,5 @@
 """Torrent-file cleanup: remove stale .torrent files from the download directory."""
 
-import shutil
 from pathlib import Path
 
 from .constants import _PREFIX_REGEX
@@ -84,32 +83,32 @@ class TorrentMixin:
 
             if inLibrary:
                 downloadSubDir = entry.parent if entry.parent != downloadPath else None
-                if self.dryRun:
+                try:
                     if downloadSubDir is not None:
-                        logger.action(f"delete folder: {downloadSubDir.name}")
-                        self._recordSummaryCleanup(f"delete folder: {downloadSubDir}")
+                        quarantinePath = self.filesystem.quarantine(
+                            downloadSubDir, sourceRoot=downloadPath.parent
+                        )
+                        logger.action(
+                            f"quarantine folder: {downloadSubDir} -> {quarantinePath}"
+                        )
+                        self._recordSummaryCleanup(
+                            f"quarantine folder: {downloadSubDir} -> {quarantinePath}"
+                        )
                         removedDirs.add(downloadSubDir)
                     else:
-                        logger.action(f"delete torrent: {entry.name}")
-                        self._recordSummaryCleanup(f"delete torrent: {entry}")
+                        quarantinePath = self.filesystem.quarantine(
+                            entry, sourceRoot=downloadPath.parent
+                        )
+                        logger.action(
+                            f"quarantine torrent: {entry} -> {quarantinePath}"
+                        )
+                        self._recordSummaryCleanup(
+                            f"quarantine torrent: {entry} -> {quarantinePath}"
+                        )
                     stats["deleted"] += 1
-                else:
-                    try:
-                        if downloadSubDir is not None:
-                            shutil.rmtree(downloadSubDir)
-                            logger.action(f"deleted folder: {downloadSubDir.name}")
-                            self._recordSummaryCleanup(
-                                f"deleted folder: {downloadSubDir}"
-                            )
-                            removedDirs.add(downloadSubDir)
-                        else:
-                            entry.unlink()
-                            logger.action(f"deleted torrent: {entry.name}")
-                            self._recordSummaryCleanup(f"deleted torrent: {entry}")
-                        stats["deleted"] += 1
-                    except Exception as e:
-                        logger.error(f"failed to delete {entry.name}: {e}")
-                        stats["errors"] += 1
+                except Exception as e:
+                    logger.error(f"failed to quarantine {entry.name}: {e}")
+                    stats["errors"] += 1
             else:
                 logger.value("keeping torrent", entry.name)
                 stats["skipped"] += 1
@@ -154,15 +153,9 @@ class TorrentMixin:
 
             newPath = entry.parent / newName
 
-            if self.dryRun:
-                logger.action(f"rename torrent: {oldName} → {newName}")
-                self._recordSummaryRename(entry, newPath)
-                stats["renamed"] += 1
-                continue
-
             try:
-                entry.rename(newPath)
-                logger.action(f"renamed torrent: {oldName} → {newName}")
+                self.filesystem.rename(entry, newPath)
+                logger.action(f"rename torrent: {oldName} → {newName}")
                 self._recordSummaryRename(entry, newPath)
                 stats["renamed"] += 1
             except FileExistsError:

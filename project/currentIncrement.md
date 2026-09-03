@@ -2,23 +2,30 @@
 
 ## Requirement
 
-[REQ-006: Entry-point and CLI architecture](requirements/features/006-cliArchitecture.md)
+[REQ-007: Central filesystem safety](requirements/features/007-filesystemSafety.md)
 
 ## Objective
 
-Deliver Phase 3 of the standards-adoption roadmap while preserving legacy CLI
-behaviour.
+Deliver Phase 4 of the standards-adoption roadmap through one recoverable
+filesystem mutation boundary.
 
 ## Status
 
-Completed on 2026-09-03 — the invalid no-state-on-import constraint was
-corrected, direct shared logging was restored, camelCase module references were
-aligned, and the Phase 3 CLI behavior remains verified.
+Completed — the operation service, workflow migration, recoverable quarantine,
+failure tests, documentation, and production-path verification are delivered.
 
 ## Verification target
 
-- Side-effect-free package import
-- Equivalent canonical and legacy command paths
-- Nested help, version, verbosity, validation, and exit statuses
-- Module and console production paths
-- Full pytest and pre-commit suites
+- Dry-run immutability and collision rejection
+- Atomic writes/copies and verified cross-filesystem moves
+- Recoverable cleanup quarantine
+- Migrated production mutation paths
+- Full pytest, hook, and direct-mutation audit
+
+## Verification result
+
+- `pytest -q`: 359 passed
+- `pre-commit run --all-files`: passed
+- `git diff --check`: passed
+- Direct-mutation audit: boundary internals plus the documented temporary
+  Firefox cookie-database copy/cleanup exception only

@@ -29,6 +29,7 @@ from .constants import (
     _PREFIX_REGEX,
 )
 from .metadata import MetadataMixin
+from .filesystemOperations import FilesystemOperations
 from .torrent import TorrentMixin
 from .video import VideoMixin
 
@@ -64,6 +65,8 @@ class VideoOrganizer(MetadataMixin, VideoMixin, TorrentMixin):
         """
         self.sourceDir = Path(sourceDir)
         self.dryRun = dryRun
+        self.filesystem = FilesystemOperations(dryRun=dryRun)
+        self.stateFilesystem = FilesystemOperations(dryRun=False)
         self.refreshMetadataLibrary = refreshMetadataLibrary
         self.useCurses = useCurses
         self._promptHelpDisplayed = False

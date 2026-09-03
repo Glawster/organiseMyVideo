@@ -142,10 +142,11 @@ class MetadataMixin:
         """
         library = self._loadMetadataLibrary()
         libraryPath = self._getMetadataLibraryPath()
-        libraryPath.parent.mkdir(parents=True, exist_ok=True)
-        libraryPath.write_text(
+        self.stateFilesystem.writeText(
+            libraryPath,
             json.dumps(library, indent=2, sort_keys=True),
             encoding="utf-8",
+            stateKind="application-state",
         )
         self._metadataLibraryLoadState = _METADATA_LIBRARY_STATE_READY
 
@@ -1245,8 +1246,7 @@ class MetadataMixin:
                 if len(raw) > _MAX_ARTWORK_SIZE_BYTES:
                     logger.warning("artwork response too large from %s", url)
                     return False
-                destPath.parent.mkdir(parents=True, exist_ok=True)
-                destPath.write_bytes(raw)
+                self.filesystem.writeBytes(destPath, raw, stateKind="metadata")
                 return True
         except (urllib.error.URLError, urllib.error.HTTPError, OSError) as error:
             logger.warning("artwork download failed for %s: %s", url, error)

@@ -210,7 +210,6 @@ class VideoMoveMixin:
             return True
 
         try:
-            destDir.mkdir(parents=True, exist_ok=True)
             self._moveFileWithProgress(musicFile, destFile)
             self._updateMusicTags(destFile, metadata)
             self._recordSummaryTransfer(musicFile, destFile)
@@ -436,7 +435,6 @@ class VideoMoveMixin:
             return True
 
         try:
-            destDir.mkdir(parents=True, exist_ok=True)
             self._moveFileWithProgress(sourceFile, destFile)
             self._replicateMovieMetadata(sourceFile, destDir, resolvedMovieInfo)
             self._recordSummaryTransfer(sourceFile, destFile)
@@ -543,7 +541,6 @@ class VideoMoveMixin:
             return True
 
         try:
-            seasonDir.mkdir(parents=True, exist_ok=True)
             self._moveFileWithProgress(sourceFile, destFile)
             self._replicateTvMetadata(
                 sourceFile, showDir, seasonDir, tvInfo, destFile=destFile
