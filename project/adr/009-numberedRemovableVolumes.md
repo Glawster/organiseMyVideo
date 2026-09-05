@@ -16,8 +16,8 @@ things.
 
 1. Keep inventory camera-only; catalogue USB drives some other way.
 2. Add a separate `usbInventory` table and ID space.
-3. Treat every removable volume as one numbered inventory: camera layouts
-   set `volumeKind` to camera kinds already stored, USB storage sets
+3. Treat every removable volume as one numbered inventory: camera SD cards
+   set `volumeKind` to `sd`, USB storage sets
    `volumeKind` to `usb`, same `--card` labels and catalogue list.
 
 ## Decision
@@ -36,6 +36,10 @@ authorizes sampling.
 The operator’s question is “what is where”, not “is this an SD card”. Size
 and free space are already the UI fields. Reusing the on-volume label
 avoids a second identity scheme. Import stays camera-only (REQ-004).
+
+REQ-016 prepares the schema with `sd` as the backward-compatible default.
+Camera families remain in `cameraKinds`; USB detection and inventory belong
+to REQ-015.
 
 ## Consequences
 

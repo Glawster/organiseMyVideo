@@ -131,3 +131,33 @@ ignored-file fixtures. They cover dry-run immutability, confirmed snapshots,
 repeat card IDs, capture-time precedence, vision injection, missing API keys,
 invalid card IDs, show-without-source, and execution through
 `python -m organiseMyVideo camera inventory`.
+
+## Source and permission errors
+
+Select the mounted card itself, for example `/media/andy/disk`, rather than
+its parent `/media/andy`. Inventory rejects a source containing immediate child
+mounts before scanning or writing, and lists those mounts in the error message.
+Copied card directories remain supported.
+
+Permission failures are reported as CLI errors with a nonzero exit status,
+without a Python traceback. Check the selected card path and its permissions.
+
+## GoPro MISC metadata
+
+When present, `MISC/version.txt` supplies the camera manufacturer, model,
+serial number, firmware version, and Wi-Fi MAC address. The reader accepts
+older GoPro files with a trailing comma before the closing brace. Missing,
+unreadable, or malformed metadata does not prevent inventory.
+
+`MISC/card` is retained as `goproCardId`, an opaque text token. It is separate
+from the operator's numeric `cardId` and is not interpreted as an SD hardware
+CID or used to infer the card manufacturer.
+
+These details are included in the confirmed on-card JSON label, SQLite snapshot,
+and inventory summary. Stored inventory can show them while the card is absent.
+Existing databases gain nullable metadata columns on their next schema upgrade;
+old snapshots retain unknown values until a new inventory is recorded.
+
+The summary shows the card `Brand` (or `unknown`) and a single `Camera` manufacturer-and-model
+line, without the redundant `Cameras` category line. Card brand is retained in
+SQLite as well as the on-card label, so saved inventory shows it offline.

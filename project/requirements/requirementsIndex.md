@@ -1,6 +1,6 @@
 # Requirements
 
-Next available number: 016
+Next available number: 017
 
 Requirements created after adoption of the managed process are recorded here.
 Historical behaviour is not assigned invented retrospective requirements.
@@ -22,6 +22,7 @@ Historical behaviour is not assigned invented retrospective requirements.
 | 013 | [Camera card ID reassign](features/013-cameraCardIdRetie.md) | Explicit confirmed action to change the numeric ID bound on an SD card. | Completed | [Prompt](prompt/013-cameraCardIdRetie.md) | Not required |
 | 014 | [Home video catalogue](features/014-homeVideoCatalogue.md) | Index `/mnt/myVideo/Video`, including GoPro and Drone, as a catalogue collection. | ToDo | [Prompt](prompt/014-homeVideoCatalogue.md) | [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
 | 015 | [USB volume inventory](features/015-usbVolumeInventory.md) | Inventory USB thumb drives with the same numeric ID, size, and free space as SD cards. | ToDo | [Prompt](prompt/015-usbVolumeInventory.md) | [ADR-009](../adr/009-numberedRemovableVolumes.md) |
+| 016 | [Catalogue media identities](features/016-catalogueMediaIdentities.md) | Prepare external identities, home-video rows, and removable-volume kinds with safe schema upgrades. | Completed | [Prompt](prompt/016-catalogueMediaIdentities.md) | [ADR-008](../adr/008-sqliteMediaCatalogue.md), [ADR-009](../adr/009-numberedRemovableVolumes.md) |
 
 ## Prompt index
 
@@ -41,4 +42,5 @@ Historical behaviour is not assigned invented retrospective requirements.
 - [013-cameraCardIdRetie](prompt/013-cameraCardIdRetie.md)
 - [014-homeVideoCatalogue](prompt/014-homeVideoCatalogue.md)
 - [015-usbVolumeInventory](prompt/015-usbVolumeInventory.md)
+- [016-catalogueMediaIdentities](prompt/016-catalogueMediaIdentities.md)
 <!-- OMP-PROMPT-INDEX-END -->

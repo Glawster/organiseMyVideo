@@ -40,11 +40,11 @@ The executable supports:
 - `--help` for contextual help;
 - `--version` for the installed package version;
 - `--confirm` to authorize changes, with dry-run as the default;
-- `--verbose` for detailed logging; and
+- `--debug` for debug-level logging; and
 - `--quiet` for errors-only logging.
 
 Shared behavioral options may be placed before the command hierarchy or after
-the final action. `--debug` remains a compatibility alias for `--verbose`.
+the final action. `--debug` enables the DEBUG logging level.
 
 ## Grok actions
 

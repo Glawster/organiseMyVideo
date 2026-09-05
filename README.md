@@ -113,7 +113,6 @@ python -m organiseMyVideo --torrent --clean --confirm
 | `--video` | With `--rescan`, limit repairs to TV/video episodes |
 | `--torrent` | Run torrent cleanup against the `Downloads` folder that sits next to the source directory |
 | `--debug` | Enable debug logging, including TVDB title payload debug lines |
-| `--verbose` | Enable detailed logging; canonical replacement for `--debug` |
 | `--quiet` | Show errors only |
 | `--version` | Display the installed package version |
 | `grok --import-firefox` | Import grok.com cookies from Firefox after logging in |

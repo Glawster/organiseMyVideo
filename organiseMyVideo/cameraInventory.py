@@ -150,6 +150,7 @@ class CameraIdentity:
     model: Optional[str] = None
     serial: Optional[str] = None
     firmware: Optional[str] = None
+    wifiMac: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -181,6 +182,9 @@ class CardInventoryRecord:
     cardBrand: Optional[str] = None
     cardProduct: Optional[str] = None
     cardRatedGigabytes: Optional[int] = None
+    volumeKind: str = "sd"
+    cameraWifiMac: Optional[str] = None
+    goproCardId: Optional[str] = None
 
 
 class CameraInventory:
@@ -250,6 +254,16 @@ class CameraInventory:
         source = Path(source).expanduser().resolve()
         if not source.is_dir():
             raise ValueError(f"source directory does not exist: {source}")
+        # A mount container would measure the host disk and label the wrong root.
+        mountedChildren = sorted(
+            child for child in source.iterdir() if os.path.ismount(str(child))
+        )
+        if mountedChildren:
+            choices = ", ".join(str(child) for child in mountedChildren)
+            raise ValueError(
+                f"source is a parent of mounted volumes: {source}; "
+                f"select the card mount itself: {choices}"
+            )
         labelRoot = _cardLabelRoot(source)
         existingLabel, storedId = _cardLabelLocate(labelRoot)
         cardId = self._cardIdResolve(cardId, storedId, existingLabel, reassign=reassign)
@@ -316,6 +330,8 @@ class CameraInventory:
             cameraModel=identity.model,
             cameraSerial=identity.serial,
             firmwareVersion=identity.firmware,
+            cameraWifiMac=identity.wifiMac,
+            goproCardId=_goproCardIdRead(labelRoot),
             cardBrand=cardBrand,
             cardProduct=cardProduct,
             cardRatedGigabytes=cardRatedGigabytes,
@@ -606,8 +622,9 @@ class CameraInventory:
                 dateStart, dateEnd, dateSource, cameraKinds,
                 videoCount, photoCount, thumbnailCount, previewCount,
                 sidecarCount, otherCount, thumbnailSampled, contentSummary,
-                visionStatus
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                visionStatus, volumeKind,
+                manufacturer, cameraModel, cameraSerial, firmwareVersion, cameraWifiMac, goproCardId, cardBrand
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.cardId,
@@ -633,6 +650,14 @@ class CameraInventory:
                 record.thumbnailSampled,
                 record.contentSummary,
                 record.visionStatus,
+                record.volumeKind,
+                record.manufacturer,
+                record.cameraModel,
+                record.cameraSerial,
+                record.firmwareVersion,
+                record.cameraWifiMac,
+                record.goproCardId,
+                record.cardBrand,
             ),
         )
         return int(cursor.lastrowid)
@@ -745,6 +770,8 @@ def _cardLabelPayload(record: CardInventoryRecord) -> dict:
         "cameraKinds": list(record.cameraKinds),
         "cameraModel": record.cameraModel,
         "cameraSerial": record.cameraSerial,
+        "cameraWifiMac": record.cameraWifiMac,
+        "goproCardId": record.goproCardId,
         "cardBrand": record.cardBrand,
         "cardId": record.cardId,
         "cardProduct": record.cardProduct,
@@ -938,6 +965,15 @@ def _cameraIdentityCollect(root: Path, cameraKinds: tuple[str, ...]) -> CameraId
     return CameraIdentity()
 
 
+def _goproCardIdRead(root: Path) -> Optional[str]:
+    """Read GoPro's opaque card token without treating it as an SD hardware CID."""
+
+    try:
+        return _identityText((root / "MISC" / "card").read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
 def _goproIdentityRead(root: Path) -> CameraIdentity:
     """Parse GoPro ``MISC/version.txt`` when present."""
 
@@ -947,7 +983,9 @@ def _goproIdentityRead(root: Path) -> CameraIdentity:
             return CameraIdentity(manufacturer="GoPro")
         return CameraIdentity()
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        raw = path.read_text(encoding="utf-8-sig")
+        # Older GoPro firmware writes a trailing comma before the final brace.
+        data = json.loads(re.sub(r",(\s*})\s*$", r"\1", raw))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return CameraIdentity(manufacturer="GoPro")
     if not isinstance(data, dict):
@@ -957,6 +995,7 @@ def _goproIdentityRead(root: Path) -> CameraIdentity:
         model=_identityText(data.get("camera type")),
         serial=_identityText(data.get("camera serial number")),
         firmware=_identityText(data.get("firmware version")),
+        wifiMac=_identityText(data.get("wifi mac")),
     )
 
 
@@ -1014,18 +1053,22 @@ def _cardLooksLikeVolumeRoot(path: Path) -> bool:
 def _cardVolumeSummary(record: CardInventoryRecord, extra: str = "") -> str:
     """Return the card summary stored on the volume and shown in the console."""
 
-    kinds = ", ".join(record.cameraKinds) or "unknown"
     counts = record.fileCounts
     content = record.contentSummary or record.visionStatus
     identity = ""
-    if record.manufacturer:
-        identity += f"  Manufacturer:     {record.manufacturer}\n"
-    if record.cameraModel:
-        identity += f"  Camera:           {record.cameraModel}\n"
+    camera = " ".join(
+        part for part in (record.manufacturer, record.cameraModel) if part
+    )
+    if camera:
+        identity += f"  Camera:           {camera}\n"
     if record.cameraSerial:
         identity += f"  Serial:           {record.cameraSerial}\n"
     if record.firmwareVersion:
         identity += f"  Firmware:         {record.firmwareVersion}\n"
+    if record.cameraWifiMac:
+        identity += f"  Camera Wi-Fi MAC: {record.cameraWifiMac}\n"
+    if record.goproCardId:
+        identity += f"  GoPro card token: {record.goproCardId}\n"
     cardSize = (
         f"  Card size:        {record.cardRatedGigabytes} GB\n"
         if record.cardRatedGigabytes
@@ -1033,13 +1076,13 @@ def _cardVolumeSummary(record: CardInventoryRecord, extra: str = "") -> str:
     )
     return f"""CAMERA CARD INVENTORY
   Card ID:          {record.cardId}
+  Brand:            {record.cardBrand or "unknown"}
 {extra}  Source:           {record.sourcePath}
   Volume:           {record.volumeLabel}
 {cardSize}  Free space:       {_bytesFormat(record.capacity.freeBytes)}
   Content size:     {_bytesFormat(record.capacity.contentBytes)}
   Volume size:      {_bytesFormat(record.capacity.totalBytes)}
   Date range:       {_dateRangeFormat(record.dateStart, record.dateEnd, record.dateSource)}
-  Cameras:          {kinds}
 {identity}  Videos:           {counts.get("video", 0)}
   Photos:           {counts.get("photo", 0)}
   Thumbnails:       {counts.get("thumbnail", 0)}
@@ -1193,6 +1236,14 @@ def _recordFromRow(row: sqlite3.Row, files: list[sqlite3.Row]) -> CardInventoryR
         },
         contentSummary=row["contentSummary"] or "",
         visionStatus=row["visionStatus"],
+        volumeKind=row["volumeKind"],
+        manufacturer=row["manufacturer"],
+        cameraModel=row["cameraModel"],
+        cameraSerial=row["cameraSerial"],
+        firmwareVersion=row["firmwareVersion"],
+        cardBrand=row["cardBrand"],
+        cameraWifiMac=row["cameraWifiMac"],
+        goproCardId=row["goproCardId"],
         thumbnailSampled=row["thumbnailSampled"],
         cardRatedGigabytes=(
             row["cardRatedGigabytes"] if "cardRatedGigabytes" in row.keys() else None

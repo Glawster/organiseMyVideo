@@ -158,13 +158,9 @@ def _buildSharedFlags(suppressDefaults: bool = False) -> argparse.ArgumentParser
     shared.add_argument(
         "--debug",
         action="store_true",
-        help="legacy alias for --verbose",
+        help="enable debug-level logging",
     )
-    verbosity = shared.add_mutually_exclusive_group()
-    verbosity.add_argument(
-        "--verbose", action="store_true", help="enable detailed logging"
-    )
-    verbosity.add_argument("--quiet", action="store_true", help="show errors only")
+    shared.add_argument("--quiet", action="store_true", help="show errors only")
     return shared
 
 
@@ -396,7 +392,7 @@ def _loggingLevel(args: argparse.Namespace) -> int:
     """Return the requested process logging level."""
     if args.quiet:
         return logging.ERROR
-    if args.verbose or args.debug:
+    if args.debug:
         return logging.DEBUG
     return logging.INFO
 
@@ -440,7 +436,13 @@ def _runCameraWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
             reassign=bool(getattr(args, "reassign", False)),
             brand=getattr(args, "brand", None),
         )
-    except (RuntimeError, ValueError) as error:
+    except PermissionError as error:
+        logger.error(
+            f"camera inventory permission denied: {error.filename or sourcePath}; "
+            "select the card mount itself and check its write permissions"
+        )
+        return 1
+    except (OSError, RuntimeError, ValueError) as error:
         logger.error("%s", error)
         return 1
     persisted = True if sourcePath is None else not dryRun

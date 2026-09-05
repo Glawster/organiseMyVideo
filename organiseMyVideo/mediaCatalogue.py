@@ -25,6 +25,14 @@ CREATE TABLE IF NOT EXISTS cardInventory (
     inventoriedAt TEXT NOT NULL,
     sourcePath TEXT NOT NULL,
     volumeLabel TEXT,
+    volumeKind TEXT NOT NULL DEFAULT 'sd',
+    manufacturer TEXT,
+    cameraModel TEXT,
+    cameraSerial TEXT,
+    firmwareVersion TEXT,
+    cameraWifiMac TEXT,
+    goproCardId TEXT,
+    cardBrand TEXT,
     filesystemId TEXT,
     cardSizeBytes INTEGER,
     usedBytes INTEGER,
@@ -57,6 +65,16 @@ CREATE TABLE IF NOT EXISTS cardInventoryFile (
     kind TEXT NOT NULL,
     cameraKind TEXT NOT NULL,
     FOREIGN KEY (inventoryId) REFERENCES cardInventory(inventoryId)
+);
+CREATE TABLE IF NOT EXISTS homeVideoItem (
+    homeVideoId INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,
+    relativePath TEXT NOT NULL,
+    filePath TEXT NOT NULL UNIQUE,
+    captureAt TEXT,
+    dateSource TEXT NOT NULL,
+    sizeBytes INTEGER NOT NULL CHECK (sizeBytes >= 0),
+    scannedAt TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS movieItem (
     movieId INTEGER PRIMARY KEY,
@@ -121,6 +139,21 @@ class CardCatalogueRecord:
     cameraKinds: tuple[str, ...]
     dateStart: Optional[str]
     dateEnd: Optional[str]
+    volumeKind: str = "sd"
+
+
+@dataclass(frozen=True)
+class HomeVideoCatalogueRecord:
+    """One future home-video row; no scanning or query workflow is provided."""
+
+    homeVideoId: int
+    kind: str
+    relativePath: str
+    filePath: str
+    captureAt: Optional[str]
+    dateSource: str
+    sizeBytes: int
+    scannedAt: str
 
 
 @dataclass(frozen=True)
@@ -172,7 +205,7 @@ class MediaCatalogue:
                 """
                 SELECT c.cardId, c.inventoriedAt, c.cardRatedGigabytes,
                        c.cardSizeBytes, c.freeBytes, c.usedBytes, c.contentBytes,
-                       c.cameraKinds, c.dateStart, c.dateEnd
+                       c.cameraKinds, c.dateStart, c.dateEnd, c.volumeKind
                 FROM cardInventory c
                 INNER JOIN (
                     SELECT cardId, MAX(inventoryId) AS inventoryId
@@ -196,6 +229,7 @@ class MediaCatalogue:
                 ),
                 dateStart=row["dateStart"],
                 dateEnd=row["dateEnd"],
+                volumeKind=row["volumeKind"],
             )
             for row in rows
         ]
@@ -327,10 +361,24 @@ class MediaCatalogue:
 
 
 def catalogueSchemaApply(connection: sqlite3.Connection) -> None:
-    """Create catalogue tables when they are missing."""
+    """Create missing tables and add columns without replacing existing rows."""
 
     connection.executescript(CATALOGUE_SCHEMA)
+    # Additive upgrades preserve snapshots and permit repeated opens of old files.
     _catalogueColumnEnsure(connection, "cardInventory", "cardRatedGigabytes", "INTEGER")
+    _catalogueColumnEnsure(
+        connection, "cardInventory", "volumeKind", "TEXT NOT NULL DEFAULT 'sd'"
+    )
+    for column in (
+        "manufacturer",
+        "cameraModel",
+        "cameraSerial",
+        "firmwareVersion",
+        "cameraWifiMac",
+        "goproCardId",
+        "cardBrand",
+    ):
+        _catalogueColumnEnsure(connection, "cardInventory", column, "TEXT")
     _catalogueColumnEnsure(connection, "tvSeries", "tvdbId", "TEXT")
     _catalogueColumnEnsure(connection, "tvSeries", "tmdbId", "TEXT")
     _catalogueColumnEnsure(connection, "tvSeries", "imdbId", "TEXT")

@@ -95,7 +95,7 @@ def testEntryPointConfiguresEstablishedLogging(tmp_path: Path):
             applicationMain, "getLogger", return_value=configuredLogger
         ) as getLogger:
             status = applicationMain.main(
-                ["media", "organise", str(tmp_path), "--verbose"]
+                ["media", "organise", str(tmp_path), "--debug"]
             )
 
     assert status == 0
@@ -243,3 +243,36 @@ def testPackageImportDoesNotMutateMedia(tmp_path: Path):
     importlib.reload(organiseMyVideo)
 
     assert media.read_bytes() == b"original-media"
+
+
+@pytest.mark.parametrize("prefix", [[], ["media", "organise"]])
+def testVerboseOptionIsRejected(prefix):
+    parser = applicationMain.buildParser()
+
+    with pytest.raises(SystemExit) as error:
+        parser.parse_args([*prefix, "--verbose"])
+
+    assert error.value.code == 2
+    assert "--verbose" not in parser.format_help()
+    assert "--debug" in parser.format_help()
+
+
+def testCameraLabelPermissionFailureReportsError(tmp_path, monkeypatch, caplog):
+    from cameraFixtures import cardTreeBuild
+    from organiseMyVideo.filesystemOperations import FilesystemOperations
+    from organiseMyVideo import constants
+
+    card = cardTreeBuild(tmp_path / "card")
+
+    def denyWrite(self, path, *args, **kwargs):
+        raise PermissionError(13, "Permission denied", str(path))
+
+    monkeypatch.setattr(FilesystemOperations, "writeText", denyWrite)
+    status = applicationMain.main(
+        ["camera", "inventory", str(card), "--card", "2", "-y"]
+    )
+
+    assert status == 1
+    assert "camera inventory permission denied" in caplog.text
+    assert "select the card mount itself" in caplog.text
+    assert not constants.CAMERA_INVENTORY_DATABASE.exists()

@@ -19,6 +19,7 @@ from organiseMyVideo.cameraInventory import (
     _cidDecode,
     _marketedGigabytes,
     cameraInventoryRun,
+    cameraInventorySummary,
 )
 from organiseMyVideo.constants import cameraCardLabelFilename
 
@@ -402,6 +403,14 @@ def testBrandOptionIsStoredOnCardLabel(cardRoot: Path, databasePath: Path):
 
     assert payload["cardBrand"] == "SanDisk"
     assert record.cardBrand == "SanDisk"
+    stored = reader.inventoryShow(1)
+    assert stored.cardBrand == "SanDisk"
+    summary = cameraInventorySummary(stored, persisted=True, databasePath=databasePath)
+    assert "Brand:            SanDisk" in summary
+    assert "Cameras:" not in summary
+    assert f"Camera:           {record.manufacturer} {record.cameraModel}" in summary
+    assert "Manufacturer:" not in summary
+    assert stored.cameraModel == record.cameraModel
 
 
 def testGoproCardIsNotClassifiedAsDashcam(cardRoot: Path, databasePath: Path):
@@ -411,3 +420,65 @@ def testGoproCardIsNotClassifiedAsDashcam(cardRoot: Path, databasePath: Path):
 
     assert "dashcam" not in record.cameraKinds
     assert "gopro" in record.cameraKinds
+
+
+@pytest.mark.parametrize("dryRun", [True, False])
+def testInventoryRejectsMountContainerBeforeScanning(tmp_path, monkeypatch, dryRun):
+    mount = tmp_path / "disk"
+    mount.mkdir()
+    monkeypatch.setattr(os.path, "ismount", lambda path: Path(path) == mount)
+    database = tmp_path / "catalogue.sqlite"
+    service = CameraInventory(dryRun=dryRun, databasePath=database)
+
+    with pytest.raises(ValueError, match="select the card mount itself") as error:
+        service.inventoryScan(tmp_path, 2)
+
+    assert str(mount) in str(error.value)
+    assert not database.exists()
+    assert not (tmp_path / cameraCardLabelFilename(2)).exists()
+
+
+def testLegacyGoproMiscMetadataSurvivesPersistence(tmp_path, databasePath):
+    card = cardTreeBuild(tmp_path / "card")
+    (card / "MISC" / "version.txt").write_text(
+        '{"camera type":"HERO4 Silver", "camera serial number":"example-serial",'
+        '"firmware version":"HD4.01.05.00.00", "wifi mac":"001122334455",\n}'
+    )
+    (card / "MISC" / "card").write_text("0012345678901234567\n")
+    service = CameraInventory(dryRun=False, databasePath=databasePath)
+
+    record = service.inventoryScan(card, 2)
+    service.inventoryPersist(record)
+    stored = service.inventoryShow(2)
+    payload = json.loads((card / cameraCardLabelFilename(2)).read_text())
+
+    expected = dict(
+        manufacturer="GoPro",
+        cameraModel="HERO4 Silver",
+        cameraSerial="example-serial",
+        firmwareVersion="HD4.01.05.00.00",
+        cameraWifiMac="001122334455",
+        goproCardId="0012345678901234567",
+    )
+    for name, value in expected.items():
+        assert getattr(record, name) == value
+        assert getattr(stored, name) == value
+        assert payload[name] == value
+    assert stored.cardId == 2
+
+
+@pytest.mark.parametrize("contents", [None, b"not json", b"\xff", b"[]"])
+def testOptionalMiscMetadataDoesNotPreventInventory(tmp_path, contents):
+    card = cardTreeBuild(tmp_path / "card")
+    version = card / "MISC" / "version.txt"
+    if contents is None:
+        version.unlink()
+    else:
+        version.write_bytes(contents)
+    (card / "MISC" / "card").write_bytes(b"\xff")
+
+    record = CameraInventory(dryRun=True).inventoryScan(card, 2)
+
+    assert record.cameraModel is None
+    assert record.cameraWifiMac is None
+    assert record.goproCardId is None
