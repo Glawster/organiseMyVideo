@@ -87,7 +87,7 @@ def _promptForTvdbApiKey(configPath: Path) -> Optional[str]:
 
 
 def _runGrokGalleryCommand(args, gallery, sessionFile: Path) -> None:
-    """Run --reset-grok, --import-firefox-session, or --grok gallery download."""
+    """Run the selected Grok session or gallery operation."""
     if args.reset_grok:
         logger.doing("resetting grok session files")
         resetStats = gallery.resetGrokConfig()
@@ -112,14 +112,13 @@ Not found:
             summary = (
                 f"FIREFOX SESSION IMPORTED\n"
                 f"  Session file: {sessionFile}\n\n"
-                f"Run --grok --confirm to download your Imagine media."
+                f"Run 'organiseMyVideo grok --scan --confirm' to download media."
             )
         else:
             summary = (
                 "FIREFOX SESSION IMPORT FAILED\n\n"
                 "Make sure you are logged into grok.com in Firefox,\n"
-                "then run --import-firefox-session again.\n\n"
-                "Alternatively, run --grok and Firefox will be opened automatically."
+                "then run 'organiseMyVideo grok --import-firefox' again."
             )
         drawBox(summary)
         return
@@ -131,7 +130,7 @@ Files handled:    {grokStats['downloaded']}
 Already present:  {grokStats['skipped']}
 Errors:           {grokStats['errors']}
 Session file:     {sessionFile}
-  (delete with --reset-grok to force re-login)
+  (use 'organiseMyVideo grok --reset --confirm' to force re-login)
 """
     drawBox(summary)
 
@@ -195,23 +194,10 @@ def buildParser() -> argparse.ArgumentParser:
         help="remove empty sub-folders from source directory (folders with only sample content are treated as empty)",
     )
     parser.add_argument(
-        "--non-interactive",
-        dest="non_interactive",
-        action="store_true",
-        help="Run without user prompts (skip files that cannot be auto-detected)",
-    )
-    parser.add_argument(
         "--refresh",
         dest="refresh_metadata_library",
         action="store_true",
         help="rebuild the saved metadata library from storage before processing",
-    )
-    parser.add_argument(
-        "--no-curses",
-        dest="curses",
-        action="store_false",
-        default=True,
-        help="use line-based prompts instead of the default curses single-key menus",
     )
     parser.add_argument(
         "--rescan",
@@ -237,22 +223,11 @@ def buildParser() -> argparse.ArgumentParser:
         "--key",
         help="TVDB API key to save to ~/.config/organiseMyVideo/config.json",
     )
-    parser.add_argument(
-        "--grok",
-        action="store_true",
-        help="download this account's generated grok.com Imagine media to ~/Downloads/Grok",
-    )
-    parser.add_argument(
-        "--import-firefox-session",
-        dest="import_firefox_session",
-        action="store_true",
-        help="import grok.com cookies from Firefox after logging in at grok.com/imagine/saved",
-    )
-    parser.add_argument(
-        "--reset-grok",
-        dest="reset_grok",
-        action="store_true",
-        help="delete saved grok.com session files so the next --grok run logs in again",
+    parser.set_defaults(
+        curses=True,
+        grok=False,
+        import_firefox_session=False,
+        reset_grok=False,
     )
     subparsers = parser.add_subparsers(dest="command")
     mediaParser = subparsers.add_parser("media", help="organise or clean staged media")
@@ -262,12 +237,8 @@ def buildParser() -> argparse.ArgumentParser:
     )
     mediaOrganise.add_argument("source", nargs="?", default="/mnt/video2/toFile")
     mediaOrganise.add_argument("--auto", action="store_true")
-    mediaOrganise.add_argument("--non-interactive", action="store_true")
     mediaOrganise.add_argument(
         "--refresh", dest="refresh_metadata_library", action="store_true"
-    )
-    mediaOrganise.add_argument(
-        "--no-curses", dest="curses", action="store_false", default=True
     )
     mediaClean = mediaSub.add_parser(
         "clean",
@@ -296,62 +267,59 @@ def buildParser() -> argparse.ArgumentParser:
     torrentMaintain.add_argument("source", nargs="?", default="/mnt/video2/toFile")
     torrentMaintain.add_argument("--clean-names", action="store_true")
 
-    galleryParser = subparsers.add_parser(
-        "gallery", help="maintain the legacy grok.com gallery"
+    cameraParser = subparsers.add_parser(
+        "camera",
+        help="inventory camera SD cards or import camera media",
     )
-    gallerySub = galleryParser.add_subparsers(dest="galleryAction", required=True)
-    gallerySub.add_parser("download", parents=[_buildSharedFlags(True)])
-    gallerySub.add_parser("import-session", parents=[_buildSharedFlags(True)])
-    gallerySub.add_parser("reset-session", parents=[_buildSharedFlags(True)])
+    cameraSub = cameraParser.add_subparsers(dest="cameraAction", required=True)
+    cameraInventory = cameraSub.add_parser(
+        "inventory",
+        parents=[_buildSharedFlags(True)],
+        help="catalogue a numbered camera SD card",
+    )
+    cameraInventory.add_argument(
+        "inventorySource",
+        nargs="?",
+        metavar="SOURCE",
+        help="mounted card or copied card directory",
+    )
+    cameraInventory.add_argument(
+        "--card",
+        type=int,
+        help="numeric ID assigned to this SD card (required on first scan)",
+    )
+    cameraInventory.add_argument(
+        "--reassign",
+        action="store_true",
+        help="allow --card to replace an existing on-card ID (requires --confirm)",
+    )
+    cameraInventory.add_argument(
+        "--brand",
+        help="SD card brand to store on the card, for example SanDisk",
+    )
     grokParser = subparsers.add_parser(
         "grok",
         parents=[_buildSharedFlags(True)],
-        help="generate, list, and download Imagine media through the xAI API",
+        help="import a Firefox session, reset it, or scan Grok Imagine media",
     )
-    grokSub = grokParser.add_subparsers(dest="grokAction", required=True)
-    generateParser = grokSub.add_parser(
-        "generate",
-        parents=[_buildSharedFlags(True)],
-        help="generate an image or video and persist it with storage_options",
+    grokActions = grokParser.add_mutually_exclusive_group(required=True)
+    grokActions.add_argument(
+        "--import-firefox",
+        dest="import_firefox_session",
+        action="store_true",
+        help="import the grok.com session from Firefox",
     )
-    generateParser.add_argument(
-        "prompt",
-        help="text prompt for image or video generation",
+    grokActions.add_argument(
+        "--reset",
+        dest="reset_grok",
+        action="store_true",
+        help="quarantine the saved grok.com session files",
     )
-    generateParser.add_argument(
-        "--kind",
-        choices=("image", "video"),
-        default="image",
-        help="generation kind (default: image)",
-    )
-    generateParser.add_argument(
-        "--filename",
-        help="filename stored in the Files API (default: timestamp plus prompt slug)",
-    )
-    generateParser.add_argument(
-        "--image",
-        help="optional local image path or URL used as a reference",
-    )
-    generateParser.add_argument(
-        "--duration",
-        type=int,
-        default=6,
-        help="video duration in seconds, 1-15 (default: 6)",
-    )
-    grokSub.add_parser(
-        "list",
-        parents=[_buildSharedFlags(True)],
-        help="list stored Imagine images and videos",
-    )
-    downloadParser = grokSub.add_parser(
-        "download",
-        parents=[_buildSharedFlags(True)],
-        help="download stored Imagine media to the local archive",
-    )
-    downloadParser.add_argument(
-        "--file-id",
-        dest="file_id",
-        help="download only this Files API id",
+    grokActions.add_argument(
+        "--scan",
+        dest="grok",
+        action="store_true",
+        help="scan and download this account's generated Imagine media",
     )
     return parser
 
@@ -368,10 +336,6 @@ def _normalizeArguments(args: argparse.Namespace) -> argparse.Namespace:
     elif command == "torrent":
         args.torrent = True
         args.clean = bool(args.clean_names)
-    elif command == "gallery":
-        args.grok = args.galleryAction == "download"
-        args.import_firefox_session = args.galleryAction == "import-session"
-        args.reset_grok = args.galleryAction == "reset-session"
     return args
 
 
@@ -393,16 +357,34 @@ def _validateArguments(
         parser.error("select only one workflow mode")
     if (
         args.command
-        and args.command != "grok"
         and legacyModes
         and args.command
         not in {
             "library",
             "torrent",
-            "gallery",
+            "grok",
         }
     ):
         parser.error("do not combine a canonical command with a legacy mode flag")
+    if args.command == "camera":
+        if getattr(args, "cameraAction", None) == "inventory":
+            cardId = getattr(args, "card", None)
+            inventorySource = getattr(args, "inventorySource", None)
+            if cardId is not None and cardId < 1:
+                parser.error("--card must be a positive integer")
+            if getattr(args, "reassign", False):
+                if not inventorySource:
+                    parser.error("--reassign requires SOURCE")
+                if cardId is None or cardId < 1:
+                    parser.error("--reassign requires --card with the new ID")
+            if not inventorySource and (cardId is None or cardId < 1):
+                parser.error("--card is required when SOURCE is omitted")
+            if inventorySource:
+                sourcePath = Path(inventorySource).expanduser()
+                if not sourcePath.is_dir():
+                    parser.error(f"source directory does not exist: {sourcePath}")
+                args.inventorySource = str(sourcePath)
+        return
     if args.command in {"media", "library", "torrent"}:
         sourcePath = Path(args.source).expanduser()
         if not sourcePath.is_dir():
@@ -440,6 +422,38 @@ def _selectedMode(args: argparse.Namespace) -> str:
     return "process"
 
 
+def _runCameraWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
+    """Run camera-card inventory through the Python application service."""
+
+    from . import constants
+    from .cameraInventory import cameraInventoryRun, cameraInventorySummary
+
+    logger.value("mode", "camera-inventory")
+    source = getattr(args, "inventorySource", None)
+    sourcePath = Path(source) if source else None
+    try:
+        record = cameraInventoryRun(
+            cardId=args.card,
+            source=sourcePath,
+            dryRun=dryRun,
+            databasePath=constants.CAMERA_INVENTORY_DATABASE,
+            reassign=bool(getattr(args, "reassign", False)),
+            brand=getattr(args, "brand", None),
+        )
+    except (RuntimeError, ValueError) as error:
+        logger.error("%s", error)
+        return 1
+    persisted = True if sourcePath is None else not dryRun
+    drawBox(
+        cameraInventorySummary(
+            record,
+            persisted=persisted,
+            databasePath=constants.CAMERA_INVENTORY_DATABASE,
+        )
+    )
+    return 0
+
+
 def _runGalleryWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
     """Run a normalized legacy-gallery action."""
     from .grokGallery import GROK_SESSION_FILE, GrokGallery
@@ -451,33 +465,6 @@ def _runGalleryWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
     except RuntimeError as error:
         logger.error("%s", error)
         return 1
-    return 0
-
-
-def _runGrokWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
-    """Run an official Imagine API action and render its summary."""
-    from .grok import grokCommandRun
-
-    logger.value("mode", "grok")
-    logger.value("grok action", args.grokAction)
-    try:
-        result = grokCommandRun(args, dryRun=dryRun)
-    except RuntimeError as error:
-        logger.error("%s", error)
-        return 1
-    if args.grokAction == "download":
-        drawBox(
-            f"""GROK DOWNLOAD SUMMARY
-Downloaded: {result['downloaded']}
-Skipped:    {result['skipped']}
-Errors:     {result['errors']}
-"""
-        )
-    elif args.grokAction == "list":
-        logger.value("listed files", len(result.get("files", [])))
-    else:
-        logger.value("file id", result.get("fileId") or "(dry-run)")
-        logger.value("filename", result.get("filename"))
     return 0
 
 
@@ -500,11 +487,11 @@ def _runOrganizerWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
         sourceDir=args.source,
         dryRun=dryRun,
         refreshMetadataLibrary=args.refresh_metadata_library,
-        useCurses=args.curses,
+        useCurses=True,
     )
     organizer.tvdbApiKeyPrompt = (
         (lambda: _promptForTvdbApiKey(configPath))
-        if selectedMode == "process" and not (args.non_interactive or args.auto)
+        if selectedMode == "process" and not args.auto
         else None
     )
     if args.auto or selectedMode == "rescan":
@@ -552,7 +539,7 @@ Folder errors:   {cleanStats['errors']}
         organizer.resetLibraryMetadata(target=target)
     else:
         logger.doing("running file organisation mode")
-        organizer.processFiles(interactive=not (args.non_interactive or args.auto))
+        organizer.processFiles(interactive=not args.auto)
     return 0
 
 
@@ -571,10 +558,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     else:
         logger.info("confirm mode, changes will be made")
 
-    if args.reset_grok or args.import_firefox_session or args.grok:
+    command = getattr(args, "command", None)
+    if command == "grok":
         status = _runGalleryWorkflow(args, dryRun)
-    elif getattr(args, "command", None) == "grok":
-        status = _runGrokWorkflow(args, dryRun)
+    elif command == "camera":
+        status = _runCameraWorkflow(args, dryRun)
     else:
         status = _runOrganizerWorkflow(args, dryRun)
     logger.done("organiseMyVideo complete")

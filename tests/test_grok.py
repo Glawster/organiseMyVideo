@@ -225,56 +225,6 @@ def testHelpListsGrokSubcommand(capsys):
     assert "grok" in capsys.readouterr().out
 
 
-def testMainGrokGenerateDryRunDispatches(monkeypatch):
-    monkeypatch.setenv("XAI_API_KEY", "test-key")
-    archive = MagicMock()
-    archive.imageGenerate.return_value = {
-        "fileId": "",
-        "filename": "harbour.jpg",
-    }
-
-    with patch("organiseMyVideo.grok.ImagineArchive", return_value=archive):
-        with patch(
-            "sys.argv",
-            ["organiseMyVideo", "grok", "generate", "a quiet harbour"],
-        ):
-            omv_main.main()
-
-    archive.imageGenerate.assert_called_once()
-    kwargs = archive.imageGenerate.call_args.kwargs
-    assert kwargs["prompt"] == "a quiet harbour"
-
-
-def testMainGrokGenerateConfirmUsesVideoKind():
-    archive = MagicMock()
-    archive.videoGenerate.return_value = {
-        "fileId": "file_clip",
-        "filename": "clip.mp4",
-    }
-
-    with patch("organiseMyVideo.grok.ImagineArchive", return_value=archive):
-        with patch(
-            "sys.argv",
-            [
-                "organiseMyVideo",
-                "--confirm",
-                "grok",
-                "generate",
-                "slow pan",
-                "--kind",
-                "video",
-                "--duration",
-                "10",
-            ],
-        ):
-            omv_main.main()
-
-    archive.videoGenerate.assert_called_once()
-    kwargs = archive.videoGenerate.call_args.kwargs
-    assert kwargs["prompt"] == "slow pan"
-    assert kwargs["duration"] == 10
-
-
 def testGrokCommandRunUnknownAction():
     with pytest.raises(RuntimeError, match="unknown grok action"):
         grokCommandRun(SimpleNamespace(grokAction="explode"), dryRun=True)

@@ -6366,8 +6366,8 @@ def testGrokModuleRemainsImportableForFutureReuse():
     assert hasattr(grok_module, "ImagineArchive")
 
 
-def testMainGrokFlagDownloadsSavedGallery():
-    """--grok downloads this account's generated grok.com Imagine media."""
+def testMainGrokScanDownloadsSavedGallery():
+    """The Grok scan action downloads this account's generated media."""
     gallery = MagicMock()
     gallery.downloadGeneratedMedia.return_value = {
         "assetsFound": 3,
@@ -6377,13 +6377,13 @@ def testMainGrokFlagDownloadsSavedGallery():
     }
 
     with patch("organiseMyVideo.grokGallery.GrokGallery", return_value=gallery):
-        with patch("sys.argv", ["organiseMyVideo", "--grok"]):
+        with patch("sys.argv", ["organiseMyVideo", "grok", "--scan"]):
             omv_main.main()
 
     gallery.downloadGeneratedMedia.assert_called_once()
 
 
-def testMainGrokConfirmAcceptsLongYFlag():
+def testMainGrokScanConfirmAcceptsLongYFlag():
     """--y is accepted as an alias for --confirm."""
     gallery = MagicMock()
     gallery.downloadGeneratedMedia.return_value = {
@@ -6394,19 +6394,19 @@ def testMainGrokConfirmAcceptsLongYFlag():
     }
 
     with patch("organiseMyVideo.grokGallery.GrokGallery", return_value=gallery):
-        with patch("sys.argv", ["organiseMyVideo", "--grok", "--y"]):
+        with patch("sys.argv", ["organiseMyVideo", "grok", "--scan", "--y"]):
             omv_main.main()
 
     gallery.downloadGeneratedMedia.assert_called_once()
 
 
-def testMainImportFirefoxSessionFlag():
-    """--import-firefox-session imports grok.com cookies from Firefox."""
+def testMainGrokImportFirefoxOption():
+    """The Grok import option imports grok.com cookies from Firefox."""
     gallery = MagicMock()
     gallery.importFirefoxSession.return_value = True
 
     with patch("organiseMyVideo.grokGallery.GrokGallery", return_value=gallery):
-        with patch("sys.argv", ["organiseMyVideo", "--import-firefox-session"]):
+        with patch("sys.argv", ["organiseMyVideo", "grok", "--import-firefox"]):
             omv_main.main()
 
     gallery.importFirefoxSession.assert_called_once()
@@ -6440,7 +6440,7 @@ def testMainLogsStartupProgressBeforeProcessing(caplog: pytest.LogCaptureFixture
     assert "running file organisation mode..." in caplog.text
 
 
-def testMainPassesRefreshAndNoCursesFlagsToOrganizer():
+def testMainPassesRefreshFlagToOrganizer():
     organizerInstance = MagicMock()
 
     with patch(
@@ -6453,7 +6453,6 @@ def testMainPassesRefreshAndNoCursesFlagsToOrganizer():
                 "--source",
                 "/tmp/source",
                 "--refresh",
-                "--no-curses",
             ],
         ):
             omv_main.main()
@@ -6462,7 +6461,7 @@ def testMainPassesRefreshAndNoCursesFlagsToOrganizer():
         sourceDir="/tmp/source",
         dryRun=True,
         refreshMetadataLibrary=True,
-        useCurses=False,
+        useCurses=True,
     )
 
 

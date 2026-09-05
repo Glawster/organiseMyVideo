@@ -20,8 +20,10 @@ _DRY_RUN_PREFIX = "[] "
 # Ensure the project root is importable during test discovery (VS Code can invoke
 # pytest from a path alias where root isn't first on sys.path).
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+_TESTS_DIR = Path(__file__).resolve().parent
+for _path in (_PROJECT_ROOT, _TESTS_DIR):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
 
 class _StubLogger:
@@ -122,9 +124,11 @@ _stubOrganiseMyProjects()
 def applicationStateIsolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep application configuration and cache writes inside the test sandbox."""
     from organiseMyVideo import (
+        cameraInventory,
         constants,
         grok,
         grokGallery,
+        mediaCatalogue,
         metadata,
         video,
         videoRescan,
@@ -134,6 +138,8 @@ def applicationStateIsolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     configDir = tmp_path / "config"
     applicationPaths = {
         "APP_CONFIG_FILE": configDir / "config.json",
+        "CAMERA_INVENTORY_DATABASE": tmp_path / "state" / "mediaCatalogue.sqlite",
+        "MEDIA_CATALOGUE_DATABASE": tmp_path / "state" / "mediaCatalogue.sqlite",
         "GROK_CATALOG_FILE": configDir / "grokCatalog.json",
         "GROK_CREDENTIALS_FILE": configDir / "grokCredentials.json",
         "GROK_DOWNLOAD_DIR": tmp_path / "downloads" / "Grok",
@@ -142,6 +148,8 @@ def applicationStateIsolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     }
     modulesByPath = {
         "APP_CONFIG_FILE": (constants, applicationMain, video, videoRescan),
+        "CAMERA_INVENTORY_DATABASE": (constants, cameraInventory),
+        "MEDIA_CATALOGUE_DATABASE": (constants, mediaCatalogue),
         "GROK_CATALOG_FILE": (constants, grok),
         "GROK_CREDENTIALS_FILE": (constants, grokGallery),
         "GROK_DOWNLOAD_DIR": (constants, grok, grokGallery),

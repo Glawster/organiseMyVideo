@@ -19,6 +19,7 @@ The initial archive destinations are:
 ```text
 /mnt/myVideo/Video/GoPro/YYYY/MM/DD/
 /mnt/myVideo/Video/Drone/YYYY/MM/DD/
+/mnt/myVideo/Video/Dashcam/YYYY/MM/DD/
 ```
 
 New GoPro and DJI imports use the same nested capture-date convention. For
@@ -42,10 +43,32 @@ DCIM/
 │   ├── GH010111.MP4
 │   ├── GL010111.LRV
 │   └── GH010111.THM
-└── 101MEDIA/
-    ├── DJI_0021.MP4
-    └── DJI_0021.SRT
+├── 101MEDIA/
+│   ├── DJI_0021.MP4
+│   └── DJI_0021.SRT
+└── Movie/
+    ├── 2024_0418_090000_0001F.MP4
+    └── Parking/
+        └── 2024_0418_100000_0002F.MP4
 ```
+
+Dash-cam cards also appear as BlackVue-style `Record/YYYYMMDD_HHMMSS_NF.mp4`
+trees, Garmin-style `DCIM/100EVENT` folders, and Transcend DrivePro 250 cards:
+
+```text
+DP250/
+├── N_VIDEO/
+│   └── 2026_0513_120237_012.mp4
+├── P_VIDEO/
+├── EVENT/
+└── SYSTEM/
+```
+
+The clip name is `YYYY_MMDD_HHMMSS_sequence.mp4`. Older DrivePro cards may
+use hyphenated `N-Video` folders and `.MOV` / `.NMEA` files.
+
+Inventory classifies those as `dashcam` and skips `SYSTEM`. Import stores
+originals under `Dashcam/YYYY/MM/DD/`.
 
 GoPro `.LRV` files are low-resolution previews and `.THM` files are
 thumbnails. They are not archive originals and will not be imported by
@@ -76,10 +99,10 @@ A proposed package decomposition is:
 ```text
 organiseMyVideo/
 ├── camera.py
-├── camera_detect.py
-├── camera_metadata.py
-├── camera_plan.py
-└── camera_import.py
+├── cameraDetect.py
+├── cameraMetadata.py
+├── cameraPlan.py
+└── cameraImport.py
 ```
 
 The public Python surface should use typed records such as `CameraAsset`,
@@ -89,6 +112,12 @@ routed through the project's central filesystem-safety boundary when that
 boundary is delivered.
 
 ## Command-line interface
+
+Card cataloguing against a numeric SD-card ID is a separate action,
+`camera inventory`, described in
+[Camera card inventory](cameraInventory.md) and
+[REQ-009](../project/requirements/features/009-cameraCardInventory.md). Import
+does not write that catalogue, and inventory does not copy archive files.
 
 The canonical interface uses nested object/action subcommands:
 
@@ -139,20 +168,22 @@ and root README must be updated when the command is implemented.
 The importer will:
 
 1. Accept the card root, `DCIM`, or an individual supported camera directory.
-2. Recognise `*GOPRO` directories and DJI-named media in `*MEDIA` directories.
+2. Recognise `*GOPRO` directories, DJI-named media in `*MEDIA` directories,
+   and dash-cam trees such as `Movie`, `Record`, and `100EVENT`.
 3. Identify capture date from embedded metadata, with a clearly reported
    fallback to filesystem time.
 4. Preserve original camera filenames.
 5. Put GoPro originals into the matching `GoPro/YYYY/MM/DD/` directory.
 6. Put DJI originals and same-stem SRT files into the matching
    `Drone/YYYY/MM/DD/` directory.
-7. Group GoPro chapters without joining or renaming the original MP4 files.
-8. Exclude LRV and THM helpers unless `--include-gopro-companions` is supplied.
-9. Report unrecognised files without importing or deleting them.
+7. Put dash-cam originals into the matching `Dashcam/YYYY/MM/DD/` directory.
+8. Group GoPro chapters without joining or renaming the original MP4 files.
+9. Exclude LRV and THM helpers unless `--include-gopro-companions` is supplied.
+10. Report unrecognised files without importing or deleting them.
 
-An asset with no trustworthy date is planned into a clearly identified
-undated location and generates a warning. The exact undated directory name
-must be settled in the camera-import requirement before implementation.
+An asset with no trustworthy date is not imported or migrated automatically.
+It remains at its source and is reported for manual review. This preserves the
+required `YYYY/MM/DD` archive structure without inventing a capture date.
 
 ## Duplicate and collision policy
 
@@ -237,7 +268,8 @@ The existing application configuration may be extended as follows:
 {
   "storage_locations": {
     "gopro": "/mnt/myVideo/Video/GoPro",
-    "drone": "/mnt/myVideo/Video/Drone"
+    "drone": "/mnt/myVideo/Video/Drone",
+    "dashcam": "/mnt/myVideo/Video/Dashcam"
   },
   "camera_import": {
     "include_gopro_companions": false,

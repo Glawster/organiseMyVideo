@@ -1055,6 +1055,13 @@ class VideoRescanMixin:
             metadataVideoDirs = videoDirs if target in {"both", "tv"} else []
             self._prepareMetadataLibrary(metadataMovieDirs, metadataVideoDirs)
 
+        self._mediaCatalogueReplace(
+            movieDirs,
+            videoDirs,
+            replaceMovies=target in {"both", "movies"},
+            replaceTv=target in {"both", "tv"},
+        )
+
         emptyStats = {"renamed": 0, "skipped": 0, "errors": 0}
         movieStats = dict(emptyStats)
         tvStats = {"renamed": 0, "skipped": 0, "errors": 0}
@@ -1072,3 +1079,25 @@ class VideoRescanMixin:
             self._writeSummaryReport()
 
         return {"movies": movieStats, "tv": tvStats}
+
+    def _mediaCatalogueReplace(
+        self,
+        movieDirs: list[Path],
+        videoDirs: list[Path],
+        *,
+        replaceMovies: bool = True,
+        replaceTv: bool = True,
+    ) -> None:
+        """Refresh SQLite movie/TV rows from the scanned storage roots."""
+
+        from . import constants
+        from .mediaCatalogue import MediaCatalogue
+
+        MediaCatalogue(
+            databasePath=constants.MEDIA_CATALOGUE_DATABASE
+        ).catalogueReplaceFromStorage(
+            movieDirs,
+            videoDirs,
+            replaceMovies=replaceMovies,
+            replaceTv=replaceTv,
+        )

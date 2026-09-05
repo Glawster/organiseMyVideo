@@ -1,10 +1,12 @@
 # Imagine API archive
 
-`organiseMyVideo grok` generates images and videos through the official xAI
-Imagine API, always persists them with `storage_options`, then lists and
-downloads those stored files.
+The `organiseMyVideo.grok.ImagineArchive` Python service generates images and
+videos through the official xAI Imagine API, persists them with
+`storage_options`, and can list or download those stored files. These API
+operations are module functionality rather than public CLI commands.
 
-To retrieve images you already created on grok.com, use `--grok`. It imports
+To retrieve images you already created on grok.com, use
+`organiseMyVideo grok --scan`. It imports
 your Firefox grok.com session and lists **this login's** Imagine workspace
 assets and Imagine conversations. The public explore feed is not downloaded.
 
@@ -20,22 +22,20 @@ Files API can list and download the asset later. It only covers media generated
 through this application. It does not retrieve images or videos created earlier
 in the grok.com gallery.
 
-## Commands
+## Python API
 
-Generate is a paid API call. Dry-run is the default; add `--confirm` to execute.
+Generation is a paid API call. Constructing the service with `dryRun=True` is
+the safe default; pass `dryRun=False` to execute downloads or generation.
 
-```bash
-python -m organiseMyVideo grok generate "a quiet harbour at dusk"
-python -m organiseMyVideo grok generate "a quiet harbour at dusk" --confirm
-python -m organiseMyVideo grok generate "slow pan across the harbour" --kind video --confirm
-python -m organiseMyVideo grok generate "slow pan" --kind video --image ./harbour.jpg --confirm
-python -m organiseMyVideo grok list
-python -m organiseMyVideo grok download
-python -m organiseMyVideo grok download --confirm
-python -m organiseMyVideo grok download --file-id file_abc --confirm
+```python
+from organiseMyVideo.grok import ImagineArchive
+
+archive = ImagineArchive(dryRun=False)
+image = archive.imageGenerate("a quiet harbour at dusk")
+video = archive.videoGenerate("slow pan across the harbour", duration=10)
+files = archive.fileList()
+stats = archive.fileDownload()
 ```
-
-`--confirm` may be placed before or after `grok`.
 
 ## Local files
 
@@ -44,7 +44,7 @@ python -m organiseMyVideo grok download --file-id file_abc --confirm
 | `~/.config/organiseMyVideo/grokCatalog.json` | Prompt, model, kind, and `file_id` for generations from this app |
 | `~/Downloads/Grok/` | Downloaded images and videos |
 
-`grok list` reads the Files API and shows stored image and video files. Other
+`fileList()` reads the Files API and returns stored image and video files. Other
 file types in the same xAI team are omitted.
 
 ## Models

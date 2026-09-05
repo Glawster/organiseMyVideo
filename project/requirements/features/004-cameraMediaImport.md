@@ -33,10 +33,11 @@ The agreed behaviour and development sequence are maintained in
 - Add `python -m organiseMyVideo camera migrate` as the canonical dry-run-first
   action for bringing existing GoPro and Drone media into the new hierarchy.
 - Accept a card root, DCIM directory, or supported camera media directory.
-- Detect mixed GoPro and DJI camera content.
+- Detect mixed GoPro, DJI, and dash-cam camera content.
 - Preserve original MP4 and JPG filenames.
 - Store GoPro originals under `GoPro/YYYY/MM/DD/`.
 - Store DJI originals under `Drone/YYYY/MM/DD/`.
+- Store dash-cam originals under `Dashcam/YYYY/MM/DD/`.
 - Preserve same-stem DJI SRT files beside their MP4.
 - Exclude GoPro LRV and THM helper files by default and support an explicit
   option to retain them.
@@ -149,3 +150,4 @@ The agreed behaviour and development sequence are maintained in
   both GoPro and DJI imports.
 - 2026-09-02: changed — include a separately planned, confirmed, and verified
   migration of current GoPro and Drone files into the new hierarchy.
+- 2026-09-04: changed — include dash-cam originals under `Dashcam/YYYY/MM/DD/`.

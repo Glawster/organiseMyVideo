@@ -1,5 +1,5 @@
 name: organiseMyVideo
-purpose: Safely organise staged media into structured movie, television, and music libraries.
+purpose: Safely organise and catalogue staged, library, camera, and generated media.
 audience:
   - Maintainers of the configured media library
   - Operators running organisation, cleanup, and rescan workflows
@@ -9,11 +9,13 @@ scope:
   - Movie, television, music, torrent, and library-rescan workflows
   - A Qt desktop interface for browsing supported media libraries
   - Official xAI Imagine generation, listing, and download via storage_options
-  - Verified GoPro and DJI camera-media import into the existing archives
+  - Firefox-session retrieval of the operator's generated grok.com media
+  - Verified GoPro, DJI, and dash-cam media import into the existing archives
+  - Numbered camera-card inventory and a shared SQLite media catalogue
 outOfScope:
   - Media playback and streaming
-  - Download acquisition
-  - grok.com login scraping and consumer-gallery export
+  - General-purpose movie and television download acquisition
+  - Public grok.com explore-feed scraping or third-party gallery export
 risks:
   - Incorrect classification or destination selection can misplace user media
   - Destructive cleanup can remove recoverable source material
@@ -33,7 +35,7 @@ milestones:
     status: Completed
   - id: phase4
     outcome: Centralise safe filesystem behaviour
-    status: ToDo
+    status: Completed
   - id: phase5
     outcome: Refactor by domain without changing behaviour
     status: ToDo
@@ -47,5 +49,5 @@ milestones:
     outcome: Browse supported media libraries through a Qt desktop interface
     status: ToDo
   - id: cameraMediaImport
-    outcome: Import and verify GoPro and DJI originals through Python services
+    outcome: Import and verify GoPro, DJI, and dash-cam originals through Python services
     status: ToDo

@@ -1,6 +1,7 @@
 """Production-path and compatibility tests for the command-line architecture."""
 
 import importlib
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -108,9 +109,129 @@ def testHandledGalleryFailureReturnsNonzeroStatus():
     gallery.downloadGeneratedMedia.side_effect = RuntimeError("gallery unavailable")
 
     with patch("organiseMyVideo.grokGallery.GrokGallery", return_value=gallery):
-        status = applicationMain.main(["gallery", "download"])
+        status = applicationMain.main(["grok", "--scan"])
 
     assert status == 1
+
+
+@pytest.mark.parametrize("removedOption", ["--non-interactive", "--no-curses"])
+def testRemovedInteractionOptionsAreRejected(removedOption):
+    with pytest.raises(SystemExit) as error:
+        applicationMain.main([removedOption])
+
+    assert error.value.code == 2
+
+
+def testGrokRequiresExactlyOneAction():
+    parser = applicationMain.buildParser()
+
+    with pytest.raises(SystemExit) as missingAction:
+        parser.parse_args(["grok"])
+    with pytest.raises(SystemExit) as conflictingActions:
+        parser.parse_args(["grok", "--scan", "--reset"])
+
+    assert missingAction.value.code == 2
+    assert conflictingActions.value.code == 2
+
+
+def testGrokResetDispatchesToGalleryService():
+    gallery = MagicMock()
+    gallery.resetGrokConfig.return_value = {"deleted": [], "notFound": []}
+
+    with patch("organiseMyVideo.grokGallery.GrokGallery", return_value=gallery):
+        status = applicationMain.main(["grok", "--reset", "--confirm"])
+
+    assert status == 0
+    gallery.resetGrokConfig.assert_called_once_with()
+
+
+def testCameraHelpListsInventoryAction(capsys):
+    with pytest.raises(SystemExit) as helpExit:
+        applicationMain.main(["camera", "--help"])
+
+    assert helpExit.value.code == 0
+    assert "inventory" in capsys.readouterr().out
+
+
+def testCameraInventoryReassignRequiresCardAndSource(tmp_path: Path):
+    with pytest.raises(SystemExit) as noCard:
+        applicationMain.main(["camera", "inventory", str(tmp_path), "--reassign"])
+    with pytest.raises(SystemExit) as noSource:
+        applicationMain.main(["camera", "inventory", "--reassign", "--card", "5"])
+
+    assert noCard.value.code == 2
+    assert noSource.value.code == 2
+
+
+def testCameraInventoryRequiresPositiveCardId(tmp_path: Path):
+    with pytest.raises(SystemExit) as missingCardOnShow:
+        applicationMain.main(["camera", "inventory"])
+    with pytest.raises(SystemExit) as zeroCard:
+        applicationMain.main(["camera", "inventory", str(tmp_path), "--card", "0"])
+    unlabeledStatus = applicationMain.main(["camera", "inventory", str(tmp_path)])
+
+    assert missingCardOnShow.value.code == 2
+    assert zeroCard.value.code == 2
+    assert unlabeledStatus == 1
+
+
+def testCameraInventoryMissingSourceFailsBeforeScan():
+    with pytest.raises(SystemExit) as error:
+        applicationMain.main(
+            ["camera", "inventory", "/definitely/missing-card", "--card", "12"]
+        )
+
+    assert error.value.code == 2
+
+
+def testCameraInventoryDryRunDoesNotWriteDatabase(tmp_path: Path):
+    from cameraFixtures import cardTreeBuild
+    from organiseMyVideo import constants
+
+    card = cardTreeBuild(tmp_path / "card")
+
+    status = applicationMain.main(["camera", "inventory", str(card), "--card", "12"])
+
+    assert status == 0
+    assert not constants.CAMERA_INVENTORY_DATABASE.exists()
+
+
+def testCameraInventoryConfirmPersistsAndShowReadsLatest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from cameraFixtures import cardTreeBuild
+    from organiseMyVideo import constants
+    from organiseMyVideo.cameraInventory import CameraInventory
+
+    card = cardTreeBuild(tmp_path / "card")
+    monkeypatch.setattr(
+        CameraInventory,
+        "_contentDescribeLive",
+        lambda self, paths: "harbour footage",
+    )
+
+    confirmStatus = applicationMain.main(
+        ["camera", "inventory", str(card), "--card", "12", "--confirm"]
+    )
+    showStatus = applicationMain.main(["camera", "inventory", "--card", "12"])
+
+    assert confirmStatus == 0
+    assert showStatus == 0
+    assert constants.CAMERA_INVENTORY_DATABASE.is_file()
+    stored = CameraInventory(
+        dryRun=True, databasePath=constants.CAMERA_INVENTORY_DATABASE
+    ).inventoryShow(12)
+    assert stored is not None
+    assert stored.contentSummary == "harbour footage"
+    from organiseMyVideo.constants import cameraCardLabelFilename
+
+    label = card / cameraCardLabelFilename(12)
+    assert label.is_file()
+    payload = json.loads(label.read_text(encoding="utf-8"))
+    assert payload["cardId"] == 12
+    assert "Free space:" in payload["summary"]
+    omitCardStatus = applicationMain.main(["camera", "inventory", str(card)])
+    assert omitCardStatus == 0
 
 
 def testPackageImportDoesNotMutateMedia(tmp_path: Path):

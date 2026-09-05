@@ -2,30 +2,21 @@
 
 ## Requirement
 
-[REQ-007: Central filesystem safety](requirements/features/007-filesystemSafety.md)
+No requirement is currently in delivery. The next planned product increment is
+[REQ-004: Camera media import](requirements/features/004-cameraMediaImport.md).
 
 ## Objective
 
-Deliver Phase 4 of the standards-adoption roadmap through one recoverable
-filesystem mutation boundary.
+Implement camera import and existing-archive migration in independently
+verifiable stages, starting with the typed dry-run planner.
 
 ## Status
 
-Completed — the operation service, workflow migration, recoverable quarantine,
-failure tests, documentation, and production-path verification are delivered.
+Ready to start after the current feature branch is reviewed and integrated.
+REQ-004 remains `ToDo` until implementation actually begins.
 
-## Verification target
+## Entry checks
 
-- Dry-run immutability and collision rejection
-- Atomic writes/copies and verified cross-filesystem moves
-- Recoverable cleanup quarantine
-- Migrated production mutation paths
-- Full pytest, hook, and direct-mutation audit
-
-## Verification result
-
-- `pytest -q`: 359 passed
-- `pre-commit run --all-files`: passed
-- `git diff --check`: passed
-- Direct-mutation audit: boundary internals plus the documented temporary
-  Firefox cookie-database copy/cleanup exception only
+- Phase 4 filesystem safety is completed.
+- Camera inventory and metadata readers are available for reuse.
+- Files without a trustworthy migration date remain in place for manual review.

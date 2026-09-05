@@ -63,3 +63,4 @@ subcommand prevents camera filenames from entering movie/TV classification.
 ## Related requirements
 
 - [REQ-004: Camera media import](../requirements/features/004-cameraMediaImport.md)
+- [REQ-009: Camera card inventory](../requirements/features/009-cameraCardInventory.md)

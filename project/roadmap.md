@@ -18,10 +18,14 @@ not itself a substitute for acceptance evidence.
 
 ## Current priority
 
+The next product-delivery priority is REQ-004 camera media import, beginning
+with its typed, non-mutating planner and then adding verified import and archive
+migration. Phase 5 remains the next internal standards-adoption phase and may
+be scheduled separately without obscuring the camera-import commitment.
+
 REQ-007 completed Phase 4 with a central filesystem-operation boundary,
 source-filesystem quarantine, 30-day purge eligibility, and verified
-cross-filesystem recovery rules. Phase 5 is now the next standards-adoption
-priority. REQ-006 completed Phase 3 with
+cross-filesystem recovery rules. REQ-006 completed Phase 3 with
 established shared logging, media-safe imports, decomposed CLI orchestration,
 canonical commands, legacy compatibility, universal options, validation, and
 reliable statuses.
@@ -30,13 +34,22 @@ the console-script entry point, declared dependencies, Conda setup, consolidated
 pytest/pre-commit configuration, and corrected ignore rules.
 REQ-002 captures the Qt media-library browser as a separate product outcome;
 it remains `ToDo` pending its open product decisions and ADR-004.
-REQ-003 captures the official Imagine API archive (`grok generate|list|download`)
-and replaces the inactive grok.com scraper.
-REQ-004 captures the agreed GoPro and DJI camera-media importer as a separate
-product outcome using Python services and a `camera import` subcommand.
+REQ-003 captures the official Imagine API archive as a Python service. The
+Firefox-backed `grok --scan` workflow separately retrieves the operator's own
+grok.com generated media.
+REQ-004 captures the agreed GoPro, DJI, and dash-cam media importer as a
+separate product outcome using Python services and a `camera import`
+subcommand.
+REQ-009 catalogues numbered SD cards through `camera inventory` and SQLite
+local-state snapshots; it does not import media.
+REQ-010 stores movies, TV, and cards in one SQLite catalogue that the UI
+reads and that scans update.
+REQ-011 adds dash-cam cards to the same inventory routine as GoPro and DJI.
+REQ-014 indexes `/mnt/myVideo/Video` as home video, including GoPro and
+Drone. REQ-015 inventories USB thumb drives in the same numbered volume
+list.
 
 ## Deferred decisions
 
-- Phase 3: duration and removal criteria for legacy CLI flags.
 - Phase 4: a future purge command and its permanent-deletion safeguards.
 - Phase 7: ownership of `rugbyAudit.py` and the root XML artifact.
