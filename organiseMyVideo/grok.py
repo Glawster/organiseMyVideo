@@ -11,8 +11,6 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
 
-from organiseMyProjects.logUtils import getLogger  # type: ignore
-
 from .constants import (
     GROK_CATALOG_FILE,
     GROK_DOWNLOAD_DIR,
@@ -20,6 +18,8 @@ from .constants import (
     GROK_MEDIA_EXTENSIONS,
     GROK_VIDEO_MODEL,
 )
+from .filesystemOperations import FilesystemOperations
+from organiseMyProjects.logUtils import getLogger  # type: ignore
 
 logger = getLogger()
 
@@ -60,6 +60,8 @@ class ImagineArchive:
         self.catalogPath = Path(catalogPath) if catalogPath else GROK_CATALOG_FILE
         self.downloadDir = Path(downloadDir) if downloadDir else GROK_DOWNLOAD_DIR
         self.pageSize = pageSize
+        self.filesystem = FilesystemOperations(dryRun=dryRun)
+        self.stateFilesystem = FilesystemOperations(dryRun=False)
 
     ## download
 
@@ -84,9 +86,6 @@ class ImagineArchive:
         logger.value("download directory", self.downloadDir)
         logger.value("files", len(records))
 
-        if not self.dryRun:
-            self.downloadDir.mkdir(parents=True, exist_ok=True)
-
         client = None if self.dryRun else self._clientGet()
         for record in records:
             dest = self._downloadDestination(record)
@@ -101,7 +100,7 @@ class ImagineArchive:
                 continue
 
             try:
-                dest.write_bytes(client.files.content(record["fileId"]))
+                self.filesystem.writeBytes(dest, client.files.content(record["fileId"]))
                 self._catalogLocalPathUpdate(record["fileId"], dest)
                 stats["downloaded"] += 1
             except Exception as error:
@@ -204,7 +203,9 @@ class ImagineArchive:
         try:
             loaded = json.loads(self.catalogPath.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:
-            logger.warning("could not read grok catalog %s: %s", self.catalogPath, error)
+            logger.warning(
+                "could not read grok catalog %s: %s", self.catalogPath, error
+            )
             return {"version": 1, "items": []}
         if not isinstance(loaded, dict):
             return {"version": 1, "items": []}
@@ -234,10 +235,11 @@ class ImagineArchive:
 
     def _catalogSave(self, catalog: dict) -> None:
         """Write *catalog* JSON to disk."""
-        self.catalogPath.parent.mkdir(parents=True, exist_ok=True)
-        self.catalogPath.write_text(
+        self.stateFilesystem.writeText(
+            self.catalogPath,
             json.dumps(catalog, indent=2, sort_keys=True),
             encoding="utf-8",
+            stateKind="application-state",
         )
 
     ## client
@@ -289,7 +291,9 @@ class ImagineArchive:
 
         model = GROK_IMAGE_MODEL if kind == "image" else GROK_VIDEO_MODEL
         suffix = ".jpg" if kind == "image" else ".mp4"
-        storedName = filename.strip() if filename else _filenameFromPrompt(cleanedPrompt, suffix)
+        storedName = (
+            filename.strip() if filename else _filenameFromPrompt(cleanedPrompt, suffix)
+        )
         record = {
             "fileId": "",
             "filename": storedName,
@@ -337,7 +341,9 @@ class ImagineArchive:
         if storageError:
             raise RuntimeError(f"imagine storage failed: {storageError}")
         fileOutput = getattr(response, "file_output", None)
-        fileId = getattr(fileOutput, "file_id", None) if fileOutput is not None else None
+        fileId = (
+            getattr(fileOutput, "file_id", None) if fileOutput is not None else None
+        )
         if not fileId:
             raise RuntimeError(
                 "generation succeeded but no file_output was returned; "
@@ -413,9 +419,7 @@ def _fileRecord(item: Any) -> dict:
     if sizeBytes is None:
         sizeBytes = getattr(item, "bytes", 0) or 0
     contentType = (
-        getattr(item, "content_type", None)
-        or getattr(item, "mime_type", None)
-        or ""
+        getattr(item, "content_type", None) or getattr(item, "mime_type", None) or ""
     )
     createdAt = getattr(item, "created_at", None)
     return {

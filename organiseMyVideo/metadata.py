@@ -10,16 +10,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
-from organiseMyProjects.logUtils import getLogger  # type: ignore
-
 from .constants import (
     METADATA_LIBRARY_FILE,
     TMDB_API_BASE_URL,
     TMDB_IMAGE_BASE_URL,
     TVDB_API_BASE_URL,
 )
+from organiseMyProjects.logUtils import getLogger  # type: ignore
 
 logger = getLogger()
+
 _METADATA_SCAN_PLACEHOLDER_FILENAME = "__metadata_scan__.mkv"
 _METADATA_SCAN_SUFFIX = Path(_METADATA_SCAN_PLACEHOLDER_FILENAME).suffix
 _METADATA_LIBRARY_LOG_CONTINUATION_PREFIX = " "
@@ -142,10 +142,11 @@ class MetadataMixin:
         """
         library = self._loadMetadataLibrary()
         libraryPath = self._getMetadataLibraryPath()
-        libraryPath.parent.mkdir(parents=True, exist_ok=True)
-        libraryPath.write_text(
+        self.stateFilesystem.writeText(
+            libraryPath,
             json.dumps(library, indent=2, sort_keys=True),
             encoding="utf-8",
+            stateKind="application-state",
         )
         self._metadataLibraryLoadState = _METADATA_LIBRARY_STATE_READY
 
@@ -1245,8 +1246,7 @@ class MetadataMixin:
                 if len(raw) > _MAX_ARTWORK_SIZE_BYTES:
                     logger.warning("artwork response too large from %s", url)
                     return False
-                destPath.parent.mkdir(parents=True, exist_ok=True)
-                destPath.write_bytes(raw)
+                self.filesystem.writeBytes(destPath, raw, stateKind="metadata")
                 return True
         except (urllib.error.URLError, urllib.error.HTTPError, OSError) as error:
             logger.warning("artwork download failed for %s: %s", url, error)

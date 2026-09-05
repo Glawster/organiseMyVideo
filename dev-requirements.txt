@@ -1,10 +1,5 @@
 black
-pytest
+build
 pre-commit
-
-# OMP-MANAGED-BEGIN
-black
 pytest
-pre-commit
 ruff
-# OMP-MANAGED-END

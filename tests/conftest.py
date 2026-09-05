@@ -20,8 +20,10 @@ _DRY_RUN_PREFIX = "[] "
 # Ensure the project root is importable during test discovery (VS Code can invoke
 # pytest from a path alias where root isn't first on sys.path).
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+_TESTS_DIR = Path(__file__).resolve().parent
+for _path in (_PROJECT_ROOT, _TESTS_DIR):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
 
 class _StubLogger:
@@ -31,6 +33,18 @@ class _StubLogger:
         self, name: str = "OrganiseMyTool", dryRun: bool = False, **kwargs
     ) -> None:
         self._log = logging.getLogger(name)
+        self._log.setLevel(kwargs.get("level", logging.INFO))
+        if kwargs.get("includeConsole") and not any(
+            type(handler) is logging.StreamHandler for handler in self._log.handlers
+        ):
+            handler = logging.StreamHandler()
+            handler.setFormatter(
+                logging.Formatter(
+                    "%(asctime)s - %(levelname)s - %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S",
+                )
+            )
+            self._log.addHandler(handler)
         self._prefix = _DRY_RUN_PREFIX if dryRun else ""
         # Expose .logger so the console-handler workaround in main() can access
         # the underlying logging.Logger via logger.logger.handlers
@@ -109,12 +123,23 @@ _stubOrganiseMyProjects()
 @pytest.fixture(autouse=True)
 def applicationStateIsolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep application configuration and cache writes inside the test sandbox."""
-    from organiseMyVideo import constants, grok, grokGallery, metadata, video, video_rescan
+    from organiseMyVideo import (
+        cameraInventory,
+        constants,
+        grok,
+        grokGallery,
+        mediaCatalogue,
+        metadata,
+        video,
+        videoRescan,
+    )
     from organiseMyVideo import __main__ as applicationMain
 
     configDir = tmp_path / "config"
     applicationPaths = {
         "APP_CONFIG_FILE": configDir / "config.json",
+        "CAMERA_INVENTORY_DATABASE": tmp_path / "state" / "mediaCatalogue.sqlite",
+        "MEDIA_CATALOGUE_DATABASE": tmp_path / "state" / "mediaCatalogue.sqlite",
         "GROK_CATALOG_FILE": configDir / "grokCatalog.json",
         "GROK_CREDENTIALS_FILE": configDir / "grokCredentials.json",
         "GROK_DOWNLOAD_DIR": tmp_path / "downloads" / "Grok",
@@ -122,7 +147,9 @@ def applicationStateIsolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
         "METADATA_LIBRARY_FILE": configDir / "metadataLibrary.json",
     }
     modulesByPath = {
-        "APP_CONFIG_FILE": (constants, applicationMain, video, video_rescan),
+        "APP_CONFIG_FILE": (constants, applicationMain, video, videoRescan),
+        "CAMERA_INVENTORY_DATABASE": (constants, cameraInventory),
+        "MEDIA_CATALOGUE_DATABASE": (constants, mediaCatalogue),
         "GROK_CATALOG_FILE": (constants, grok),
         "GROK_CREDENTIALS_FILE": (constants, grokGallery),
         "GROK_DOWNLOAD_DIR": (constants, grok, grokGallery),

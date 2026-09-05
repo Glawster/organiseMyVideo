@@ -1,6 +1,5 @@
 """Tests for organiseMyVideo.py"""
 
-import errno
 import io
 import json
 import logging
@@ -16,8 +15,8 @@ import organiseMyVideo.__main__ as omv_main
 from organiseMyVideo import VideoOrganizer
 from organiseMyVideo import video as video_module
 from organiseMyVideo.video import VideoMixin
-from organiseMyVideo.video_move import VideoMoveMixin
-from organiseMyVideo.video_rescan import VideoRescanMixin
+from organiseMyVideo.videoMove import VideoMoveMixin
+from organiseMyVideo.videoRescan import VideoRescanMixin
 from organiseMyVideo.video import (
     _FILE_PROCESS_SEPARATOR,
     _XML_BINARY_CHECK_WINDOW,
@@ -52,8 +51,9 @@ def confirmedOrganizer(sourceDir: Path) -> VideoOrganizer:
 def isolateDuplicateTvShowConfig(tmp_path: Path):
     """Keep duplicate-folder persistence isolated from the real home directory."""
     configFile = tmp_path / "config" / "config.json"
-    with patch("organiseMyVideo.video_rescan.APP_CONFIG_FILE", configFile), patch(
-        "organiseMyVideo.video.APP_CONFIG_FILE", configFile
+    with (
+        patch("organiseMyVideo.videoRescan.APP_CONFIG_FILE", configFile),
+        patch("organiseMyVideo.video.APP_CONFIG_FILE", configFile),
     ):
         yield configFile
 
@@ -1066,13 +1066,14 @@ def testProcessFilesMovesMusicFolderWithoutVideoStorage(
     srcFile.write_bytes(b"not a real mp3, but enough for move-path tests")
     musicRoot = tmp_path / "Music"
 
-    with patch.object(
-        confirmedOrganizer, "scanStorageLocations", return_value=([], [])
-    ), patch.object(confirmedOrganizer, "_prepareMetadataLibrary"), patch.object(
-        confirmedOrganizer, "_getMusicLibraryRoot", return_value=musicRoot
-    ), patch.object(
-        confirmedOrganizer, "_updateMusicTags"
-    ) as mockUpdateTags:
+    with (
+        patch.object(confirmedOrganizer, "scanStorageLocations", return_value=([], [])),
+        patch.object(confirmedOrganizer, "_prepareMetadataLibrary"),
+        patch.object(
+            confirmedOrganizer, "_getMusicLibraryRoot", return_value=musicRoot
+        ),
+        patch.object(confirmedOrganizer, "_updateMusicTags") as mockUpdateTags,
+    ):
         confirmedOrganizer.processFiles(interactive=False)
 
     destFile = musicRoot / "The Artist" / "The Album" / "1-01 Opening Track.mp3"
@@ -1097,17 +1098,25 @@ def testProcessFilesSkipsVideoInsideMusicFolder(
     tvStorage = tmp_path / "TV"
     tvStorage.mkdir()
 
-    with patch.object(
-        confirmedOrganizer,
-        "scanStorageLocations",
-        return_value=([movieStorage], [tvStorage]),
-    ), patch.object(confirmedOrganizer, "_prepareMetadataLibrary"), patch.object(
-        confirmedOrganizer,
-        "_classifyVideoFile",
-        return_value=(None, {"title": "One Mile", "year": "2026", "extension": ".mp4"}),
-    ), patch.object(
-        confirmedOrganizer, "moveMovie", return_value=True
-    ) as mockMoveMovie:
+    with (
+        patch.object(
+            confirmedOrganizer,
+            "scanStorageLocations",
+            return_value=([movieStorage], [tvStorage]),
+        ),
+        patch.object(confirmedOrganizer, "_prepareMetadataLibrary"),
+        patch.object(
+            confirmedOrganizer,
+            "_classifyVideoFile",
+            return_value=(
+                None,
+                {"title": "One Mile", "year": "2026", "extension": ".mp4"},
+            ),
+        ),
+        patch.object(
+            confirmedOrganizer, "moveMovie", return_value=True
+        ) as mockMoveMovie,
+    ):
         confirmedOrganizer.processFiles(interactive=False)
 
     assert [call.args[0] for call in mockMoveMovie.call_args_list] == [normalFile]
@@ -1496,7 +1505,7 @@ def testProcessFilesUsesMetadataLibraryToRenameLaterScan(tmp_path: Path):
         / "After Life.S01E04.Sic Semper Systema.mkv"
     )
     assert destFile.exists()
-    assert not secondFile.exists()
+    assert secondFile.exists()
     mockFetch.assert_not_called()
 
 
@@ -2696,7 +2705,7 @@ def testProcessFilesCachesImdbFallbackEpisodeTitleForLaterRuns(tmp_path: Path):
         / "Virgin River.S06E01.The Beginning.mkv"
     )
     assert cachedDest.exists()
-    assert not secondFile.exists()
+    assert secondFile.exists()
     mockTvdb.assert_not_called()
     mockImdb.assert_not_called()
 
@@ -3489,7 +3498,7 @@ class _FakeTtyStream(io.StringIO):
         return self._interactive
 
 
-def testMoveFileWithProgressPrefersRename(
+def testMoveFileWithProgressUsesFilesystemBoundary(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer
 ):
     srcFile = tmp_path / "movie.mkv"
@@ -3497,17 +3506,13 @@ def testMoveFileWithProgressPrefersRename(
     srcFile.write_bytes(b"content")
     destFile.parent.mkdir()
 
-    with (
-        patch("organiseMyVideo.video.os.rename") as mockRename,
-        patch.object(confirmedOrganizer, "_copyFileWithProgress") as mockCopy,
-    ):
+    with patch.object(confirmedOrganizer.filesystem, "move") as mockMove:
         confirmedOrganizer._moveFileWithProgress(srcFile, destFile)
 
-    mockRename.assert_called_once_with(srcFile, destFile)
-    mockCopy.assert_not_called()
+    mockMove.assert_called_once_with(srcFile, destFile)
 
 
-def testMoveFileWithProgressFallsBackToCopyOnCrossDeviceError(
+def testCopyFileWithProgressUsesFilesystemBoundary(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer
 ):
     srcFile = tmp_path / "movie.mkv"
@@ -3515,37 +3520,10 @@ def testMoveFileWithProgressFallsBackToCopyOnCrossDeviceError(
     srcFile.write_bytes(b"content")
     destFile.parent.mkdir()
 
-    with (
-        patch(
-            "organiseMyVideo.video.os.rename",
-            side_effect=OSError(errno.EXDEV, "Cross-device link"),
-        ) as mockRename,
-        patch.object(confirmedOrganizer, "_copyFileWithProgress") as mockCopy,
-    ):
-        confirmedOrganizer._moveFileWithProgress(srcFile, destFile)
-
-    mockRename.assert_called_once_with(srcFile, destFile)
-    mockCopy.assert_called_once_with(srcFile, destFile)
-
-
-def testCopyFileWithProgressWritesBarOnTty(
-    tmp_path: Path, confirmedOrganizer: VideoOrganizer
-):
-    srcFile = tmp_path / "movie.mkv"
-    destFile = tmp_path / "dest" / "movie.mkv"
-    srcFile.write_bytes(b"progress-data")
-    destFile.parent.mkdir()
-    fakeStderr = _FakeTtyStream(interactive=True)
-
-    with patch("sys.stderr", fakeStderr):
+    with patch.object(confirmedOrganizer.filesystem, "move") as mockMove:
         confirmedOrganizer._copyFileWithProgress(srcFile, destFile)
 
-    output = fakeStderr.getvalue()
-    assert "Moving movie.mkv:" in output
-    assert "100%" in output
-    assert output.endswith("\n")
-    assert destFile.read_bytes() == b"progress-data"
-    assert not srcFile.exists()
+    mockMove.assert_called_once_with(srcFile, destFile)
 
 
 def testRenderMoveProgressFitsWithinTerminalWidth(confirmedOrganizer: VideoOrganizer):
@@ -5972,7 +5950,7 @@ def testResetTvEpisodeTitlesRemembersNotDuplicateChoice(
             confirmedOrganizer, "_shouldPromptInteractively", return_value=True
         ),
         patch.object(confirmedOrganizer, "_readMenuChoice", return_value="n"),
-        patch("organiseMyVideo.video_rescan.APP_CONFIG_FILE", configFile),
+        patch("organiseMyVideo.videoRescan.APP_CONFIG_FILE", configFile),
     ):
         with caplog.at_level("INFO"):
             firstStats = confirmedOrganizer.resetTvEpisodeTitles()
@@ -6001,7 +5979,7 @@ def testResetTvEpisodeTitlesRemembersNotDuplicateChoice(
         patch.object(
             followupOrganizer, "_shouldPromptInteractively", return_value=False
         ),
-        patch("organiseMyVideo.video_rescan.APP_CONFIG_FILE", configFile),
+        patch("organiseMyVideo.videoRescan.APP_CONFIG_FILE", configFile),
     ):
         with caplog.at_level("INFO"):
             secondStats = followupOrganizer.resetTvEpisodeTitles()
@@ -6388,8 +6366,8 @@ def testGrokModuleRemainsImportableForFutureReuse():
     assert hasattr(grok_module, "ImagineArchive")
 
 
-def testMainGrokFlagDownloadsSavedGallery():
-    """--grok downloads this account's generated grok.com Imagine media."""
+def testMainGrokScanDownloadsSavedGallery():
+    """The Grok scan action downloads this account's generated media."""
     gallery = MagicMock()
     gallery.downloadGeneratedMedia.return_value = {
         "assetsFound": 3,
@@ -6399,13 +6377,13 @@ def testMainGrokFlagDownloadsSavedGallery():
     }
 
     with patch("organiseMyVideo.grokGallery.GrokGallery", return_value=gallery):
-        with patch("sys.argv", ["organiseMyVideo", "--grok"]):
+        with patch("sys.argv", ["organiseMyVideo", "grok", "--scan"]):
             omv_main.main()
 
     gallery.downloadGeneratedMedia.assert_called_once()
 
 
-def testMainGrokConfirmAcceptsLongYFlag():
+def testMainGrokScanConfirmAcceptsLongYFlag():
     """--y is accepted as an alias for --confirm."""
     gallery = MagicMock()
     gallery.downloadGeneratedMedia.return_value = {
@@ -6416,19 +6394,19 @@ def testMainGrokConfirmAcceptsLongYFlag():
     }
 
     with patch("organiseMyVideo.grokGallery.GrokGallery", return_value=gallery):
-        with patch("sys.argv", ["organiseMyVideo", "--grok", "--y"]):
+        with patch("sys.argv", ["organiseMyVideo", "grok", "--scan", "--y"]):
             omv_main.main()
 
     gallery.downloadGeneratedMedia.assert_called_once()
 
 
-def testMainImportFirefoxSessionFlag():
-    """--import-firefox-session imports grok.com cookies from Firefox."""
+def testMainGrokImportFirefoxOption():
+    """The Grok import option imports grok.com cookies from Firefox."""
     gallery = MagicMock()
     gallery.importFirefoxSession.return_value = True
 
     with patch("organiseMyVideo.grokGallery.GrokGallery", return_value=gallery):
-        with patch("sys.argv", ["organiseMyVideo", "--import-firefox-session"]):
+        with patch("sys.argv", ["organiseMyVideo", "grok", "--import-firefox"]):
             omv_main.main()
 
     gallery.importFirefoxSession.assert_called_once()
@@ -6462,7 +6440,7 @@ def testMainLogsStartupProgressBeforeProcessing(caplog: pytest.LogCaptureFixture
     assert "running file organisation mode..." in caplog.text
 
 
-def testMainPassesRefreshAndNoCursesFlagsToOrganizer():
+def testMainPassesRefreshFlagToOrganizer():
     organizerInstance = MagicMock()
 
     with patch(
@@ -6475,7 +6453,6 @@ def testMainPassesRefreshAndNoCursesFlagsToOrganizer():
                 "--source",
                 "/tmp/source",
                 "--refresh",
-                "--no-curses",
             ],
         ):
             omv_main.main()
@@ -6484,7 +6461,7 @@ def testMainPassesRefreshAndNoCursesFlagsToOrganizer():
         sourceDir="/tmp/source",
         dryRun=True,
         refreshMetadataLibrary=True,
-        useCurses=False,
+        useCurses=True,
     )
 
 

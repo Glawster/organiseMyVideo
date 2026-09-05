@@ -4,18 +4,17 @@ from contextlib import contextmanager
 import difflib
 import json
 import re
-import shutil
 import sys
 import unicodedata
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Iterable, Optional
 
+from .constants import APP_CONFIG_FILE, VIDEO_EXTENSIONS
 from organiseMyProjects.logUtils import getLogger  # type: ignore
 
-from .constants import APP_CONFIG_FILE, VIDEO_EXTENSIONS
-
 logger = getLogger()
+
 _IGNORED_TV_SHOW_DUPLICATES_CONFIG_KEY = "ignored_tv_show_duplicates"
 
 
@@ -277,9 +276,11 @@ class VideoRescanMixin:
                 key=lambda group: self._sortResetDuplicateShowNames(group),
             )
         ]
-        APP_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        APP_CONFIG_FILE.write_text(
-            json.dumps(config, indent=2, sort_keys=True), encoding="utf-8"
+        self.stateFilesystem.writeText(
+            APP_CONFIG_FILE,
+            json.dumps(config, indent=2, sort_keys=True),
+            encoding="utf-8",
+            stateKind="application-state",
         )
         self._resetIgnoredDuplicateTvShowGroups = ignoredGroups
 
@@ -472,7 +473,6 @@ class VideoRescanMixin:
         """Move non-conflicting files from *sourceDir* into *destinationDir*."""
         if not sourceDir.exists() or not sourceDir.is_dir():
             return
-        destinationDir.mkdir(parents=True, exist_ok=True)
         for sourcePath in sorted(
             sourceDir.iterdir(), key=lambda item: item.name.casefold()
         ):
@@ -481,7 +481,7 @@ class VideoRescanMixin:
                 if sourcePath.is_dir() and destinationPath.is_dir():
                     self._mergeResetTvShowFolderContents(sourcePath, destinationPath)
                     try:
-                        sourcePath.rmdir()
+                        self.filesystem.removeEmptyDirectory(sourcePath)
                         self._recordSummaryCleanup(
                             f"removed empty folder: {sourcePath}"
                         )
@@ -500,10 +500,10 @@ class VideoRescanMixin:
                 ["merging TV show folder item", sourcePath, destinationPath]
             )
             self._recordSummaryTransfer(sourcePath, destinationPath)
-            shutil.move(str(sourcePath), str(destinationPath))
+            self.filesystem.move(sourcePath, destinationPath)
 
         try:
-            sourceDir.rmdir()
+            self.filesystem.removeEmptyDirectory(sourceDir)
             self._recordSummaryCleanup(f"removed empty folder: {sourceDir}")
         except OSError:
             pass
@@ -650,10 +650,7 @@ class VideoRescanMixin:
                     return
                 if self.dryRun:
                     return
-                metadataFile.parent.mkdir(parents=True, exist_ok=True)
-                ET.ElementTree(root).write(
-                    metadataFile, encoding="utf-8", xml_declaration=True
-                )
+                self._writeXml(metadataFile, root)
             return
 
         _, changed = self._updateEpisodeMetadataRoot(root, tvInfo)
@@ -669,7 +666,7 @@ class VideoRescanMixin:
             return
         if self.dryRun:
             return
-        ET.ElementTree(root).write(metadataFile, encoding="utf-8", xml_declaration=True)
+        self._writeXml(metadataFile, root)
 
     def _updateMovieMetadataRoot(self, root: ET.Element, movieInfo: dict) -> bool:
         """Update a movie metadata XML root with resolved title, year, and IDs."""
@@ -703,10 +700,7 @@ class VideoRescanMixin:
                 self._updateMovieMetadataRoot(root, movieInfo)
                 if self.dryRun:
                     return
-                metadataFile.parent.mkdir(parents=True, exist_ok=True)
-                ET.ElementTree(root).write(
-                    metadataFile, encoding="utf-8", xml_declaration=True
-                )
+                self._writeXml(metadataFile, root)
             return
 
         if not self._updateMovieMetadataRoot(root, movieInfo):
@@ -714,16 +708,17 @@ class VideoRescanMixin:
         logger.action("update metadata: %s", metadataFile)
         if self.dryRun:
             return
-        ET.ElementTree(root).write(metadataFile, encoding="utf-8", xml_declaration=True)
+        self._writeXml(metadataFile, root)
 
     def _resetMovieMetadataForFile(self, videoFile: Path) -> str:
         """Repair metadata and canonical naming for one stored movie file."""
         with self._suppressResetNoiseLogs():
             mcmHints = self._readMovieMcmHints(videoFile)
             parsedMovieInfo = self.parseMovieFilename(videoFile.name)
-            sourceMovieInfo = self._applyMovieMcmHints(
-                parsedMovieInfo, mcmHints, videoFile
-            ) or parsedMovieInfo
+            sourceMovieInfo = (
+                self._applyMovieMcmHints(parsedMovieInfo, mcmHints, videoFile)
+                or parsedMovieInfo
+            )
             sourceMovieInfo = self._normaliseMovieMetadata(sourceMovieInfo)
             if not sourceMovieInfo:
                 return "skipped"
@@ -757,7 +752,7 @@ class VideoRescanMixin:
             self._recordSummaryRename(videoFile, destinationPath)
             return "renamed"
 
-        videoFile.rename(destinationPath)
+        self.filesystem.rename(videoFile, destinationPath)
         self._recordSummaryRename(videoFile, destinationPath)
         return "renamed"
 
@@ -779,7 +774,9 @@ class VideoRescanMixin:
         if destinationDir == movieFolder:
             return movieFolder, videoFiles
         if destinationDir.exists():
-            logger.error("rescan movie folder target already exists: %s", destinationDir)
+            logger.error(
+                "rescan movie folder target already exists: %s", destinationDir
+            )
             return movieFolder, videoFiles
 
         logger.action(
@@ -795,7 +792,7 @@ class VideoRescanMixin:
             ]
 
         try:
-            movieFolder.rename(destinationDir)
+            self.filesystem.rename(movieFolder, destinationDir)
         except OSError as error:
             logger.error("could not rename movie folder %s: %s", movieFolder, error)
             return movieFolder, videoFiles
@@ -952,11 +949,10 @@ class VideoRescanMixin:
                 self._recordSummaryRename(sourcePath, companionDestination)
             return "renamed"
 
-        videoFile.rename(destinationPath)
+        self.filesystem.rename(videoFile, destinationPath)
         self._recordSummaryRename(videoFile, destinationPath)
         for sourcePath, companionDestination in companionRenames:
-            companionDestination.parent.mkdir(parents=True, exist_ok=True)
-            sourcePath.rename(companionDestination)
+            self.filesystem.rename(sourcePath, companionDestination)
             self._recordSummaryRename(sourcePath, companionDestination)
         if destinationMetadataFile.exists():
             self._updateEpisodeMetadataFile(destinationMetadataFile, resolvedTvInfo)
@@ -1059,6 +1055,13 @@ class VideoRescanMixin:
             metadataVideoDirs = videoDirs if target in {"both", "tv"} else []
             self._prepareMetadataLibrary(metadataMovieDirs, metadataVideoDirs)
 
+        self._mediaCatalogueReplace(
+            movieDirs,
+            videoDirs,
+            replaceMovies=target in {"both", "movies"},
+            replaceTv=target in {"both", "tv"},
+        )
+
         emptyStats = {"renamed": 0, "skipped": 0, "errors": 0}
         movieStats = dict(emptyStats)
         tvStats = {"renamed": 0, "skipped": 0, "errors": 0}
@@ -1076,3 +1079,25 @@ class VideoRescanMixin:
             self._writeSummaryReport()
 
         return {"movies": movieStats, "tv": tvStats}
+
+    def _mediaCatalogueReplace(
+        self,
+        movieDirs: list[Path],
+        videoDirs: list[Path],
+        *,
+        replaceMovies: bool = True,
+        replaceTv: bool = True,
+    ) -> None:
+        """Refresh SQLite movie/TV rows from the scanned storage roots."""
+
+        from . import constants
+        from .mediaCatalogue import MediaCatalogue
+
+        MediaCatalogue(
+            databasePath=constants.MEDIA_CATALOGUE_DATABASE
+        ).catalogueReplaceFromStorage(
+            movieDirs,
+            videoDirs,
+            replaceMovies=replaceMovies,
+            replaceTv=replaceTv,
+        )

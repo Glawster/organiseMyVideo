@@ -15,9 +15,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable, List, Optional
 
-from organiseMyProjects.logUtils import getLogger  # type: ignore
-
-# Playwright is an optional dependency used only by --grok.  We import it at
+# Playwright is an optional dependency used only by the Grok CLI. We import it at
 # module level so tests can patch ``organiseMyVideo.grokGallery.sync_playwright``.
 try:
     from playwright.sync_api import sync_playwright  # type: ignore
@@ -33,6 +31,8 @@ from .constants import (
     _GROK_SAVED_URL,
     _PLAYWRIGHT_INIT_SCRIPT,
 )
+from .filesystemOperations import FilesystemOperations
+from organiseMyProjects.logUtils import getLogger  # type: ignore
 
 logger = getLogger()
 
@@ -73,6 +73,8 @@ class GrokGallery:
         self.downloadDir = Path(downloadDir) if downloadDir else GROK_DOWNLOAD_DIR
         self._listAssets = listAssets
         self._fetchBytes = fetchBytes
+        self.filesystem = FilesystemOperations(dryRun=dryRun)
+        self.stateFilesystem = FilesystemOperations(dryRun=False)
 
     ## generated library
 
@@ -97,7 +99,7 @@ class GrokGallery:
                 "this grok.com login has no stored Imagine generations "
                 "(public explore images are not downloaded). "
                 "log into the same Firefox profile you used to create them, "
-                "then run --import-firefox-session --confirm"
+                "then run 'organiseMyVideo grok --import-firefox --confirm'"
             )
         logger.doing("downloading generated grok.com imagine media")
         logger.value("generated assets", len(assets))
@@ -215,11 +217,10 @@ class GrokGallery:
             if error.code in {401, 403}:
                 raise RuntimeError(
                     "grok.com session expired or Cloudflare blocked the request; "
-                    "log in with Firefox and run --import-firefox-session --confirm"
+                    "log in with Firefox and run "
+                    "'organiseMyVideo grok --import-firefox --confirm'"
                 ) from error
-            raise RuntimeError(
-                f"grok.com request failed: HTTP {error.code}"
-            ) from error
+            raise RuntimeError(f"grok.com request failed: HTTP {error.code}") from error
 
     def _assetsQuery(
         self,
@@ -256,8 +257,6 @@ class GrokGallery:
     def _downloadAssetFiles(self, assets: List[dict], cookies: List[dict]) -> dict:
         """Download generated assets into the download directory."""
         stats = {"downloaded": 0, "skipped": 0, "errors": 0}
-        if not self.dryRun:
-            self.downloadDir.mkdir(parents=True, exist_ok=True)
         cookieHeader = self._cookieHeader(cookies, host="grok.com")
         for asset in assets:
             filename = self._assetFilename(asset)
@@ -272,7 +271,7 @@ class GrokGallery:
                 stats["downloaded"] += 1
                 continue
             try:
-                dest.write_bytes(self._assetBytes(url, cookieHeader))
+                self.filesystem.writeBytes(dest, self._assetBytes(url, cookieHeader))
                 stats["downloaded"] += 1
             except Exception as error:
                 logger.error("failed downloading %s: %s", url, error)
@@ -318,12 +317,7 @@ class GrokGallery:
         mime = str(asset.get("mimeType") or "")
         if mime == "application/octet-stream":
             return None
-        url = (
-            asset.get("hd1080Key")
-            or asset.get("hdKey")
-            or asset.get("url")
-            or ""
-        )
+        url = asset.get("hd1080Key") or asset.get("hdKey") or asset.get("url") or ""
         if url and not str(url).startswith("http"):
             url = self._assetDownloadUrl({"key": url, "assetId": assetId})
         if not url:
@@ -447,7 +441,7 @@ class GrokGallery:
         if not grokCookies:
             raise RuntimeError(
                 "session has no grok.com cookies; log in with Firefox and run "
-                "--import-firefox-session --confirm"
+                "organiseMyVideo grok --import-firefox --confirm"
             )
         return grokCookies
 
@@ -467,7 +461,8 @@ class GrokGallery:
         if not self.importFirefoxSession(sessionFile=sessionFile):
             raise RuntimeError(
                 "could not import grok.com cookies from Firefox; "
-                "log in at grok.com then run --import-firefox-session --confirm"
+                "log in at grok.com then run "
+                "'organiseMyVideo grok --import-firefox --confirm'"
             )
 
     def _extractMediaUrlsFromHtml(self, html: str) -> List[str]:
@@ -562,9 +557,6 @@ class GrokGallery:
         """
         stats = {"downloaded": 0, "skipped": 0, "errors": 0}
         destDir = self.downloadDir
-        if not self.dryRun:
-            destDir.mkdir(parents=True, exist_ok=True)
-
         for mediaUrl in mediaUrls:
             parsed = urllib.parse.urlparse(mediaUrl)
             filename = (
@@ -591,10 +583,10 @@ class GrokGallery:
                     )
                     if not response.ok:
                         raise RuntimeError(f"HTTP {response.status}")
-                    dest.write_bytes(response.body())
+                    self.filesystem.writeBytes(dest, response.body())
                 else:
                     with urllib.request.urlopen(mediaUrl, timeout=30) as response:
-                        dest.write_bytes(response.read())
+                        self.filesystem.writeBytes(dest, response.read())
                 logger.action(f"downloaded grok media: {dest}")
                 stats["downloaded"] += 1
             except Exception as e:
@@ -603,8 +595,7 @@ class GrokGallery:
 
         return stats
 
-    @staticmethod
-    def _sanitizeStorageState(sessionFile: Path) -> None:
+    def _sanitizeStorageState(self, sessionFile: Path) -> None:
         """Fix cookie ``expires`` values in a Playwright storage-state JSON file.
 
         Playwright requires cookie ``expires`` to be either ``-1`` (session
@@ -672,7 +663,12 @@ class GrokGallery:
                 cookie["expires"] = _PLAYWRIGHT_MAX_COOKIE_EXPIRES
                 changed = True
         if changed:
-            sessionFile.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            self.stateFilesystem.writeText(
+                sessionFile,
+                json.dumps(data, indent=2),
+                encoding="utf-8",
+                stateKind="application-state",
+            )
 
     def _openFirefoxWindow(self, url: str) -> None:
         """Open the user's system Firefox browser at *url*.
@@ -950,12 +946,14 @@ class GrokGallery:
             # (e.g. '.grok.com', 'accounts.x.ai').  The LIKE patterns use a
             # leading dot/% pair so they cannot match unrelated suffixes such
             # as 'fakegrok.com'.
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT name, value, host, path, expiry, isSecure, isHttpOnly, sameSite
                 FROM moz_cookies
                 WHERE host = 'grok.com'  OR host LIKE '%.grok.com'
                    OR host = 'x.ai'      OR host LIKE '%.x.ai'
-                """)
+                """
+            )
             rows = cursor.fetchall()
             conn.close()
         finally:
@@ -997,9 +995,13 @@ class GrokGallery:
         ]
 
         storageState = {"cookies": cookies, "origins": []}
-        sessionFile.parent.mkdir(parents=True, exist_ok=True)
-        sessionFile.write_text(json.dumps(storageState, indent=2))
-        sessionFile.chmod(0o600)
+        self.stateFilesystem.writeText(
+            sessionFile,
+            json.dumps(storageState, indent=2),
+            stateKind="application-state",
+        )
+        if not self.dryRun:
+            sessionFile.chmod(0o600)
         self._sanitizeStorageState(sessionFile)
         logger.value(
             f"imported {len(cookies)} cookies from Firefox to", str(sessionFile)
@@ -1014,7 +1016,7 @@ class GrokGallery:
         """Delete saved Grok session and credentials config files.
 
         Removes *sessionFile* and *credentialsFile* if they exist so that the
-        next ``--grok`` run will prompt for a fresh manual login.
+        next ``grok --scan`` run will prompt for a fresh manual login.
 
         Args:
             sessionFile: Path to the Playwright storage-state file.
@@ -1028,9 +1030,8 @@ class GrokGallery:
         notFound = []
         for path in (sessionFile, credentialsFile):
             if path.exists():
-                if not self.dryRun:
-                    path.unlink()
-                logger.action(f"deleted Grok config file: {path}")
+                quarantinePath = self.filesystem.quarantine(path)
+                logger.action(f"quarantined Grok config file: {quarantinePath}")
                 deleted.append(str(path))
             else:
                 logger.info(f"Grok config file not found (skipping): {path}")
@@ -1044,7 +1045,7 @@ class GrokGallery:
     ) -> dict:
         """Download this account's generated Imagine media.
 
-        Kept as the historical ``--grok`` entry point. It no longer scrapes the
+        Used by the ``grok --scan`` entry point. It no longer scrapes the
         Imagine landing page; it lists this login's Imagine workspace assets.
         """
         del credentialsFile

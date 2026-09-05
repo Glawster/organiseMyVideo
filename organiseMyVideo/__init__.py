@@ -7,8 +7,10 @@ Public surface
                      multiple inheritance.
 
 Imagine generation, listing, and download live in :mod:`organiseMyVideo.grok`
-and are invoked through the ``grok`` CLI subcommand. They are not mixed into
-:class:`VideoOrganizer`.
+as a Python service. The ``grok`` CLI command handles the Firefox-backed Grok
+gallery workflow. Camera-card inventory lives in
+:mod:`organiseMyVideo.cameraInventory` and is exposed as ``camera inventory``.
+None of these concerns is mixed into :class:`VideoOrganizer`.
 """
 
 import shutil  # re-exported so patch("organiseMyVideo.shutil.move") still works in tests
@@ -29,6 +31,7 @@ from .constants import (
     _PREFIX_REGEX,
 )
 from .metadata import MetadataMixin
+from .filesystemOperations import FilesystemOperations
 from .torrent import TorrentMixin
 from .video import VideoMixin
 
@@ -64,6 +67,8 @@ class VideoOrganizer(MetadataMixin, VideoMixin, TorrentMixin):
         """
         self.sourceDir = Path(sourceDir)
         self.dryRun = dryRun
+        self.filesystem = FilesystemOperations(dryRun=dryRun)
+        self.stateFilesystem = FilesystemOperations(dryRun=False)
         self.refreshMetadataLibrary = refreshMetadataLibrary
         self.useCurses = useCurses
         self._promptHelpDisplayed = False

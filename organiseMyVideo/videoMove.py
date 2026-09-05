@@ -6,9 +6,8 @@ import unicodedata
 from pathlib import Path
 from typing import List, Optional
 
-from organiseMyProjects.logUtils import getLogger  # type: ignore
-
 from .constants import MUSIC_EXTENSIONS, MUSIC_FOLDER_NAMES, VIDEO_EXTENSIONS
+from organiseMyProjects.logUtils import getLogger  # type: ignore
 
 logger = getLogger()
 
@@ -103,9 +102,7 @@ class VideoMoveMixin:
         artist = (
             self._cleanMusicField(parentParts[0]) if len(parentParts) >= 2 else None
         )
-        album = (
-            self._cleanMusicField(parentParts[1]) if len(parentParts) >= 2 else None
-        )
+        album = self._cleanMusicField(parentParts[1]) if len(parentParts) >= 2 else None
         if len(parentParts) == 1:
             album = self._cleanMusicField(parentParts[0])
 
@@ -213,7 +210,6 @@ class VideoMoveMixin:
             return True
 
         try:
-            destDir.mkdir(parents=True, exist_ok=True)
             self._moveFileWithProgress(musicFile, destFile)
             self._updateMusicTags(destFile, metadata)
             self._recordSummaryTransfer(musicFile, destFile)
@@ -439,7 +435,6 @@ class VideoMoveMixin:
             return True
 
         try:
-            destDir.mkdir(parents=True, exist_ok=True)
             self._moveFileWithProgress(sourceFile, destFile)
             self._replicateMovieMetadata(sourceFile, destDir, resolvedMovieInfo)
             self._recordSummaryTransfer(sourceFile, destFile)
@@ -546,7 +541,6 @@ class VideoMoveMixin:
             return True
 
         try:
-            seasonDir.mkdir(parents=True, exist_ok=True)
             self._moveFileWithProgress(sourceFile, destFile)
             self._replicateTvMetadata(
                 sourceFile, showDir, seasonDir, tvInfo, destFile=destFile

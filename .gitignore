@@ -22,8 +22,14 @@ wheels/
 
 # Virtual Environment
 venv/
+.venv/
 ENV/
 env/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
 
 # IDE
 .vscode/
@@ -43,6 +49,8 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+.ruff_cache/
+.mypy_cache/
 mp4_match_audit.csv
 mp4_match_audit.json
 mp4_match_prompt_audit.csv

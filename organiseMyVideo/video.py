@@ -1,6 +1,5 @@
 """Core video-file organisation: scan storage, parse filenames, move files, clean names."""
 
-import errno
 import difflib
 import json
 import os
@@ -15,13 +14,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable, List, Tuple, Optional, TextIO
 
+from .constants import APP_CONFIG_FILE, VIDEO_EXTENSIONS, _PREFIX_REGEX
 from organiseMyProjects.logUtils import getLogger  # type: ignore
 
-from .constants import APP_CONFIG_FILE, VIDEO_EXTENSIONS, _PREFIX_REGEX
-from .video_move import VideoMoveMixin
-from .video_rescan import VideoRescanMixin
+from .videoMove import VideoMoveMixin
+from .videoRescan import VideoRescanMixin
 
 logger = getLogger()
+
 _FILESYSTEM_PATH = Path
 UNKNOWN_YEAR = "Unknown"
 _UTF8_BOM = b"\xef\xbb\xbf"
@@ -79,7 +79,9 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
                     continue
                 storageDir = _FILESYSTEM_PATH(value).expanduser()
                 if not storageDir.is_dir():
-                    logger.warning("configured storage location missing: %s", storageDir)
+                    logger.warning(
+                        "configured storage location missing: %s", storageDir
+                    )
                     continue
                 storageDirs.append(storageDir)
             return sorted(set(storageDirs))
@@ -170,9 +172,19 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         logger.info("scanning for storage locations")
 
         discoveredMovieDirs, discoveredVideoDirs = self._scanMountedStorageLocations()
-        configuredMovieDirs, configuredVideoDirs = self._loadConfiguredStorageLocations()
-        movieDirs = configuredMovieDirs if configuredMovieDirs is not None else discoveredMovieDirs
-        videoDirs = configuredVideoDirs if configuredVideoDirs is not None else discoveredVideoDirs
+        configuredMovieDirs, configuredVideoDirs = (
+            self._loadConfiguredStorageLocations()
+        )
+        movieDirs = (
+            configuredMovieDirs
+            if configuredMovieDirs is not None
+            else discoveredMovieDirs
+        )
+        videoDirs = (
+            configuredVideoDirs
+            if configuredVideoDirs is not None
+            else discoveredVideoDirs
+        )
 
         if configuredMovieDirs is not None:
             for movieDir in movieDirs:
@@ -743,10 +755,7 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
             return
 
         logger.action(f"copy metadata: {sourcePath} -> {destPath}")
-        if self.dryRun:
-            return
-        destPath.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(sourcePath, destPath)
+        self.filesystem.copyFile(sourcePath, destPath)
 
     def _getMoveProgressStream(self) -> Optional[TextIO]:
         """Return the live console stream for move progress, if interactive."""
@@ -842,56 +851,12 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         stream.flush()
 
     def _copyFileWithProgress(self, sourceFile: Path, destFile: Path) -> None:
-        """Copy *sourceFile* to *destFile* and delete the source afterwards."""
-        self._moveProgressDisplayWidth = 0
-        progressStream = self._getMoveProgressStream()
-        if progressStream is None:
-            shutil.copy2(sourceFile, destFile)
-            sourceFile.unlink()
-            return
-
-        totalBytes = sourceFile.stat().st_size
-        copiedBytes = 0
-        try:
-            with sourceFile.open("rb") as sourceHandle, destFile.open(
-                "wb"
-            ) as destHandle:
-                self._renderMoveProgress(
-                    progressStream, sourceFile.name, copiedBytes, totalBytes
-                )
-                while True:
-                    chunk = sourceHandle.read(_MOVE_PROGRESS_CHUNK_SIZE)
-                    if not chunk:
-                        break
-                    destHandle.write(chunk)
-                    copiedBytes += len(chunk)
-                    self._renderMoveProgress(
-                        progressStream, sourceFile.name, copiedBytes, totalBytes
-                    )
-            try:
-                shutil.copystat(sourceFile, destFile)
-            except PermissionError as e:
-                logger.warning("could not preserve timestamps for %s: %s", destFile, e)
-            sourceFile.unlink()
-        except Exception as e:
-            logger.error("failed to copy file %s to %s: %s", sourceFile, destFile, e)
-            if destFile.exists():
-                destFile.unlink()
-            raise
-        finally:
-            if progressStream is not None:
-                self._moveProgressDisplayWidth = 0
-                progressStream.write("\n")
-                progressStream.flush()
+        """Safely move a file through the centralized operation boundary."""
+        self.filesystem.move(sourceFile, destFile)
 
     def _moveFileWithProgress(self, sourceFile: Path, destFile: Path) -> None:
-        """Move *sourceFile* to *destFile*, showing progress for copy fallback only."""
-        try:
-            os.rename(sourceFile, destFile)
-        except OSError as e:
-            if e.errno != errno.EXDEV:
-                raise
-            self._copyFileWithProgress(sourceFile, destFile)
+        """Safely move a file through the centralized operation boundary."""
+        self.filesystem.move(sourceFile, destFile)
 
     def _recordSummaryTransfer(self, sourcePath: Path, destPath: Path) -> None:
         """Record a file transfer for the optional text summary."""
@@ -921,7 +886,6 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
             return
 
         reportPath = Path(summaryReportPath)
-        reportPath.parent.mkdir(parents=True, exist_ok=True)
         reportMode = getattr(self, "summaryReportMode", None)
         runLabel = "DRY-RUN" if self.dryRun else "ACTUAL-RUN"
         summaryLabel = " ".join(
@@ -969,10 +933,14 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         else:
             lines.append("- none")
         lines.append("")
-        with reportPath.open("a", encoding="utf-8") as reportFile:
-            if reportFile.tell():
-                reportFile.write("\n\n")
-            reportFile.write("\n".join(lines))
+        previous = reportPath.read_text(encoding="utf-8") if reportPath.exists() else ""
+        separator = "\n\n" if previous else ""
+        reportText = "\n".join(lines)
+        self.stateFilesystem.writeText(
+            reportPath,
+            f"{previous}{separator}{reportText}",
+            stateKind="application-state",
+        )
         logger.value("summary report", reportPath)
 
     def _extractEpisodeMetadataImage(self, metadataFile: Path) -> Optional[str]:
@@ -1494,8 +1462,7 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         logger.action("create metadata: %s", dvdIdFile)
         if self.dryRun:
             return
-        destDir.mkdir(parents=True, exist_ok=True)
-        ET.ElementTree(root).write(dvdIdFile, encoding="utf-8", xml_declaration=True)
+        self._writeXml(dvdIdFile, root)
 
     def _writeMovieMcmTemplate(self, destDir: Path, movieInfo: dict) -> None:
         """Create a starter ``movie.xml`` when enough movie metadata is known."""
@@ -1520,8 +1487,7 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         logger.action("create metadata: %s", movieFile)
         if self.dryRun:
             return
-        movieFile.parent.mkdir(parents=True, exist_ok=True)
-        ET.ElementTree(root).write(movieFile, encoding="utf-8", xml_declaration=True)
+        self._writeXml(movieFile, root)
 
     def _ensureMovieMetadata(self, destDir: Path, movieInfo: dict) -> None:
         """Create destination ``movie.xml`` only when missing; preserve existing files."""
@@ -1774,7 +1740,7 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
             return capitalisedShowName, videoFiles
 
         try:
-            showDir.rename(destinationDir)
+            self.filesystem.rename(showDir, destinationDir)
         except OSError as error:
             logger.error("could not rename TV show folder %s: %s", showDir, error)
             return showName, videoFiles
@@ -1848,8 +1814,7 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         if self.dryRun:
             return
 
-        destMetadataDir.mkdir(parents=True, exist_ok=True)
-        ET.ElementTree(item).write(destFile, encoding="utf-8", xml_declaration=True)
+        self._writeXml(destFile, item)
         logger.info("  episode metadata written")
 
     def _buildEpisodeMetadataTemplateRoot(self, tvInfo: dict) -> Optional[ET.Element]:
@@ -1942,10 +1907,7 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
                 logger.action("update metadata: %s", existingFile)
                 if self.dryRun:
                     continue
-                existingFile.parent.mkdir(parents=True, exist_ok=True)
-                ET.ElementTree(root).write(
-                    existingFile, encoding="utf-8", xml_declaration=True
-                )
+                self._writeXml(existingFile, root)
             if updated == 0:
                 logger.value("preserving existing metadata files", len(existing))
             return
@@ -1967,8 +1929,7 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         logger.action("create metadata: %s", dvdIdFile)
         if self.dryRun:
             return
-        showDir.mkdir(parents=True, exist_ok=True)
-        ET.ElementTree(root).write(dvdIdFile, encoding="utf-8", xml_declaration=True)
+        self._writeXml(dvdIdFile, root)
 
     def _setXmlFieldIfMissing(
         self, root: ET.Element, tag: str, value: Optional[str]
@@ -2021,8 +1982,7 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         logger.action("create metadata: %s", seriesFile)
         if self.dryRun:
             return
-        seriesFile.parent.mkdir(parents=True, exist_ok=True)
-        ET.ElementTree(root).write(seriesFile, encoding="utf-8", xml_declaration=True)
+        self._writeXml(seriesFile, root)
 
     def _ensureSeriesMetadata(self, showDir: Path, tvInfo: dict) -> None:
         """Create or backfill destination ``series.xml`` while preserving existing values."""
@@ -2042,10 +2002,7 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
             logger.action("update metadata: %s", seriesFile)
             if self.dryRun:
                 return
-            seriesFile.parent.mkdir(parents=True, exist_ok=True)
-            ET.ElementTree(root).write(
-                seriesFile, encoding="utf-8", xml_declaration=True
-            )
+            self._writeXml(seriesFile, root)
             return
         self._writeSeriesMcmTemplate(showDir, tvInfo)
 
@@ -2075,8 +2032,7 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         if self.dryRun:
             return
 
-        destFile.parent.mkdir(parents=True, exist_ok=True)
-        ET.ElementTree(root).write(destFile, encoding="utf-8", xml_declaration=True)
+        self._writeXml(destFile, root)
         logger.info("  episode metadata written")
 
     def _replicateTvMetadata(
@@ -2195,7 +2151,7 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
             if self.dryRun:
                 continue
             try:
-                folder.rename(destination)
+                self.filesystem.rename(folder, destination)
             except Exception as e:
                 logger.error("failed to rename %s: %s", folder, e)
 
@@ -2239,15 +2195,9 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
 
             newPath = entry.parent / newName
 
-            if self.dryRun:
-                logger.action(f"rename: {oldName} → {newName}")
-                self._recordSummaryRename(entry, newPath)
-                stats["renamed"] += 1
-                continue
-
             try:
-                entry.rename(newPath)
-                logger.action(f"renamed: {oldName} → {newName}")
+                self.filesystem.rename(entry, newPath)
+                logger.action(f"rename: {oldName} → {newName}")
                 self._recordSummaryRename(entry, newPath)
                 stats["renamed"] += 1
             except FileExistsError:
@@ -2294,15 +2244,14 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
                 stats["skipped"] += 1
                 continue
 
-            logger.action(f"removing empty folder: {subDir}")
-            self._recordSummaryCleanup(f"remove empty folder: {subDir}")
-            if self.dryRun:
-                stats["removed"] += 1
-                continue
-
             try:
-                shutil.rmtree(str(subDir))
-                logger.action(f"removed: {subDir}")
+                quarantinePath = self.filesystem.quarantine(
+                    subDir, sourceRoot=self.sourceDir.parent
+                )
+                logger.action(f"quarantine folder: {subDir} -> {quarantinePath}")
+                self._recordSummaryCleanup(
+                    f"quarantine folder: {subDir} -> {quarantinePath}"
+                )
                 stats["removed"] += 1
             except Exception as e:
                 logger.error(f"failed to remove {subDir}: {e}")
@@ -2310,3 +2259,8 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
 
         logger.done(f"clean complete")
         return stats
+
+    def _writeXml(self, path: Path, root: ET.Element) -> None:
+        """Atomically write an XML document through the filesystem boundary."""
+        content = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+        self.filesystem.writeBytes(path, content, stateKind="metadata")

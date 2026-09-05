@@ -44,7 +44,8 @@ decision below.
 
 - A Qt desktop application surface integrated with this repository's existing
   packaged application rather than a separate web frontend.
-- Top-level collection navigation for Movies, TV, Audio, Audiobooks, and Ebooks.
+- Top-level collection navigation for Movies, TV, Home video, Removable
+  volumes, Audio, Audiobooks, and Ebooks.
 - Artwork-led grid browsing with a useful list/table alternative where artwork
   is unavailable or dense file information is preferred.
 - A selected-item details area showing available identity, file, storage,
@@ -55,6 +56,14 @@ decision below.
 - Keyboard-accessible navigation and operation at common desktop display scales.
 - A framework-independent library/query model so the Qt layer orchestrates and
   renders rather than implementing scanning or metadata business rules.
+- Read movies, TV, home video, and removable-volume collections from the
+  SQLite media catalogue described in [REQ-010](010-sqliteMediaCatalogue.md),
+  [REQ-014](014-homeVideoCatalogue.md), and
+  [REQ-015](015-usbVolumeInventory.md); refresh that catalogue by running
+  scan services rather than treating a live disk walk as the record.
+  Home video includes GoPro and Drone folders under `/mnt/myVideo/Video`.
+  Removable volumes show sold size and free space for SD cards and USB
+  sticks.
 - Headless automated tests for the presentation model and appropriate Qt tests
   for navigation, selection, filtering, state handling, and responsiveness.
 - An explicit integration assessment for any reusable processing or domain
@@ -75,9 +84,9 @@ decision below.
 ## Acceptance criteria
 
 1. Given configured libraries containing supported media, when the Qt
-   application opens, then Movies, TV, Audio, Audiobooks, and Ebooks are
-   available as distinct top-level collections and selecting one displays only
-   items classified in that collection.
+   application opens, then Movies, TV, Home video, Removable volumes, Audio,
+   Audiobooks, and Ebooks are available as distinct top-level collections
+   and selecting one displays only items classified in that collection.
 2. Given an item with partial or complete metadata, when it is displayed in the
    active collection, then the browser shows its title or filename, media type,
    location, available artwork or a consistent placeholder, and the most useful
@@ -132,6 +141,8 @@ decision below.
 
 - [ADR-001: Preserve the packaged CLI layout](../../adr/001-packagedCliLayout.md)
 - [ADR-004: Qt application architecture](../../adr/004-qtApplicationArchitecture.md)
+- [ADR-008: SQLite media catalogue as the UI record](../../adr/008-sqliteMediaCatalogue.md)
+- [REQ-010: SQLite media catalogue](010-sqliteMediaCatalogue.md)
 - Phase 2 packaging work must provide a reproducible optional Qt dependency and
   executable entry point before implementation is considered ready.
 - Phase 3 entry-point work must preserve CLI operation while adding a GUI entry
@@ -163,3 +174,7 @@ decision below.
 
 - 2026-08-04: created — requested a Qt media browser inspired by Media Center
   Master and recorded the unconfirmed `organiseAIMediaStudio` dependency.
+- 2026-09-04: changed — UI collections read the SQLite media catalogue from
+  REQ-010 rather than treating a live disk walk as the record.
+- 2026-09-04: changed — Home video and Removable volumes added as
+  collections (REQ-014, REQ-015).
