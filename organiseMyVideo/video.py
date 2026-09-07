@@ -337,11 +337,16 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         Returns:
             Path to existing directory or None
         """
-        searchPattern = f"{title} ({year})"
+        from .showFolders import canonicalMovieFolderName
+
+        searchNames = {
+            f"{title} ({year})".casefold(),
+            canonicalMovieFolderName(f"{title} ({year})").casefold(),
+        }
 
         for movieRoot in movieDirs:
             for item in movieRoot.iterdir():
-                if item.is_dir() and item.name.lower() == searchPattern.lower():
+                if item.is_dir() and item.name.casefold() in searchNames:
                     logger.value("found existing movie", item)
                     return item
 
@@ -420,16 +425,9 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
 
     def _buildTvShowFolderName(self, showName: str) -> str:
         """Return the on-disk TV show folder name for *showName*."""
-        normalised = re.sub(r"\s+", " ", showName).strip()
-        if not normalised:
-            return showName
-        if re.search(r",\s*the$", normalised, re.IGNORECASE):
-            return normalised
-        match = re.match(r"^the\s+(.+)$", normalised, re.IGNORECASE)
-        if not match:
-            return normalised
-        remainder = match.group(1).strip()
-        return f"{remainder}, The" if remainder else normalised
+        from .showFolders import canonicalTvShowFolderName
+
+        return canonicalTvShowFolderName(showName)
 
     def _stripResetTvShowDuplicateSuffixes(self, showName: str) -> str:
         """Return a show name with common duplicate-only suffixes removed."""
@@ -1721,31 +1719,30 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
     ) -> tuple[str, list[Path]]:
         """Return the rescan show label and video paths after any lowercase-folder fix."""
         showDir = tvDir / showName
-        capitalisedShowName = self._resolveStoredTvShowFolderName(
-            showDir, showName, videoFiles
-        )
-        if capitalisedShowName == showName:
-            return showName, videoFiles
+        displayName = self._resolveStoredTvShowFolderName(showDir, showName, videoFiles)
+        folderName = self._buildTvShowFolderName(displayName)
+        if folderName == showName:
+            return displayName, videoFiles
 
-        destinationDir = tvDir / capitalisedShowName
+        destinationDir = tvDir / folderName
         if destinationDir.exists():
             logger.error("rescan TV show target already exists: %s", destinationDir)
-            return showName, videoFiles
+            return displayName, videoFiles
 
         logger.action(
             "renaming TV show: %s (from %s)", destinationDir.name, showDir.name
         )
         self._recordSummaryRename(showDir, destinationDir)
         if self.dryRun:
-            return capitalisedShowName, videoFiles
+            return displayName, videoFiles
 
         try:
             self.filesystem.rename(showDir, destinationDir)
         except OSError as error:
             logger.error("could not rename TV show folder %s: %s", showDir, error)
-            return showName, videoFiles
+            return displayName, videoFiles
 
-        return capitalisedShowName, [
+        return displayName, [
             destinationDir / videoFile.relative_to(showDir) for videoFile in videoFiles
         ]
 

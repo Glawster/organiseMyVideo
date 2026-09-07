@@ -493,10 +493,10 @@ Errors:              {stats.errors}
 """
 
 
-def _seasonSummary(stats) -> str:
-    """Return the terminal summary for season-folder normalisation."""
+def _seasonSummary(stats, *, label: str) -> str:
+    """Return the terminal summary for TV library-folder normalisation."""
 
-    return f"""SEASON FOLDER SUMMARY
+    return f"""{label} SUMMARY
 Folders renamed:     {stats.renamed}
 Files moved:         {stats.filesMoved}
 Directories removed: {stats.directoriesRemoved}
@@ -507,37 +507,66 @@ Errors:              {stats.errors}
 
 
 def _normaliseSeasonFolders(organizer, dryRun: bool, *, refreshCatalogue: bool):
-    """Canonicalise ``Season 03`` style folders and optionally refresh TV paths."""
+    """Canonicalise TV show and season folder names and optionally refresh TV paths."""
 
     from .mediaCatalogue import MediaCatalogue
     from .seasonFolders import SeasonFolderStats, normaliseTvSeasonFolders
+    from .showFolders import normaliseMovieFolderNames, normaliseTvShowFolderNames
 
     storageLocations = organizer.scanStorageLocations()
     if not isinstance(storageLocations, (tuple, list)) or len(storageLocations) != 2:
         # A malformed discovery result cannot be used safely. This is principally
         # useful for lightweight mocked organizers, while keeping production
         # behaviour explicit rather than attempting to infer locations.
-        logger.debug(
-            "skipping season-folder normalisation: storage locations unavailable"
-        )
+        logger.debug("skipping TV folder normalisation: storage locations unavailable")
         return SeasonFolderStats()
 
     movieDirs, videoDirs = storageLocations
-    stats = normaliseTvSeasonFolders(
+    filesystem = FilesystemOperations(dryRun=dryRun)
+    showStats = normaliseTvShowFolderNames(
         videoDirs,
-        filesystem=FilesystemOperations(dryRun=dryRun),
+        filesystem=filesystem,
         dryRun=dryRun,
     )
-    drawBox(_seasonSummary(stats))
-    if not dryRun and refreshCatalogue and stats.changed:
-        logger.doing("refreshing TV catalogue after season-folder normalisation")
+    drawBox(_seasonSummary(showStats, label="TV SHOW FOLDER"))
+    movieFolderStats = normaliseMovieFolderNames(
+        movieDirs,
+        filesystem=filesystem,
+        dryRun=dryRun,
+    )
+    drawBox(_seasonSummary(movieFolderStats, label="MOVIE FOLDER"))
+    seasonStats = normaliseTvSeasonFolders(
+        videoDirs,
+        filesystem=filesystem,
+        dryRun=dryRun,
+    )
+    drawBox(_seasonSummary(seasonStats, label="SEASON FOLDER"))
+    changed = showStats.changed or movieFolderStats.changed or seasonStats.changed
+    if not dryRun and refreshCatalogue and changed:
+        logger.doing("refreshing media catalogue after folder normalisation")
         MediaCatalogue().catalogueReplaceFromStorage(
             movieDirs,
             videoDirs,
-            replaceMovies=False,
+            replaceMovies=True,
             replaceTv=True,
         )
-    return stats
+    combined = SeasonFolderStats(
+        renamed=showStats.renamed + movieFolderStats.renamed + seasonStats.renamed,
+        filesMoved=showStats.filesMoved
+        + movieFolderStats.filesMoved
+        + seasonStats.filesMoved,
+        directoriesRemoved=showStats.directoriesRemoved
+        + movieFolderStats.directoriesRemoved
+        + seasonStats.directoriesRemoved,
+        duplicates=showStats.duplicates
+        + movieFolderStats.duplicates
+        + seasonStats.duplicates,
+        conflicts=showStats.conflicts
+        + movieFolderStats.conflicts
+        + seasonStats.conflicts,
+        errors=showStats.errors + movieFolderStats.errors + seasonStats.errors,
+    )
+    return combined
 
 
 def _runOrganizerWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
@@ -601,6 +630,14 @@ Folders kept:    {cleanStats['skipped']}
 Folder errors:   {cleanStats['errors']}
 """
         )
+        logger.doing("normalising TV show and season folders")
+        folderStats = _normaliseSeasonFolders(
+            organizer,
+            dryRun,
+            refreshCatalogue=True,
+        )
+        if folderStats.errors:
+            return 1
     elif args.rescan:
         target = (
             "movies"
@@ -613,7 +650,7 @@ Folder errors:   {cleanStats['errors']}
         from .mediaCatalogue import MediaCatalogue
         from .mediaMerge import mergeDuplicateMovies, mergeDuplicateTvShows
 
-        logger.doing("normalising TV season folders before merge")
+        logger.doing("normalising TV show and season folders before merge")
         seasonStats = _normaliseSeasonFolders(
             organizer,
             dryRun,
@@ -648,7 +685,7 @@ Folder errors:   {cleanStats['errors']}
     else:
         logger.doing("running file organisation mode")
         organizer.processFiles(interactive=not args.auto)
-        logger.doing("normalising TV season folders")
+        logger.doing("normalising TV show and season folders")
         seasonStats = _normaliseSeasonFolders(
             organizer,
             dryRun,

@@ -78,9 +78,11 @@ Omitting `SOURCE` shows the latest stored snapshot for that card ID. See [Camera
 `media organise --merge` consolidates duplicate TV and movie folders that
 share a catalogue provider ID into the most complete existing folder.
 Dry-run is the default; `--confirm` performs moves. Same-name folders
-without IMDb/TMDB (movies) or TVDB/TMDB/IMDb (TV) are not merged. Season
-folders are rewritten to unpadded `Season N` on ordinary organise and
-merge runs.
+without IMDb/TMDB (movies) or TVDB/TMDB/IMDb (TV) are not merged. TV show
+folders that begin with `The` are stored as `Name, The`; movie folders
+as `Name, The (Year)`. Titles and media filenames keep `The Name`. Season
+folders are rewritten to unpadded `Season N`. Organise, merge, and clean
+all run that folder cleanup.
 
 `library rescan` also refreshes movie and TV rows in that catalogue from
 current storage. The Qt browser is expected to query the catalogue rather

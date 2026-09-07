@@ -1,6 +1,6 @@
 # Requirements
 
-Next available number: 018
+Next available number: 019
 
 Requirements created after adoption of the managed process are recorded here.
 Historical behaviour is not assigned invented retrospective requirements.
@@ -24,6 +24,7 @@ Historical behaviour is not assigned invented retrospective requirements.
 | 015 | [USB volume inventory](features/015-usbVolumeInventory.md) | Inventory USB thumb drives with the same numeric ID, size, and free space as SD cards. | ToDo | [Prompt](prompt/015-usbVolumeInventory.md) | [ADR-009](../adr/009-numberedRemovableVolumes.md) |
 | 016 | [Catalogue media identities](features/016-catalogueMediaIdentities.md) | Prepare external identities, home-video rows, and removable-volume kinds with safe schema upgrades. | Completed | [Prompt](prompt/016-catalogueMediaIdentities.md) | [ADR-008](../adr/008-sqliteMediaCatalogue.md), [ADR-009](../adr/009-numberedRemovableVolumes.md) |
 | 017 | [Merge duplicate TV and movie folders](features/017-mergeDuplicateTvFolders.md) | Merge provider-identified duplicate TV and movie folders into the most complete existing folder. | Completed | [Prompt](prompt/017-mergeDuplicateTvFolders.md) | Not required |
+| 018 | [TV show folder leading articles](features/018-tvShowFolderArticles.md) | Store ``The Show`` folders as ``Show, The`` and repair existing library folders. | Completed | [Prompt](prompt/018-tvShowFolderArticles.md) | Not required |
 
 ## Prompt index
 
@@ -45,4 +46,5 @@ Historical behaviour is not assigned invented retrospective requirements.
 - [015-usbVolumeInventory](prompt/015-usbVolumeInventory.md)
 - [016-catalogueMediaIdentities](prompt/016-catalogueMediaIdentities.md)
 - [017-mergeDuplicateTvFolders](prompt/017-mergeDuplicateTvFolders.md)
+- [018-tvShowFolderArticles](prompt/018-tvShowFolderArticles.md)
 <!-- OMP-PROMPT-INDEX-END -->

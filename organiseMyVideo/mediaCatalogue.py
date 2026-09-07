@@ -434,9 +434,12 @@ def _movieFromFolder(folder: Path, identity) -> Optional[MovieCatalogueRecord]:
     videoPath = videos[0] if videos else None
     xmlPath = folder / "movie.xml"
     parsedFolder = MOVIE_FOLDER_NAME.match(folder.name)
+    from .showFolders import restoreLeadingThe
+
+    folderTitle = parsedFolder.group("title").strip() if parsedFolder else None
     folderHints = {
         "type": "movie",
-        "title": parsedFolder.group("title").strip() if parsedFolder else None,
+        "title": restoreLeadingThe(folderTitle) if folderTitle else None,
         "year": parsedFolder.group("year") if parsedFolder else None,
     }
     filenameHints = identity.parseMovieFilename(videoPath.name) if videoPath else None
@@ -554,9 +557,11 @@ def _tvEpisodeFromFile(
 ) -> TvEpisodeCatalogueRecord:
     """Build an episode row from MCM, the metadata library, then names."""
 
+    from .showFolders import restoreLeadingThe
+
     folderHints = {
         "type": "tv",
-        "showName": showDir.name,
+        "showName": restoreLeadingThe(showDir.name),
         "season": seasonHint,
         "episode": None,
         "episodeTitle": None,
@@ -662,7 +667,9 @@ def _tvReplace(
 def _tvSeriesFromFolder(showDir: Path, identity) -> TvSeriesCatalogueRecord:
     """Build a series row from MCM and the metadata library."""
 
-    folderHints = {"type": "tv", "showName": showDir.name}
+    from .showFolders import restoreLeadingThe
+
+    folderHints = {"type": "tv", "showName": restoreLeadingThe(showDir.name)}
     mcm = identity._readTvSeriesMcmHints(showDir)
     seed = _knownMetadataApply(
         identity, mcm=mcm, library=None, filename=None, folder=folderHints

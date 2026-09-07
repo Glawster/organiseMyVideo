@@ -420,7 +420,9 @@ class VideoMoveMixin:
                 logger.error("No movie storage locations found")
                 return False
 
-            destDir = storage / f"{title} ({year})"
+            from .showFolders import canonicalMovieFolderName
+
+            destDir = storage / canonicalMovieFolderName(f"{title} ({year})")
 
         destFile = destDir / self._buildMovieDestinationFilename(
             sourceFile, resolvedMovieInfo
