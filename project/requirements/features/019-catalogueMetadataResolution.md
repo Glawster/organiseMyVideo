@@ -1,4 +1,4 @@
-# 017: Catalogue metadata resolution
+# 019: Catalogue metadata resolution
 
 ## Status
 
@@ -66,10 +66,20 @@ camera import/migration; media moves, renames or deletions; UI changes.
 | Identity reconciliation | Replacement fallback | Repeated selected scans | Explicit IDs and descriptions | N/A | N/A | Fresh source tree |
 | Offline boundary | Provider guards | Real rescan with socket/input guards | N/A | N/A | N/A | Fresh database |
 
-Run pytest, black --check ., ./tests/runLinter.py,
-./tests/runLinter.py --markup and git diff --check. Do not fix unrelated
-pre-existing lint findings.
+Final combined-tree verification completed on 2026-09-07. `pytest` passed and
+`git diff --check` produced no output. The naming linter reports no REQ-019
+findings; remaining naming findings are pre-existing/test-interface cases. The
+markup linter reports repository-wide pre-existing findings outside the REQ-019
+changed Markdown. Black identified three combined-tree formatting changes, which
+were applied before final verification.
 
 ## Change history
 
 - 2026-09-05: created from the catalogue metadata resolution implementation request.
+- 2026-09-07: renumbered from REQ-017 to REQ-019 after REQ-017 was assigned to
+  duplicate media-folder merging.
+- 2026-09-07: added explicit regression coverage that current MCM movie, series
+  and episode provider IDs replace older provider IDs preserved in SQLite.
+- 2026-09-07: completed after final verification on the combined post-merge tree;
+  pytest is green and diff check is clean, with only unrelated pre-existing lint
+  findings remaining.

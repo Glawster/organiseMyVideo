@@ -1,6 +1,6 @@
 # Requirements
 
-Next available number: 019
+Next available number: 020
 
 Requirements created after adoption of the managed process are recorded here.
 Historical behaviour is not assigned invented retrospective requirements.
@@ -10,7 +10,7 @@ Historical behaviour is not assigned invented retrospective requirements.
 | 001 | [Standards adoption governance](features/001-standardsAdoption.md) | Establish traceable governance for the standards migration. | Completed | [Prompt](prompt/001-standardsAdoption.md) | [ADR-001](../adr/001-packagedCliLayout.md), [ADR-002](../adr/002-cliCompatibility.md), [ADR-003](../adr/003-filesystemSafetyBoundary.md) |
 | 002 | [Qt media-library browser](features/002-qtMediaLibraryBrowser.md) | Browse movie, television, audio, audiobook, and ebook libraries in a desktop interface. | ToDo | [Refinement prompt](prompt/002-qtMediaLibraryBrowser.md) | [ADR-004](../adr/004-qtApplicationArchitecture.md) |
 | 003 | [Imagine API archive](features/003-imagineArchive.md) | Generate, list, and download Imagine images and videos through the official xAI API with `storage_options`. | Completed | [Prompt](prompt/003-imagineArchive.md) | [ADR-005](../adr/005-imagineApiStorage.md) |
-| 004 | [Camera media import](features/004-cameraMediaImport.md) | Safely import GoPro and DJI originals through Python services and a camera import subcommand. | ToDo | [Prompt](prompt/004-cameraMediaImport.md) | [ADR-006](../adr/006-cameraImportArchitecture.md) |
+| 004 | [Camera media import](features/004-cameraMediaImport.md) | Safely import GoPro and DJI originals through Python services and a camera import subcommand. | ToDo | [Prompt](prompt/004-cameraImport.md) | [ADR-006](../adr/006-cameraImportArchitecture.md) |
 | 005 | [Reproducible packaging and installation](features/005-reproduciblePackaging.md) | Make package installation, execution, tests, and hooks reproducible. | Completed | [Prompt](prompt/005-reproduciblePackaging.md) | [ADR-001](../adr/001-packagedCliLayout.md) |
 | 006 | [Entry-point and CLI architecture](features/006-cliArchitecture.md) | Use established logging and provide canonical commands with legacy compatibility. | Completed | [Prompt](prompt/006-cliArchitecture.md) | [ADR-001](../adr/001-packagedCliLayout.md), [ADR-002](../adr/002-cliCompatibility.md) |
 | 007 | [Central filesystem safety](features/007-filesystemSafety.md) | Route mutations through a dry-run-aware, recoverable operation boundary. | Completed | [Prompt](prompt/007-filesystemSafety.md) | [ADR-003](../adr/003-filesystemSafetyBoundary.md) |
@@ -25,6 +25,7 @@ Historical behaviour is not assigned invented retrospective requirements.
 | 016 | [Catalogue media identities](features/016-catalogueMediaIdentities.md) | Prepare external identities, home-video rows, and removable-volume kinds with safe schema upgrades. | Completed | [Prompt](prompt/016-catalogueMediaIdentities.md) | [ADR-008](../adr/008-sqliteMediaCatalogue.md), [ADR-009](../adr/009-numberedRemovableVolumes.md) |
 | 017 | [Merge duplicate TV and movie folders](features/017-mergeDuplicateTvFolders.md) | Merge provider-identified duplicate TV and movie folders into the most complete existing folder. | Completed | [Prompt](prompt/017-mergeDuplicateTvFolders.md) | Not required |
 | 018 | [TV show folder leading articles](features/018-tvShowFolderArticles.md) | Store ``The Show`` folders as ``Show, The`` and repair existing library folders. | Completed | [Prompt](prompt/018-tvShowFolderArticles.md) | Not required |
+| 019 | [Catalogue metadata resolution](features/019-catalogueMetadataResolution.md) | Resolve the best already-known movie, series and episode metadata offline while preserving durable provider IDs. | In progress | [Prompt](prompt/019-catalogueMetadataResolution.md) | [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
 
 ## Prompt index
 
@@ -47,4 +48,5 @@ Historical behaviour is not assigned invented retrospective requirements.
 - [016-catalogueMediaIdentities](prompt/016-catalogueMediaIdentities.md)
 - [017-mergeDuplicateTvFolders](prompt/017-mergeDuplicateTvFolders.md)
 - [018-tvShowFolderArticles](prompt/018-tvShowFolderArticles.md)
+- [019-catalogueMetadataResolution](prompt/019-catalogueMetadataResolution.md)
 <!-- OMP-PROMPT-INDEX-END -->

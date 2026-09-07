@@ -171,7 +171,9 @@ def _collectLiveTvLibrary(
 def _seriesHasProviderIdentity(row: TvSeriesCatalogueRecord) -> bool:
     """Return whether *row* already has any provider identity."""
 
-    return any(value not in (None, "") for value in (row.tvdbId, row.tmdbId, row.imdbId))
+    return any(
+        value not in (None, "") for value in (row.tvdbId, row.tmdbId, row.imdbId)
+    )
 
 
 def _seriesLookupName(showName: str, identity) -> str:
@@ -268,7 +270,9 @@ def _resolveMissingSeriesIdentities(
                 row.showName or Path(row.folderPath).name, identity
             )
             progress.render(completed, lookupName)
-            lookupKey = identity._normaliseLookupText(lookupName) or lookupName.casefold()
+            lookupKey = (
+                identity._normaliseLookupText(lookupName) or lookupName.casefold()
+            )
             if lookupKey not in cache:
                 cache[lookupKey] = _tvdbExactSeriesId(identity, lookupName, token)
             tvdbId = cache[lookupKey]
