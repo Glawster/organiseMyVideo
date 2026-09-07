@@ -1,4 +1,4 @@
-"""Merge duplicate TV-show folders identified by catalogue provider IDs."""
+"""Merge duplicate TV-show and movie folders identified by catalogue provider IDs."""
 
 from __future__ import annotations
 
@@ -13,11 +13,13 @@ from .constants import VIDEO_EXTENSIONS
 from .filesystemOperations import FilesystemOperations
 from .mediaCatalogue import (
     MediaCatalogue,
+    MovieCatalogueRecord,
     TvEpisodeCatalogueRecord,
     TvSeriesCatalogueRecord,
 )
 
 logger = getLogger()
+REGENERABLE_METADATA_NAMES = frozenset({"series.xml", "movie.xml"})
 
 
 @dataclass
@@ -41,6 +43,14 @@ class TvMergeGroup:
 
     series: tuple[TvSeriesCatalogueRecord, ...]
     destination: TvSeriesCatalogueRecord
+
+
+@dataclass(frozen=True)
+class MovieMergeGroup:
+    """One provider-identity movie group with a selected canonical destination."""
+
+    movies: tuple[MovieCatalogueRecord, ...]
+    destination: MovieCatalogueRecord
 
 
 class _TvMergeProgress:
@@ -240,7 +250,7 @@ class TvLibraryMerger:
                     progress.render(completed + 1, displayName)
                     continue
 
-                destination = max(
+                destination = min(
                     members,
                     key=lambda row: _seriesCompleteness(row, episodeCounts),
                 )
@@ -349,6 +359,7 @@ class TvLibraryMerger:
         seriesSource: Path,
         episodeFiles: dict[tuple[object, ...], Path],
         progress: Optional[_TvMergeProgress] = None,
+        featureVideos: Optional[list[Path]] = None,
     ) -> bool:
         """Recursively merge *sourceDir* without overwriting destination files."""
 
@@ -389,6 +400,7 @@ class TvLibraryMerger:
                     seriesSource,
                     episodeFiles,
                     progress,
+                    featureVideos,
                 )
                 movedAny = movedAny or childMoved
                 if not self.dryRun and source.is_dir() and not any(source.iterdir()):
@@ -419,9 +431,24 @@ class TvLibraryMerger:
                         progress.advance(1, source.name)
                     continue
 
+            if (
+                featureVideos is not None
+                and source.parent == seriesSource
+                and source.suffix.lower() in VIDEO_EXTENSIONS
+            ):
+                existingFeature = next(
+                    (video for video in featureVideos if video != source),
+                    None,
+                )
+                if existingFeature is not None:
+                    self._recordExistingEpisode(source, existingFeature, progress)
+                    if progress is not None:
+                        progress.advance(1, source.name)
+                    continue
+
             if destination.exists():
                 if destination.is_file():
-                    if source.name.casefold() == "series.xml":
+                    if source.name.casefold() in REGENERABLE_METADATA_NAMES:
                         self._discardRegenerableSeriesMetadata(
                             source,
                             destination,
@@ -450,6 +477,12 @@ class TvLibraryMerger:
                 key = _episodeIdentity(episode)
                 if key is not None:
                     episodeFiles[key] = source if self.dryRun else destination
+            if (
+                featureVideos is not None
+                and source.parent == seriesSource
+                and source.suffix.lower() in VIDEO_EXTENSIONS
+            ):
+                featureVideos.append(source if self.dryRun else destination)
             continue
 
         return movedAny
@@ -480,7 +513,7 @@ class TvLibraryMerger:
 
         if progress is not None:
             progress.pause()
-        logger.value("preserving destination series metadata", destination)
+        logger.value("preserving destination metadata", destination)
         logger.value("removing regenerable source metadata", source)
         self.filesystem.removeFile(source, stateKind="metadata")
         if progress is not None:
@@ -572,6 +605,164 @@ class TvLibraryMerger:
             progress.resume(source.name)
 
 
+class MovieLibraryMerger:
+    """Plan or execute merges of duplicate movie folders."""
+
+    def __init__(
+        self,
+        *,
+        catalogue: Optional[MediaCatalogue] = None,
+        filesystem: Optional[FilesystemOperations] = None,
+        dryRun: bool = True,
+        progressStream=None,
+    ) -> None:
+        self.catalogue = catalogue or MediaCatalogue()
+        self.tree = TvLibraryMerger(
+            catalogue=catalogue,
+            filesystem=filesystem,
+            dryRun=dryRun,
+            progressStream=progressStream,
+        )
+        self.filesystem = self.tree.filesystem
+        self.dryRun = dryRun
+        self.stats = self.tree.stats
+        self.progressStream = progressStream
+
+    def merge(self) -> TvMergeStats:
+        """Merge every unambiguous duplicate movie group in the catalogue."""
+
+        movies = [
+            row
+            for row in self.catalogue.catalogueMoviesList()
+            if Path(row.folderPath).is_dir()
+        ]
+        groups = self._duplicateGroups(movies)
+        self.stats.groupsFound = len(groups)
+        for group in groups:
+            self._mergeGroup(group)
+        return self.stats
+
+    def _duplicateGroups(
+        self, movies: list[MovieCatalogueRecord]
+    ) -> list[MovieMergeGroup]:
+        """Return duplicate groups linked by matching IMDb or TMDB identity."""
+
+        if len(movies) < 2:
+            return []
+
+        parent = list(range(len(movies)))
+
+        def find(index: int) -> int:
+            while parent[index] != index:
+                parent[index] = parent[parent[index]]
+                index = parent[index]
+            return index
+
+        def union(left: int, right: int) -> None:
+            leftRoot = find(left)
+            rightRoot = find(right)
+            if leftRoot != rightRoot:
+                parent[rightRoot] = leftRoot
+
+        identityOwner: dict[tuple[str, str], int] = {}
+        for index, row in enumerate(movies):
+            for identity in _movieIdentityTokens(row):
+                previous = identityOwner.get(identity)
+                if previous is None:
+                    identityOwner[identity] = index
+                else:
+                    union(previous, index)
+
+        grouped: dict[int, list[MovieCatalogueRecord]] = {}
+        for index, row in enumerate(movies):
+            grouped.setdefault(find(index), []).append(row)
+
+        candidateGroups = [members for members in grouped.values() if len(members) > 1]
+        result: list[MovieMergeGroup] = []
+        from .tvLibraryScan import _TvScanProgress
+
+        progress = _TvScanProgress(len(candidateGroups), "Planning movie merges")
+        try:
+            for completed, members in enumerate(candidateGroups):
+                displayName = members[0].title or Path(members[0].folderPath).name
+                progress.render(completed, displayName)
+                if _movieIdentityConflicts(members):
+                    self.stats.identityConflicts += 1
+                    progress.finish()
+                    logger.warning(
+                        "skipping movie merge with conflicting provider IDs: %s",
+                        ", ".join(row.folderPath for row in members),
+                    )
+                    progress.render(completed + 1, displayName)
+                    continue
+                destination = min(members, key=_movieCompleteness)
+                ordered = tuple(
+                    sorted(
+                        members,
+                        key=lambda row: (
+                            row.folderPath != destination.folderPath,
+                            row.folderPath.lower(),
+                        ),
+                    )
+                )
+                result.append(MovieMergeGroup(movies=ordered, destination=destination))
+                progress.render(completed + 1, displayName)
+        finally:
+            progress.finish()
+
+        return sorted(
+            result,
+            key=lambda group: (
+                group.destination.title.lower(),
+                group.destination.folderPath.lower(),
+            ),
+        )
+
+    def _mergeGroup(self, group: MovieMergeGroup) -> None:
+        """Merge all non-canonical folders in *group* into its destination."""
+
+        destination = Path(group.destination.folderPath)
+        logger.doing(f"merging duplicate movie: {group.destination.title}")
+        logger.value("merge destination", destination)
+        featureVideos = _rootVideos(destination)
+        mergedAny = False
+        for sourceRow in group.movies:
+            source = Path(sourceRow.folderPath)
+            if source == destination:
+                continue
+            logger.value("merge source", source)
+            progress = _TvMergeProgress(
+                group.destination.title,
+                source.name,
+                stream=self.progressStream,
+            )
+            try:
+                progress.show("counting entries")
+                progress.setTotal(_directoryDescendantCount(source))
+                moved = self.tree._mergeDirectory(
+                    source,
+                    destination,
+                    source,
+                    {},
+                    progress,
+                    featureVideos,
+                )
+                mergedAny = mergedAny or moved
+                if not self.dryRun and source.is_dir() and not any(source.iterdir()):
+                    self.filesystem.removeEmptyDirectory(source, stateKind="media")
+                    self.stats.directoriesRemoved += 1
+            except (OSError, RuntimeError, ValueError) as error:
+                progress.pause()
+                self.stats.errors += 1
+                logger.error(
+                    "could not merge %s into %s: %s", source, destination, error
+                )
+            finally:
+                progress.finish()
+        if mergedAny:
+            self.stats.groupsMerged += 1
+
+
 def mergeDuplicateTvShows(
     *,
     catalogue: Optional[MediaCatalogue] = None,
@@ -590,6 +781,26 @@ def mergeDuplicateTvShows(
         catalogue = scanTvLibrary()
 
     return TvLibraryMerger(
+        catalogue=catalogue,
+        filesystem=filesystem,
+        dryRun=dryRun,
+    ).merge()
+
+
+def mergeDuplicateMovies(
+    *,
+    catalogue: Optional[MediaCatalogue] = None,
+    filesystem: Optional[FilesystemOperations] = None,
+    dryRun: bool = True,
+) -> TvMergeStats:
+    """Merge duplicate movies from live storage unless a test catalogue is injected."""
+
+    if catalogue is None or isinstance(catalogue, MediaCatalogue):
+        from .movieLibraryScan import scanMovieLibrary
+
+        catalogue = scanMovieLibrary()
+
+    return MovieLibraryMerger(
         catalogue=catalogue,
         filesystem=filesystem,
         dryRun=dryRun,
@@ -643,7 +854,7 @@ def _seriesIdentityConflicts(rows: Iterable[TvSeriesCatalogueRecord]) -> bool:
 def _seriesCompleteness(
     row: TvSeriesCatalogueRecord, episodeCounts: dict[str, int]
 ) -> tuple[int, int, int, str]:
-    """Rank a TV folder by episodes, video count, bytes, then stable path."""
+    """Rank a TV folder so fuller libraries win and earlier paths break ties."""
 
     root = Path(row.folderPath)
     videoCount = 0
@@ -660,11 +871,73 @@ def _seriesCompleteness(
     except OSError:
         pass
     return (
-        episodeCounts.get(row.folderPath, 0),
-        videoCount,
-        videoBytes,
+        -episodeCounts.get(row.folderPath, 0),
+        -videoCount,
+        -videoBytes,
         row.folderPath.lower(),
     )
+
+
+def _movieIdentityTokens(row: MovieCatalogueRecord) -> set[tuple[str, str]]:
+    """Return IMDb/TMDB tokens that can establish movie identity."""
+
+    values = {"imdb": row.imdbId, "tmdb": row.tmdbId}
+    return {
+        (provider, value.strip().lower())
+        for provider, raw in values.items()
+        if raw is not None and (value := str(raw).strip())
+    }
+
+
+def _movieIdentityConflicts(rows: Iterable[MovieCatalogueRecord]) -> bool:
+    """Return True when a linked group contains contradictory movie IDs."""
+
+    for attribute in ("imdbId", "tmdbId"):
+        values = {
+            str(getattr(row, attribute)).strip().lower()
+            for row in rows
+            if getattr(row, attribute) not in (None, "")
+        }
+        if len(values) > 1:
+            return True
+    return False
+
+
+def _movieCompleteness(row: MovieCatalogueRecord) -> tuple[int, int, int, str]:
+    """Rank a movie folder by metadata, videos, bytes, then stable path."""
+
+    root = Path(row.folderPath)
+    videoCount = 0
+    videoBytes = 0
+    hasXml = 1 if (root / "movie.xml").is_file() else 0
+    try:
+        for path in root.rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in VIDEO_EXTENSIONS:
+                continue
+            videoCount += 1
+            try:
+                videoBytes += path.stat().st_size
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return (-hasXml, -videoCount, -videoBytes, row.folderPath.lower())
+
+
+def _rootVideos(folder: Path) -> list[Path]:
+    """Return video files stored directly in *folder*."""
+
+    try:
+        return sorted(
+            (
+                path
+                for path in folder.iterdir()
+                if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS
+            ),
+            key=lambda path: path.name.lower(),
+        )
+    except OSError:
+        return []
 
 
 def _episodeIdentity(

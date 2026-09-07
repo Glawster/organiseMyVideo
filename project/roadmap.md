@@ -47,7 +47,8 @@ reads and that scans update.
 REQ-011 adds dash-cam cards to the same inventory routine as GoPro and DJI.
 REQ-014 indexes `/mnt/myVideo/Video` as home video, including GoPro and
 Drone. REQ-015 inventories USB thumb drives in the same numbered volume
-list.
+list. REQ-017 merges provider-identified duplicate TV and movie folders
+with `media organise --merge`.
 
 ## Deferred decisions
 

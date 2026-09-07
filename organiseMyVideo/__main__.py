@@ -239,7 +239,7 @@ def buildParser() -> argparse.ArgumentParser:
     mediaOrganise.add_argument(
         "--merge",
         action="store_true",
-        help="merge provider-identified duplicate TV show folders into the most complete existing folder",
+        help="merge provider-identified duplicate TV and movie folders into the most complete existing folder",
     )
     mediaClean = mediaSub.add_parser(
         "clean",
@@ -477,10 +477,10 @@ def _runGalleryWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
     return 0
 
 
-def _mergeSummary(stats) -> str:
-    """Return the terminal summary for a TV merge run."""
+def _mergeSummary(stats, *, label: str) -> str:
+    """Return the terminal summary for one library merge run."""
 
-    return f"""TV MERGE SUMMARY
+    return f"""{label} MERGE SUMMARY
 Groups found:        {stats.groupsFound}
 Groups merged:       {stats.groupsMerged}
 Identity conflicts:  {stats.identityConflicts}
@@ -517,7 +517,9 @@ def _normaliseSeasonFolders(organizer, dryRun: bool, *, refreshCatalogue: bool):
         # A malformed discovery result cannot be used safely. This is principally
         # useful for lightweight mocked organizers, while keeping production
         # behaviour explicit rather than attempting to infer locations.
-        logger.debug("skipping season-folder normalisation: storage locations unavailable")
+        logger.debug(
+            "skipping season-folder normalisation: storage locations unavailable"
+        )
         return SeasonFolderStats()
 
     movieDirs, videoDirs = storageLocations
@@ -609,7 +611,7 @@ Folder errors:   {cleanStats['errors']}
         organizer.resetLibraryMetadata(target=target)
     elif getattr(args, "merge", False):
         from .mediaCatalogue import MediaCatalogue
-        from .mediaMerge import mergeDuplicateTvShows
+        from .mediaMerge import mergeDuplicateMovies, mergeDuplicateTvShows
 
         logger.doing("normalising TV season folders before merge")
         seasonStats = _normaliseSeasonFolders(
@@ -619,22 +621,30 @@ Folder errors:   {cleanStats['errors']}
         )
         logger.doing("running TV library merge mode")
         catalogue = MediaCatalogue()
-        stats = mergeDuplicateTvShows(
+        filesystem = FilesystemOperations(dryRun=dryRun)
+        tvStats = mergeDuplicateTvShows(
             catalogue=catalogue,
-            filesystem=FilesystemOperations(dryRun=dryRun),
+            filesystem=filesystem,
             dryRun=dryRun,
         )
-        drawBox(_mergeSummary(stats))
-        if not dryRun and stats.groupsMerged:
-            logger.doing("refreshing TV catalogue after merge")
+        drawBox(_mergeSummary(tvStats, label="TV"))
+        logger.doing("running movie library merge mode")
+        movieStats = mergeDuplicateMovies(
+            catalogue=catalogue,
+            filesystem=filesystem,
+            dryRun=dryRun,
+        )
+        drawBox(_mergeSummary(movieStats, label="MOVIE"))
+        if not dryRun and (tvStats.groupsMerged or movieStats.groupsMerged):
+            logger.doing("refreshing media catalogue after merge")
             movieDirs, videoDirs = organizer.scanStorageLocations()
             catalogue.catalogueReplaceFromStorage(
                 movieDirs,
                 videoDirs,
-                replaceMovies=False,
+                replaceMovies=True,
                 replaceTv=True,
             )
-        return 1 if stats.errors or seasonStats.errors else 0
+        return 1 if tvStats.errors or movieStats.errors or seasonStats.errors else 0
     else:
         logger.doing("running file organisation mode")
         organizer.processFiles(interactive=not args.auto)

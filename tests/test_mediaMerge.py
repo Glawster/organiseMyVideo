@@ -5,10 +5,11 @@ from pathlib import Path
 
 from organiseMyVideo.filesystemOperations import FilesystemOperations
 from organiseMyVideo.mediaCatalogue import (
+    MovieCatalogueRecord,
     TvEpisodeCatalogueRecord,
     TvSeriesCatalogueRecord,
 )
-from organiseMyVideo.mediaMerge import TvLibraryMerger
+from organiseMyVideo.mediaMerge import MovieLibraryMerger, TvLibraryMerger
 
 
 class _TtyStream(StringIO):
@@ -321,3 +322,161 @@ def testMergeProgressShowsWorkBeforeMovingFiles(tmp_path: Path):
     assert "Grimm S01E02.mkv" in output
     assert "(0/" in output
     assert "(1/" in output or "(2/" in output or "(3/" in output
+
+
+class FakeMovieCatalogue:
+    """Small movie catalogue surface used by merge tests."""
+
+    def __init__(self, movies):
+        self.movies = list(movies)
+
+    def catalogueMoviesList(self):
+        return list(self.movies)
+
+
+def _movie(path: Path, *, imdb="tt1375666", tmdb=None, title="Inception", year="2010"):
+    videos = sorted(path.glob("*.mkv")) if path.is_dir() else []
+    xmlPath = path / "movie.xml"
+    return MovieCatalogueRecord(
+        title=title,
+        year=year,
+        folderPath=str(path),
+        videoPath=str(videos[0]) if videos else None,
+        xmlPath=str(xmlPath) if xmlPath.is_file() else None,
+        imdbId=imdb,
+        tmdbId=tmdb,
+    )
+
+
+def testMovieMergeMovesUniqueExtrasIntoCompleteFolder(tmp_path: Path):
+    fuller = tmp_path / "movie1" / "Inception (2010)"
+    smaller = tmp_path / "movie2" / "Inception (2010)"
+    extras = smaller / "Featurettes"
+    fuller.mkdir(parents=True)
+    extras.mkdir(parents=True)
+    (fuller / "Inception (2010).mkv").write_bytes(b"feature")
+    (fuller / "movie.xml").write_text("<Title><IMDbId>tt1375666</IMDbId></Title>")
+    extra = extras / "making-of.mkv"
+    extra.write_bytes(b"extra")
+
+    stats = MovieLibraryMerger(
+        catalogue=FakeMovieCatalogue([_movie(fuller), _movie(smaller)]),
+        filesystem=FilesystemOperations(dryRun=False),
+        dryRun=False,
+    ).merge()
+
+    assert (fuller / "Featurettes" / "making-of.mkv").read_bytes() == b"extra"
+    assert not smaller.exists()
+    assert stats.groupsFound == 1
+    assert stats.groupsMerged == 1
+    assert stats.conflicts == 0
+
+
+def testMovieMergePreservesDuplicateFeatureWithDifferentFilename(tmp_path: Path):
+    first = tmp_path / "movie1" / "Inception (2010)"
+    second = tmp_path / "movie2" / "Inception (2010)"
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
+    existing = first / "Inception (2010).mkv"
+    duplicate = second / "Inception.2010.1080p.mkv"
+    existing.write_bytes(b"same feature")
+    duplicate.write_bytes(b"same feature")
+    (first / "movie.xml").write_text("<Title><IMDbId>tt1375666</IMDbId></Title>")
+
+    stats = MovieLibraryMerger(
+        catalogue=FakeMovieCatalogue([_movie(first), _movie(second)]),
+        filesystem=FilesystemOperations(dryRun=False),
+        dryRun=False,
+    ).merge()
+
+    assert existing.exists()
+    assert duplicate.exists()
+    assert stats.duplicates == 1
+    assert stats.conflicts == 0
+    assert stats.groupsMerged == 0
+
+
+def testMovieMergePreservesConflictingFeature(tmp_path: Path):
+    first = tmp_path / "movie1" / "Inception (2010)"
+    second = tmp_path / "movie2" / "Inception (2010)"
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
+    existing = first / "Inception (2010).mkv"
+    conflict = second / "Inception.2010.1080p.mkv"
+    existing.write_bytes(b"first copy")
+    conflict.write_bytes(b"different copy")
+
+    stats = MovieLibraryMerger(
+        catalogue=FakeMovieCatalogue([_movie(first), _movie(second)]),
+        filesystem=FilesystemOperations(dryRun=False),
+        dryRun=False,
+    ).merge()
+
+    assert existing.exists()
+    assert conflict.exists()
+    assert stats.conflicts == 1
+    assert stats.duplicates == 0
+
+
+def testMovieMergeDoesNotUseTitleWithoutProviderIdentity(tmp_path: Path):
+    first = tmp_path / "movie1" / "Inception (2010)"
+    second = tmp_path / "movie2" / "Inception (2010)"
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
+    (first / "Inception (2010).mkv").write_bytes(b"one")
+    (second / "Inception (2010).mkv").write_bytes(b"two")
+
+    stats = MovieLibraryMerger(
+        catalogue=FakeMovieCatalogue(
+            [_movie(first, imdb=None), _movie(second, imdb=None)]
+        ),
+        dryRun=True,
+    ).merge()
+
+    assert stats.groupsFound == 0
+    assert first.exists()
+    assert second.exists()
+
+
+def testMovieMergeSkipsConflictingProviderIds(tmp_path: Path):
+    first = tmp_path / "movie1" / "Inception (2010)"
+    second = tmp_path / "movie2" / "Inception (2010)"
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
+
+    stats = MovieLibraryMerger(
+        catalogue=FakeMovieCatalogue(
+            [
+                _movie(first, imdb="tt1375666", tmdb="10"),
+                _movie(second, imdb="tt1375666", tmdb="11"),
+            ]
+        ),
+        dryRun=True,
+    ).merge()
+
+    assert stats.groupsFound == 0
+    assert stats.identityConflicts == 1
+
+
+def testMovieMergeDiscardsSourceMovieXmlWhenDestinationHasOne(tmp_path: Path):
+    destination = tmp_path / "movie1" / "Inception (2010)"
+    source = tmp_path / "movie2" / "Inception (2010) old"
+    destination.mkdir(parents=True)
+    source.mkdir(parents=True)
+    (destination / "Inception (2010).mkv").write_bytes(b"feature")
+    destinationXml = destination / "movie.xml"
+    sourceXml = source / "movie.xml"
+    destinationXml.write_text("<Title><IMDbId>tt1375666</IMDbId></Title>")
+    sourceXml.write_text("<Title><IMDbId>tt1375666</IMDbId><Old>true</Old></Title>")
+
+    stats = MovieLibraryMerger(
+        catalogue=FakeMovieCatalogue([_movie(destination), _movie(source)]),
+        filesystem=FilesystemOperations(dryRun=False),
+        dryRun=False,
+    ).merge()
+
+    assert "Old" not in destinationXml.read_text()
+    assert not sourceXml.exists()
+    assert not source.exists()
+    assert stats.groupsMerged == 1
+    assert stats.conflicts == 0

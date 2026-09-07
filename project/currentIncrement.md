@@ -2,20 +2,19 @@
 
 ## Requirement
 
-[REQ-017: Merge duplicate TV folders](requirements/features/017-mergeDuplicateTvFolders.md)
+[REQ-017: Merge duplicate TV and movie folders](requirements/features/017-mergeDuplicateTvFolders.md)
 
 ## Objective
 
-Keep the merge progress bar moving while a large source folder is listed,
-counted, and copied, instead of sitting at 0% with the source directory name.
+Finish `--merge` for TV folders and add the same provider-identity merge
+for movie folders.
 
 ## Status
 
-Completed — the live line starts before counting, shows listing, credits
-whole-tree moves before the copy, and no longer renders 100% while the
-total is still unknown.
+Completed — TV merge plus IMDb/TMDB movie merge, regenerable `movie.xml`,
+and feature-video collision handling.
 
 ## Verification result
 
-- pytest
-- `git diff --check`
+- 457 pytest tests passed
+- `git diff --check` clean

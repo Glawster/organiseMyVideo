@@ -432,6 +432,7 @@ def _movieFromFolder(folder: Path, identity) -> Optional[MovieCatalogueRecord]:
 
     videos = _videoFiles(folder, recursive=False)
     videoPath = videos[0] if videos else None
+    xmlPath = folder / "movie.xml"
     parsedFolder = MOVIE_FOLDER_NAME.match(folder.name)
     folderHints = {
         "type": "movie",
@@ -439,7 +440,8 @@ def _movieFromFolder(folder: Path, identity) -> Optional[MovieCatalogueRecord]:
         "year": parsedFolder.group("year") if parsedFolder else None,
     }
     filenameHints = identity.parseMovieFilename(videoPath.name) if videoPath else None
-    mcm = identity._readMovieMcmHints(videoPath) if videoPath else None
+    hintFile = videoPath or (xmlPath if xmlPath.is_file() else None)
+    mcm = identity._readMovieMcmHints(hintFile) if hintFile else None
     if mcm and mcm.get("type") != "movie":
         mcm = None
     seed = _knownMetadataApply(
@@ -456,7 +458,6 @@ def _movieFromFolder(folder: Path, identity) -> Optional[MovieCatalogueRecord]:
     title = resolved.get("title")
     if not title:
         return None
-    xmlPath = folder / "movie.xml"
     return MovieCatalogueRecord(
         title=title,
         year=resolved.get("year"),

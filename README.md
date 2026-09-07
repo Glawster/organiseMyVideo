@@ -41,6 +41,8 @@ Use the object/action command hierarchy for new invocations:
 ```bash
 organiseMyVideo media organise /path/to/staging
 organiseMyVideo media organise /path/to/staging --confirm
+organiseMyVideo media organise --merge
+organiseMyVideo media organise --merge --confirm
 organiseMyVideo media clean /path/to/staging
 organiseMyVideo library rescan /path/to/staging --target movies
 organiseMyVideo torrent maintain /path/to/staging --clean-names

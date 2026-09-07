@@ -20,6 +20,7 @@ New scripts and documentation should use the object/action hierarchy:
 
 ```bash
 organiseMyVideo media organise [SOURCE]
+organiseMyVideo media organise --merge
 organiseMyVideo media clean [SOURCE]
 organiseMyVideo library rescan [SOURCE] [--target both|movies|tv]
 organiseMyVideo torrent maintain [SOURCE] [--clean-names]
@@ -73,6 +74,13 @@ brand strings. USB thumb drives will use the same numbered list
 `--brand` remains optional when the operator wants to store a make by hand.
 Omitting `SOURCE` shows the latest stored snapshot for that card ID. See [Camera card inventory](cameraInventory.md) and
 [Media catalogue](mediaCatalogue.md).
+
+`media organise --merge` consolidates duplicate TV and movie folders that
+share a catalogue provider ID into the most complete existing folder.
+Dry-run is the default; `--confirm` performs moves. Same-name folders
+without IMDb/TMDB (movies) or TVDB/TMDB/IMDb (TV) are not merged. Season
+folders are rewritten to unpadded `Season N` on ordinary organise and
+merge runs.
 
 `library rescan` also refreshes movie and TV rows in that catalogue from
 current storage. The Qt browser is expected to query the catalogue rather
