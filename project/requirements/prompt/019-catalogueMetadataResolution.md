@@ -1,9 +1,9 @@
-# REQ-017 implementation prompt
+# REQ-019 implementation prompt
 
 ## Assignment
 
 Implement and verify all acceptance criteria in
-[REQ-017](../features/017-catalogueMetadataResolution.md) on
+[REQ-019](../features/019-catalogueMetadataResolution.md) on
 feature/catalogue-metadata-resolution. The requirement is authoritative.
 
 ## Boundaries

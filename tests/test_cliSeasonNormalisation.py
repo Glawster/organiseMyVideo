@@ -6,7 +6,9 @@ from unittest.mock import MagicMock, patch
 import organiseMyVideo.__main__ as applicationMain
 
 
-def testOrganiseSkipsSeasonNormalisationWhenMockStorageScanHasNoLocations(tmp_path: Path):
+def testOrganiseSkipsSeasonNormalisationWhenMockStorageScanHasNoLocations(
+    tmp_path: Path,
+):
     """CLI tests using a bare MagicMock organizer must not fail in post-processing."""
 
     organizer = MagicMock()

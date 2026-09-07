@@ -1,4 +1,4 @@
-"""REQ-017 production-path evidence for offline catalogue resolution."""
+"""REQ-019 production-path evidence for offline catalogue resolution."""
 
 import json
 import socket
@@ -117,7 +117,6 @@ def testRescanPreservesOnlyMissingProviderIds(tmp_path: Path, stronger: bool):
                 }
             },
         )
-    # Selected replacements leave the other collection exactly as it was.
     oldEpisodes = catalogue.catalogueTvEpisodesList()
     oldSeries = catalogue.catalogueTvSeriesList()
     catalogue.catalogueReplaceFromStorage([movieRoot], [], replaceTv=False)
@@ -144,6 +143,66 @@ def testRescanPreservesOnlyMissingProviderIds(tmp_path: Path, stronger: bool):
     assert episode.tvdbEpisodeId == ("newEpisode" if stronger else "oldEpisode")
     assert episode.tmdbEpisodeId == "oldTmdbEpisode"
     assert episode.imdbId == ("ttNewEpisode" if stronger else "ttEpisode")
+
+
+def testCurrentMcmProviderIdsReplaceStoredIds(tmp_path: Path):
+    movieRoot = tmp_path / "movies"
+    movieDir = movieRoot / "Current (2000)"
+    movieDir.mkdir(parents=True)
+    movieFile = movieDir / "Current (2000).mkv"
+    movieFile.touch()
+
+    tvRoot = tmp_path / "TV"
+    showDir = tvRoot / "Current Show"
+    seasonDir = showDir / "Season 1"
+    metadataDir = seasonDir / "metadata"
+    metadataDir.mkdir(parents=True)
+    episodeFile = seasonDir / "Current.Show.S01E02.Current.Title.mkv"
+    episodeFile.touch()
+
+    catalogue = MediaCatalogue(tmp_path / "catalogue.sqlite")
+    catalogue.catalogueReplaceFromStorage([movieRoot], [tvRoot])
+    with sqlite3.connect(catalogue.databasePath) as connection:
+        connection.execute(
+            "UPDATE movieItem SET imdbId='ttOldMovie', tmdbId='oldMovie'"
+        )
+        connection.execute(
+            "UPDATE tvSeries SET tvdbId='oldSeries', tmdbId='oldSeriesTmdb', imdbId='ttOldSeries'"
+        )
+        connection.execute(
+            "UPDATE tvEpisode SET tvdbEpisodeId='oldEpisode', tmdbEpisodeId='oldEpisodeTmdb', imdbId='ttOldEpisode'"
+        )
+
+    (movieDir / "movie.xml").write_text(
+        "<Title><LocalTitle>Current</LocalTitle><ProductionYear>2000</ProductionYear>"
+        "<IMDbId>ttNewMovie</IMDbId><TMDbId>newMovie</TMDbId></Title>"
+    )
+    (showDir / "series.xml").write_text(
+        "<Series><LocalTitle>Current Show</LocalTitle><SeriesID>newSeries</SeriesID>"
+        "<TMDbId>newSeriesTmdb</TMDbId><IMDbId>ttNewSeries</IMDbId></Series>"
+    )
+    (metadataDir / "Current.Show.S01E02.Current.Title.xml").write_text(
+        "<Item><SeasonNumber>1</SeasonNumber><EpisodeNumber>2</EpisodeNumber>"
+        "<EpisodeName>Current Title</EpisodeName><EpisodeID>newEpisode</EpisodeID>"
+        "<TMDbEpisodeId>newEpisodeTmdb</TMDbEpisodeId><IMDbId>ttNewEpisode</IMDbId></Item>"
+    )
+
+    catalogue.catalogueReplaceFromStorage([movieRoot], [tvRoot])
+
+    movie = catalogue.catalogueMoviesList()[0]
+    series = catalogue.catalogueTvSeriesList()[0]
+    episode = catalogue.catalogueTvEpisodesList()[0]
+    assert (movie.imdbId, movie.tmdbId) == ("ttNewMovie", "newMovie")
+    assert (series.tvdbId, series.tmdbId, series.imdbId) == (
+        "newSeries",
+        "newSeriesTmdb",
+        "ttNewSeries",
+    )
+    assert (episode.tvdbEpisodeId, episode.tmdbEpisodeId, episode.imdbId) == (
+        "newEpisode",
+        "newEpisodeTmdb",
+        "ttNewEpisode",
+    )
 
 
 @pytest.mark.parametrize("episodeXml", [False, True])

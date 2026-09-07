@@ -101,7 +101,7 @@ IDs always win when supplied. Descriptions are rebuilt from current evidence;
 SQLite titles, show names, season numbers and episode titles are never reused.
 Removed paths still disappear. Renamed paths do not inherit old identities.
 
-[REQ-017](../project/requirements/features/017-catalogueMetadataResolution.md)
+[REQ-019](../project/requirements/features/019-catalogueMetadataResolution.md)
 uses the existing local MCM readers, library lookup and canonical filename
 parsers through a catalogue-only source, without constructing an organiser or
 calling enrichment, provider, authentication, artwork or scraping workflows.

@@ -201,7 +201,8 @@ class MediaCatalogue:
             return []
         with self._databaseConnect() as connection:
             catalogueSchemaApply(connection)
-            rows = connection.execute("""
+            rows = connection.execute(
+                """
                 SELECT c.cardId, c.inventoriedAt, c.cardRatedGigabytes,
                        c.cardSizeBytes, c.freeBytes, c.usedBytes, c.contentBytes,
                        c.cameraKinds, c.dateStart, c.dateEnd, c.volumeKind
@@ -212,7 +213,8 @@ class MediaCatalogue:
                     GROUP BY cardId
                 ) latest ON c.inventoryId = latest.inventoryId
                 ORDER BY c.cardId
-                """).fetchall()
+                """
+            ).fetchall()
         return [
             CardCatalogueRecord(
                 cardId=row["cardId"],
@@ -239,11 +241,13 @@ class MediaCatalogue:
             return []
         with self._databaseConnect() as connection:
             catalogueSchemaApply(connection)
-            rows = connection.execute("""
+            rows = connection.execute(
+                """
                 SELECT title, year, folderPath, videoPath, xmlPath, imdbId, tmdbId
                 FROM movieItem
                 ORDER BY title, year
-                """).fetchall()
+                """
+            ).fetchall()
         return [
             MovieCatalogueRecord(
                 title=row["title"],
@@ -302,12 +306,14 @@ class MediaCatalogue:
             return []
         with self._databaseConnect() as connection:
             catalogueSchemaApply(connection)
-            rows = connection.execute("""
+            rows = connection.execute(
+                """
                 SELECT showName, seriesFolderPath, season, episode, episodeTitle,
                        filePath, tvdbEpisodeId, tmdbEpisodeId, imdbId
                 FROM tvEpisode
                 ORDER BY showName, season, episode, filePath
-                """).fetchall()
+                """
+            ).fetchall()
         return [
             TvEpisodeCatalogueRecord(
                 showName=row["showName"],
@@ -330,11 +336,13 @@ class MediaCatalogue:
             return []
         with self._databaseConnect() as connection:
             catalogueSchemaApply(connection)
-            rows = connection.execute("""
+            rows = connection.execute(
+                """
                 SELECT showName, folderPath, tvdbId, tmdbId, imdbId
                 FROM tvSeries
                 ORDER BY showName, folderPath
-                """).fetchall()
+                """
+            ).fetchall()
         return [
             TvSeriesCatalogueRecord(
                 showName=row["showName"],
