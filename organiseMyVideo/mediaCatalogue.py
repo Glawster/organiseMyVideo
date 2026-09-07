@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -201,8 +201,7 @@ class MediaCatalogue:
             return []
         with self._databaseConnect() as connection:
             catalogueSchemaApply(connection)
-            rows = connection.execute(
-                """
+            rows = connection.execute("""
                 SELECT c.cardId, c.inventoriedAt, c.cardRatedGigabytes,
                        c.cardSizeBytes, c.freeBytes, c.usedBytes, c.contentBytes,
                        c.cameraKinds, c.dateStart, c.dateEnd, c.volumeKind
@@ -213,8 +212,7 @@ class MediaCatalogue:
                     GROUP BY cardId
                 ) latest ON c.inventoryId = latest.inventoryId
                 ORDER BY c.cardId
-                """
-            ).fetchall()
+                """).fetchall()
         return [
             CardCatalogueRecord(
                 cardId=row["cardId"],
@@ -241,13 +239,11 @@ class MediaCatalogue:
             return []
         with self._databaseConnect() as connection:
             catalogueSchemaApply(connection)
-            rows = connection.execute(
-                """
+            rows = connection.execute("""
                 SELECT title, year, folderPath, videoPath, xmlPath, imdbId, tmdbId
                 FROM movieItem
                 ORDER BY title, year
-                """
-            ).fetchall()
+                """).fetchall()
         return [
             MovieCatalogueRecord(
                 title=row["title"],
@@ -281,6 +277,8 @@ class MediaCatalogue:
         self.databasePath.parent.mkdir(parents=True, exist_ok=True)
         with self._databaseConnect() as connection:
             catalogueSchemaApply(connection)
+            # Lock the replacement snapshot before reading durable identities.
+            connection.execute("BEGIN IMMEDIATE")
             if movies is not None:
                 logger.doing("updating movie catalogue")
                 _moviesReplace(connection, movies, scannedAt)
@@ -304,14 +302,12 @@ class MediaCatalogue:
             return []
         with self._databaseConnect() as connection:
             catalogueSchemaApply(connection)
-            rows = connection.execute(
-                """
+            rows = connection.execute("""
                 SELECT showName, seriesFolderPath, season, episode, episodeTitle,
                        filePath, tvdbEpisodeId, tmdbEpisodeId, imdbId
                 FROM tvEpisode
                 ORDER BY showName, season, episode, filePath
-                """
-            ).fetchall()
+                """).fetchall()
         return [
             TvEpisodeCatalogueRecord(
                 showName=row["showName"],
@@ -334,13 +330,11 @@ class MediaCatalogue:
             return []
         with self._databaseConnect() as connection:
             catalogueSchemaApply(connection)
-            rows = connection.execute(
-                """
+            rows = connection.execute("""
                 SELECT showName, folderPath, tvdbId, tmdbId, imdbId
                 FROM tvSeries
                 ORDER BY showName, folderPath
-                """
-            ).fetchall()
+                """).fetchall()
         return [
             TvSeriesCatalogueRecord(
                 showName=row["showName"],
@@ -432,14 +426,19 @@ def _movieFromFolder(folder: Path, identity) -> Optional[MovieCatalogueRecord]:
 
     videos = _videoFiles(folder, recursive=False)
     videoPath = videos[0] if videos else None
+    xmlPath = folder / "movie.xml"
     parsedFolder = MOVIE_FOLDER_NAME.match(folder.name)
+    from .showFolders import restoreLeadingThe
+
+    folderTitle = parsedFolder.group("title").strip() if parsedFolder else None
     folderHints = {
         "type": "movie",
-        "title": parsedFolder.group("title").strip() if parsedFolder else None,
+        "title": restoreLeadingThe(folderTitle) if folderTitle else None,
         "year": parsedFolder.group("year") if parsedFolder else None,
     }
     filenameHints = identity.parseMovieFilename(videoPath.name) if videoPath else None
-    mcm = identity._readMovieMcmHints(videoPath) if videoPath else None
+    hintFile = videoPath or (xmlPath if xmlPath.is_file() else None)
+    mcm = identity._readMovieMcmHints(hintFile) if hintFile else None
     if mcm and mcm.get("type") != "movie":
         mcm = None
     seed = _knownMetadataApply(
@@ -456,7 +455,6 @@ def _movieFromFolder(folder: Path, identity) -> Optional[MovieCatalogueRecord]:
     title = resolved.get("title")
     if not title:
         return None
-    xmlPath = folder / "movie.xml"
     return MovieCatalogueRecord(
         title=title,
         year=resolved.get("year"),
@@ -475,6 +473,9 @@ def _moviesReplace(
 ) -> None:
     """Replace all movie rows with the current scan."""
 
+    movies = _providerIdsPreserve(
+        connection, "movieItem", "folderPath", movies, ("imdbId", "tmdbId")
+    )
     connection.execute("DELETE FROM movieItem")
     connection.executemany(
         """
@@ -553,15 +554,17 @@ def _tvEpisodeFromFile(
 ) -> TvEpisodeCatalogueRecord:
     """Build an episode row from MCM, the metadata library, then names."""
 
+    from .showFolders import restoreLeadingThe
+
     folderHints = {
         "type": "tv",
-        "showName": showDir.name,
+        "showName": restoreLeadingThe(showDir.name),
         "season": seasonHint,
         "episode": None,
         "episodeTitle": None,
     }
     filenameHints = identity.parseTvFilename(path.name)
-    mcm = identity._readTvMcmHints(path)
+    mcm = identity._readTvMcmHints(path, evidenceOnly=True, showDir=showDir)
     if mcm and mcm.get("type") != "tv":
         mcm = None
     seed = _knownMetadataApply(
@@ -571,10 +574,21 @@ def _tvEpisodeFromFile(
         filename=filenameHints,
         folder=folderHints,
     )
-    library = identity._lookupTvMetadataInLibrary(seed)
+    seriesLibrary = identity._firstStoredMetadataRecord(
+        identity._loadMetadataLibrary()["tv"]["series"],
+        identity._tvSeriesLibraryKeys(seed),
+    )
+    # Known series IDs can locate episodes stored only under a provider key.
+    episodeSeed = identity._mergeMetadata(
+        mcm, identity._mergeMetadata(_providerAliasesNormalise(seriesLibrary), seed)
+    )
     episodeLibrary = identity._firstStoredMetadataRecord(
         identity._loadMetadataLibrary()["tv"]["episodes"],
-        identity._tvEpisodeLibraryKeys(seed),
+        identity._tvEpisodeLibraryKeys(episodeSeed),
+    )
+    # A series can supply a show name, never episode provider IDs.
+    library = identity._mergeMetadata(
+        episodeLibrary, {"showName": (seriesLibrary or {}).get("showName")}
     )
     resolved = _knownMetadataApply(
         identity,
@@ -590,18 +604,9 @@ def _tvEpisodeFromFile(
         episode=resolved.get("episode"),
         episodeTitle=resolved.get("episodeTitle"),
         filePath=str(path),
-        tvdbEpisodeId=_tvIdText(
-            (episodeLibrary or {}).get("tvdbEpisodeId")
-            or (episodeLibrary or {}).get("episodeId")
-            or resolved.get("tvdbEpisodeId")
-            or resolved.get("episodeId")
-        ),
-        tmdbEpisodeId=_tvIdText(
-            (episodeLibrary or {}).get("tmdbEpisodeId") or resolved.get("tmdbEpisodeId")
-        ),
-        imdbId=_tvIdText(
-            (episodeLibrary or {}).get("imdbId") or resolved.get("imdbId")
-        ),
+        tvdbEpisodeId=_tvIdText(resolved.get("tvdbEpisodeId")),
+        tmdbEpisodeId=_tvIdText(resolved.get("tmdbEpisodeId")),
+        imdbId=_tvIdText(resolved.get("imdbId")),
     )
 
 
@@ -613,6 +618,16 @@ def _tvReplace(
 ) -> None:
     """Replace series and episode rows from the current scan."""
 
+    series = _providerIdsPreserve(
+        connection, "tvSeries", "folderPath", series, ("tvdbId", "tmdbId", "imdbId")
+    )
+    episodes = _providerIdsPreserve(
+        connection,
+        "tvEpisode",
+        "filePath",
+        episodes,
+        ("tvdbEpisodeId", "tmdbEpisodeId", "imdbId"),
+    )
     connection.execute("DELETE FROM tvEpisode")
     connection.execute("DELETE FROM tvSeries")
     connection.executemany(
@@ -661,7 +676,9 @@ def _tvReplace(
 def _tvSeriesFromFolder(showDir: Path, identity) -> TvSeriesCatalogueRecord:
     """Build a series row from MCM and the metadata library."""
 
-    folderHints = {"type": "tv", "showName": showDir.name}
+    from .showFolders import restoreLeadingThe
+
+    folderHints = {"type": "tv", "showName": restoreLeadingThe(showDir.name)}
     mcm = identity._readTvSeriesMcmHints(showDir)
     seed = _knownMetadataApply(
         identity, mcm=mcm, library=None, filename=None, folder=folderHints
@@ -724,11 +741,54 @@ def _knownMetadataApply(
 ) -> dict:
     """Merge known metadata with MCM first and folder names last."""
 
+    # Normalise TVDB aliases within each source before merging priorities.
+    mcm = _providerAliasesNormalise(mcm)
+    library = _providerAliasesNormalise(library)
     resolved = dict(folder or {})
     resolved = identity._mergeMetadata(filename, resolved)
     resolved = identity._mergeMetadata(library, resolved)
     resolved = identity._mergeMetadata(mcm, resolved)
     return resolved or {}
+
+
+def _providerAliasesNormalise(metadata: Optional[dict]) -> Optional[dict]:
+    """Map organiser TVDB aliases without confusing local database keys."""
+    if metadata is None:
+        return None
+    result = dict(metadata)
+    for field, alias in (("tvdbId", "seriesId"), ("tvdbEpisodeId", "episodeId")):
+        result[field] = result.get(field) or result.get(alias)
+        result[alias] = result.get(field)
+    return result
+
+
+def _providerIdsPreserve(
+    connection: sqlite3.Connection,
+    table: str,
+    localKey: str,
+    records: list,
+    fields: tuple[str, ...],
+) -> list:
+    """Carry durable IDs forward by stable path, never stale descriptions."""
+    # Read before deletion in the replacement transaction. SQL identifiers are
+    # internal constants; filesystem values never enter SQL text.
+    existing = {
+        row[localKey]: dict(row)
+        for row in connection.execute(
+            f"SELECT {localKey}, {', '.join(fields)} FROM {table}"
+        )
+    }
+    return [
+        replace(
+            item,
+            **{
+                field: getattr(item, field)
+                or existing.get(getattr(item, localKey), {}).get(field)
+                for field in fields
+            },
+        )
+        for item in records
+    ]
 
 
 ## utilities

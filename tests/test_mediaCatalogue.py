@@ -52,6 +52,29 @@ def testCatalogueReplaceStoresMoviesAndEpisodes(tmp_path: Path):
     assert episodes[0].episodeTitle == "Sic Semper Systema"
 
 
+def testCatalogueKeepsNaturalTitleWhenFolderHasTrailingThe(tmp_path: Path):
+    movieRoot = tmp_path / "movie1"
+    movieFolder = movieRoot / "Godfather, The (1972)"
+    movieFolder.mkdir(parents=True)
+    (movieFolder / "The Godfather (1972).mkv").write_bytes(b"movie")
+    tvRoot = tmp_path / "TV"
+    show = tvRoot / "Boys, The" / "Season 1"
+    show.mkdir(parents=True)
+    (show / "The.Boys.S01E01.mkv").write_bytes(b"tv")
+    catalogue = MediaCatalogue(databasePath=tmp_path / "mediaCatalogue.sqlite")
+
+    catalogue.catalogueReplaceFromStorage([movieRoot], [tvRoot])
+    movies = catalogue.catalogueMoviesList()
+    series = catalogue.catalogueTvSeriesList()
+    episodes = catalogue.catalogueTvEpisodesList()
+
+    assert movies[0].title == "The Godfather"
+    assert movies[0].folderPath.endswith("Godfather, The (1972)")
+    assert series[0].showName == "The Boys"
+    assert series[0].folderPath.endswith("Boys, The")
+    assert episodes[0].showName == "The Boys"
+
+
 def testSecondScanDropsRemovedMovieFolders(tmp_path: Path):
     movieRoot, tvRoot = _libraryTree(tmp_path)
     catalogue = MediaCatalogue(databasePath=tmp_path / "mediaCatalogue.sqlite")

@@ -768,8 +768,10 @@ class VideoRescanMixin:
         if not movieInfo or not movieInfo.get("title") or not movieInfo.get("year"):
             return movieFolder, videoFiles
 
+        from .showFolders import canonicalMovieFolderName
+
         destinationDir = movieFolder.with_name(
-            f"{movieInfo['title']} ({movieInfo['year']})"
+            canonicalMovieFolderName(f"{movieInfo['title']} ({movieInfo['year']})")
         )
         if destinationDir == movieFolder:
             return movieFolder, videoFiles

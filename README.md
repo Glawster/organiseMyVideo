@@ -24,8 +24,8 @@ The README is the canonical entry point for repository documentation. The living
 - [Home video archive](documentation/homeVideo.md)
 - [Command-line interface](documentation/commandLineInterface.md)
 
-- **Movies** → `/mnt/movie<n>/Title (Year)/`
-- **TV shows** → `/mnt/video<n>/TV/Show Name/Season NN/` (`The Name` folders are stored as `Name, The`)
+- **Movies** → `/mnt/movie<n>/Title (Year)/` (`The Title` folders are stored as `Title, The (Year)`; the title stays `The Title`)
+- **TV shows** → `/mnt/video<n>/TV/Show Name/Season NN/` (`The Name` folders are stored as `Name, The`; the show title stays `The Name`)
 - **Home video** → `/mnt/myVideo/Video/` (GoPro, Drone, tape transfers, and other personal folders)
 - **Default staging/source folder** → `/mnt/video2/toFile`
 - **Torrent download folder** → sibling `Downloads` folder next to the source directory, e.g. `/mnt/video2/Downloads`
@@ -41,6 +41,8 @@ Use the object/action command hierarchy for new invocations:
 ```bash
 organiseMyVideo media organise /path/to/staging
 organiseMyVideo media organise /path/to/staging --confirm
+organiseMyVideo media organise --merge
+organiseMyVideo media organise --merge --confirm
 organiseMyVideo media clean /path/to/staging
 organiseMyVideo library rescan /path/to/staging --target movies
 organiseMyVideo torrent maintain /path/to/staging --clean-names

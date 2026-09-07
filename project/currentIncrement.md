@@ -2,38 +2,53 @@
 
 ## Requirement
 
-[REQ-016: Catalogue media identities](requirements/features/016-catalogueMediaIdentities.md)
-on `feature/catalogue-identities`.
+[REQ-018: TV show folder leading articles](requirements/features/018-tvShowFolderArticles.md)
+[REQ-017: Catalogue metadata resolution](requirements/features/017-catalogueMetadataResolution.md)
+on feature/catalogue-metadata-resolution.
 
-## Objective and scope
+## Objective
 
-Prepare external TV identities, home-video storage, and removable-volume kinds
-through additive SQLite changes and compatible dataclasses. Preserve current
-movie, TV, and camera scan behaviour. REQ-014 and REQ-015 scans remain out of scope.
+Keep titles as `The Boys` / `The Godfather`, and store folders as
+`Boys, The` / `Godfather, The (1972)` for browsing.
+
+## Status
+
+Completed — TV and movie folder cleanup invert a leading `The` on the
+folder only; catalogue titles stay in natural order.
+Record the best existing movie/TV metadata offline and preserve durable provider
+IDs across replacements. Reuse organiser readers; refresh descriptions from
+current evidence. No provider identification or media mutations.
 
 ## Status
 
 Implementation and acceptance verification complete; ready for review.
-Existing TV identity support is retained. Home-video schema and volume-kind
-persistence are added. REQ-010's completed scope is unchanged.
 
-## Acceptance and verification
+## Verification result
 
-- Eight new tests cover legacy migration via all three list APIs, preserved
-  rows/indexes, repeated upgrades, TV identity round trips, home-video schema
-  constraints, and SD/USB model persistence.
-- Full suite: 416 passed.
-- Project-pinned Black 25.1.0: all 28 Python files pass.
-- Naming lint: existing HEAD findings unchanged; new catalogue tests and
-  mediaCatalogue pass. Ran the module through the local organiseMyProjects
-  checkout because the installed launcher lacks package metadata.
-- Markup lint: existing repository violations; no findings in changed Markdown.
-- `git diff --check`: passed.
-- No acceptance verification remains; repository-wide lint cleanup is separate.
+- pytest
+- `git diff --check`
+- Ten new production-path cases cover movie MCM/library/name/folder resolution,
+  XML-only folders, TV source priority and identity scope, series-key episode
+  lookup, season zero, durable fallback, refreshed descriptions and independent
+  replacement. Network, input and provider/enrichment guards cover every case.
+- Full pytest suite: 436 passed, including migrations and REQ-016.
+- black --check . with installed Black 26.3.1: four unchanged files require
+  formatting (organiseMyVideo/__main__.py, organiseMyVideo/grokGallery.py,
+  tests/test_mediaCatalogue.py and tests/test_grokGallery.py). Changed Python
+  files pass. Unrelated formatting was left alone.
+- Both requested ./tests/runLinter.py commands fail with permission denied.
+  Invoking with python3 requires PYTHONPATH=/home/andy/Source/organiseMyProjects
+  because the shared package is not installed for that interpreter.
+- Those fallback naming and markup runs completed: existing repository findings
+  remain. Catalogue code/new tests pass naming checks; changed Markdown passes.
+  Existing metadata/video logging findings are unchanged.
+- git diff --check passes. No acceptance verification remains; repository-wide
+  formatting/lint remediation is outside this increment.
 
-## Deferred design and next action
+## Deferred risks and next action
 
-Review this increment. For `feature/catalogue-metadata-resolution`, decide how
-provider provenance and identity reconciliation should preserve catalogue-only
-IDs across scans: current movie/TV replacement can discard them. Do not change
-that scan contract within REQ-016.
+Review the changes. feature/canonical-media-identification owns ambiguous
+provider matches, provenance modelling, conflicting partial IDs and identity
+continuity across renamed paths. Reconciliation deliberately uses stable local
+paths and cannot distinguish a different media item replacing one at the same
+path. No fresh identification is attempted to resolve those cases.
