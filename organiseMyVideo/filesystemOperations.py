@@ -188,6 +188,15 @@ class FilesystemOperations:
         )
         return result
 
+    def removeFile(self, path: Path, *, stateKind: str = "application-state") -> None:
+        """Plan or remove one existing regular file."""
+        path = Path(path)
+        if not path.is_file():
+            raise FileNotFoundError(path)
+        self._record("remove-file", source=path, stateKind=stateKind)
+        if not self.dryRun:
+            path.unlink()
+
     def removeEmptyDirectory(
         self, path: Path, *, stateKind: str = "application-state"
     ) -> None:

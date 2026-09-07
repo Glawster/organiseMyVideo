@@ -115,3 +115,25 @@ def testQuarantineMovesContentToRecoverableLocation(tmp_path: Path):
     assert quarantinePath.read_bytes() == b"torrent"
     assert ".organiseMyVideo-quarantine" in quarantinePath.parts
     assert filesystem.operations[0].action == "quarantine"
+
+
+def testRemoveFileHonoursDryRun(tmp_path: Path):
+    source = tmp_path / "series.xml"
+    source.write_text("<Series />", encoding="utf-8")
+    filesystem = FilesystemOperations(dryRun=True)
+
+    filesystem.removeFile(source, stateKind="metadata")
+
+    assert source.exists()
+    assert filesystem.operations[0].action == "remove-file"
+    assert filesystem.operations[0].source == source
+    assert filesystem.operations[0].stateKind == "metadata"
+
+
+def testRemoveFileDeletesConfirmedFile(tmp_path: Path):
+    source = tmp_path / "series.xml"
+    source.write_text("<Series />", encoding="utf-8")
+
+    FilesystemOperations(dryRun=False).removeFile(source, stateKind="metadata")
+
+    assert not source.exists()

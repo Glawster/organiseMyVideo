@@ -43,6 +43,85 @@ class TvMergeGroup:
     destination: TvSeriesCatalogueRecord
 
 
+class _TvMergeProgress:
+    """Track recursive merge work on the established single-line progress display."""
+
+    def __init__(self, total: int, showName: str, sourceName: str) -> None:
+        from .tvLibraryScan import _TvScanProgress
+
+        self.total = max(total, 0)
+        self.completed = 0
+        self.sourceName = sourceName
+        self.progress = _TvScanProgress(self.total, f"Merging {showName}")
+        self.progress.render(0, sourceName)
+
+    def advance(self, count: int = 1, name: Optional[str] = None) -> None:
+        """Advance by *count* filesystem entries and refresh the live line."""
+
+        self.completed = min(self.completed + max(count, 0), self.total)
+        self.progress.render(self.completed, name or self.sourceName)
+
+    def show(self, name: str) -> None:
+        """Show the filesystem entry currently being evaluated."""
+
+        self.progress.render(self.completed, name)
+
+    def compareFiles(self, left: Path, right: Path) -> bool:
+        """Compare equal-sized files while showing byte-level hashing progress."""
+
+        try:
+            leftSize = left.stat().st_size
+            rightSize = right.stat().st_size
+        except OSError:
+            return False
+        if leftSize != rightSize:
+            return False
+
+        from .tvLibraryScan import _TvScanProgress
+
+        self.pause()
+        totalBytes = leftSize + rightSize
+        compareProgress = _TvScanProgress(totalBytes, "Comparing duplicate files")
+        completedBytes = 0
+
+        def digest(path: Path) -> str:
+            nonlocal completedBytes
+            value = hashlib.sha256()
+            compareProgress.render(completedBytes, path.name)
+            with path.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    value.update(chunk)
+                    completedBytes += len(chunk)
+                    compareProgress.render(completedBytes, path.name)
+            return value.hexdigest()
+
+        try:
+            return digest(left) == digest(right)
+        except OSError:
+            return False
+        finally:
+            compareProgress.finish()
+            self.resume(left.name)
+
+    def pause(self) -> None:
+        """Finish the current live line before ordinary logger output."""
+
+        self.progress.finish()
+
+    def resume(self, name: Optional[str] = None) -> None:
+        """Redraw progress after a logger message interrupted the live line."""
+
+        self.progress.render(self.completed, name or self.sourceName)
+
+    def finish(self) -> None:
+        """Complete the live merge line."""
+
+        if self.completed < self.total:
+            self.completed = self.total
+            self.progress.render(self.completed, self.sourceName)
+        self.progress.finish()
+
+
 class TvLibraryMerger:
     """Plan or execute merges of duplicate TV-show folders."""
 
@@ -57,6 +136,7 @@ class TvLibraryMerger:
         self.filesystem = filesystem or FilesystemOperations(dryRun=dryRun)
         self.dryRun = dryRun
         self.stats = TvMergeStats()
+        self._episodeByPath: dict[tuple[str, str], TvEpisodeCatalogueRecord] = {}
 
     def merge(self) -> TvMergeStats:
         """Merge every unambiguous duplicate TV-series group in the catalogue."""
@@ -67,6 +147,9 @@ class TvLibraryMerger:
             if Path(row.folderPath).is_dir()
         ]
         episodes = self.catalogue.catalogueTvEpisodesList()
+        self._episodeByPath = {
+            (episode.seriesFolderPath, episode.filePath): episode for episode in episodes
+        }
         groups = self._duplicateGroups(series, episodes)
         self.stats.groupsFound = len(groups)
 
@@ -118,31 +201,45 @@ class TvLibraryMerger:
                 episodeCounts.get(episode.seriesFolderPath, 0) + 1
             )
 
+        candidateGroups = [members for members in grouped.values() if len(members) > 1]
         result: list[TvMergeGroup] = []
-        for members in grouped.values():
-            if len(members) < 2:
-                continue
-            if _seriesIdentityConflicts(members):
-                self.stats.identityConflicts += 1
-                logger.warning(
-                    "skipping TV merge with conflicting provider IDs: %s",
-                    ", ".join(row.folderPath for row in members),
-                )
-                continue
-            destination = max(
-                members,
-                key=lambda row: _seriesCompleteness(row, episodeCounts),
-            )
-            ordered = tuple(
-                sorted(
+
+        from .tvLibraryScan import _TvScanProgress
+
+        progress = _TvScanProgress(len(candidateGroups), "Planning TV merges")
+        try:
+            for completed, members in enumerate(candidateGroups):
+                displayName = members[0].showName or Path(members[0].folderPath).name
+                progress.render(completed, displayName)
+
+                if _seriesIdentityConflicts(members):
+                    self.stats.identityConflicts += 1
+                    progress.finish()
+                    logger.warning(
+                        "skipping TV merge with conflicting provider IDs: %s",
+                        ", ".join(row.folderPath for row in members),
+                    )
+                    progress.render(completed + 1, displayName)
+                    continue
+
+                destination = max(
                     members,
-                    key=lambda row: (
-                        row.folderPath != destination.folderPath,
-                        row.folderPath.lower(),
-                    ),
+                    key=lambda row: _seriesCompleteness(row, episodeCounts),
                 )
-            )
-            result.append(TvMergeGroup(series=ordered, destination=destination))
+                ordered = tuple(
+                    sorted(
+                        members,
+                        key=lambda row: (
+                            row.folderPath != destination.folderPath,
+                            row.folderPath.lower(),
+                        ),
+                    )
+                )
+                result.append(TvMergeGroup(series=ordered, destination=destination))
+                progress.render(completed + 1, displayName)
+        finally:
+            progress.finish()
+
         return sorted(
             result,
             key=lambda group: (
@@ -169,20 +266,29 @@ class TvLibraryMerger:
             if source == destination:
                 continue
             logger.value("merge source", source)
+            progress = _TvMergeProgress(
+                _directoryDescendantCount(source),
+                group.destination.showName,
+                source.name,
+            )
             try:
                 moved = self._mergeDirectory(
                     source,
                     destination,
                     source,
                     episodeFiles,
+                    progress,
                 )
                 mergedAny = mergedAny or moved
                 if not self.dryRun and source.is_dir() and not any(source.iterdir()):
                     self.filesystem.removeEmptyDirectory(source, stateKind="media")
                     self.stats.directoriesRemoved += 1
             except (OSError, RuntimeError, ValueError) as error:
+                progress.pause()
                 self.stats.errors += 1
                 logger.error("could not merge %s into %s: %s", source, destination, error)
+            finally:
+                progress.finish()
 
         if mergedAny:
             self.stats.groupsMerged += 1
@@ -216,6 +322,7 @@ class TvLibraryMerger:
         destinationDir: Path,
         seriesSource: Path,
         episodeFiles: dict[tuple[object, ...], Path],
+        progress: Optional[_TvMergeProgress] = None,
     ) -> bool:
         """Recursively merge *sourceDir* without overwriting destination files."""
 
@@ -226,35 +333,62 @@ class TvLibraryMerger:
             raise
 
         if not destinationDir.exists():
+            entryCount = _treeEntryCount(sourceDir)
+            if progress is not None:
+                progress.show(sourceDir.name)
             self.filesystem.move(sourceDir, destinationDir)
             self.stats.directoriesMoved += 1
+            if progress is not None:
+                progress.advance(entryCount, sourceDir.name)
             return True
 
         for source in children:
             destination = destinationDir / source.name
+            if progress is not None:
+                progress.show(source.name)
             if source.is_dir():
                 if not destination.exists():
+                    entryCount = _treeEntryCount(source)
                     self.filesystem.move(source, destination)
                     self.stats.directoriesMoved += 1
                     movedAny = True
+                    if progress is not None:
+                        progress.advance(entryCount, source.name)
                     continue
                 if not destination.is_dir():
-                    self._recordConflict(source, destination, "directory/file collision")
+                    self._recordConflict(
+                        source,
+                        destination,
+                        "directory/file collision",
+                        progress,
+                    )
+                    if progress is not None:
+                        progress.advance(1, source.name)
                     continue
                 childMoved = self._mergeDirectory(
                     source,
                     destination,
                     seriesSource,
                     episodeFiles,
+                    progress,
                 )
                 movedAny = movedAny or childMoved
                 if not self.dryRun and source.is_dir() and not any(source.iterdir()):
                     self.filesystem.removeEmptyDirectory(source, stateKind="media")
                     self.stats.directoriesRemoved += 1
+                if progress is not None:
+                    progress.advance(1, source.name)
                 continue
 
             if not source.is_file():
-                self._recordConflict(source, destination, "unsupported filesystem entry")
+                self._recordConflict(
+                    source,
+                    destination,
+                    "unsupported filesystem entry",
+                    progress,
+                )
+                if progress is not None:
+                    progress.advance(1, source.name)
                 continue
 
             episode = self._episodeForPath(source, seriesSource)
@@ -262,14 +396,31 @@ class TvLibraryMerger:
                 key = _episodeIdentity(episode)
                 existing = episodeFiles.get(key) if key is not None else None
                 if existing is not None and existing != source:
-                    self._recordExistingEpisode(source, existing)
+                    self._recordExistingEpisode(source, existing, progress)
+                    if progress is not None:
+                        progress.advance(1, source.name)
                     continue
 
             if destination.exists():
                 if destination.is_file():
-                    self._recordExistingFile(source, destination)
+                    if source.name.casefold() == "series.xml":
+                        self._discardRegenerableSeriesMetadata(
+                            source,
+                            destination,
+                            progress,
+                        )
+                        movedAny = True
+                    else:
+                        self._recordExistingFile(source, destination, progress)
                 else:
-                    self._recordConflict(source, destination, "file/directory collision")
+                    self._recordConflict(
+                        source,
+                        destination,
+                        "file/directory collision",
+                        progress,
+                    )
+                if progress is not None:
+                    progress.advance(1, source.name)
                 continue
 
             self.filesystem.move(source, destination)
@@ -279,8 +430,26 @@ class TvLibraryMerger:
                 key = _episodeIdentity(episode)
                 if key is not None:
                     episodeFiles[key] = source if self.dryRun else destination
+            if progress is not None:
+                progress.advance(1, source.name)
 
         return movedAny
+
+    def _discardRegenerableSeriesMetadata(
+        self,
+        source: Path,
+        destination: Path,
+        progress: Optional[_TvMergeProgress] = None,
+    ) -> None:
+        """Keep destination ``series.xml`` and discard the regenerable source copy."""
+
+        if progress is not None:
+            progress.pause()
+        logger.value("preserving destination series metadata", destination)
+        logger.value("removing regenerable source metadata", source)
+        self.filesystem.removeFile(source, stateKind="metadata")
+        if progress is not None:
+            progress.resume(source.name)
 
     def _episodeForPath(
         self, source: Path, seriesSource: Path
@@ -289,35 +458,79 @@ class TvLibraryMerger:
 
         if source.suffix.lower() not in VIDEO_EXTENSIONS:
             return None
-        sourceText = str(source)
-        for episode in self.catalogue.catalogueTvEpisodesList():
-            if episode.seriesFolderPath == str(seriesSource) and episode.filePath == sourceText:
-                return episode
-        return None
+        return self._episodeByPath.get((str(seriesSource), str(source)))
 
-    def _recordExistingEpisode(self, source: Path, existing: Path) -> None:
+    def _recordExistingEpisode(
+        self,
+        source: Path,
+        existing: Path,
+        progress: Optional[_TvMergeProgress] = None,
+    ) -> None:
         """Report a duplicate/conflicting episode and preserve both files."""
 
-        if _filesIdentical(source, existing):
+        identical = (
+            progress.compareFiles(source, existing)
+            if progress is not None
+            else _filesIdentical(source, existing)
+        )
+        if identical:
+            if progress is not None:
+                progress.pause()
             self.stats.duplicates += 1
             logger.warning("duplicate episode preserved: %s; existing %s", source, existing)
+            if progress is not None:
+                progress.resume(source.name)
         else:
-            self._recordConflict(source, existing, "episode identity already exists")
+            self._recordConflict(
+                source,
+                existing,
+                "episode identity already exists",
+                progress,
+            )
 
-    def _recordExistingFile(self, source: Path, destination: Path) -> None:
+    def _recordExistingFile(
+        self,
+        source: Path,
+        destination: Path,
+        progress: Optional[_TvMergeProgress] = None,
+    ) -> None:
         """Report a same-path duplicate or conflict without overwriting."""
 
-        if _filesIdentical(source, destination):
+        identical = (
+            progress.compareFiles(source, destination)
+            if progress is not None
+            else _filesIdentical(source, destination)
+        )
+        if identical:
+            if progress is not None:
+                progress.pause()
             self.stats.duplicates += 1
             logger.warning("duplicate file preserved: %s; existing %s", source, destination)
+            if progress is not None:
+                progress.resume(source.name)
         else:
-            self._recordConflict(source, destination, "destination already exists")
+            self._recordConflict(
+                source,
+                destination,
+                "destination already exists",
+                progress,
+            )
 
-    def _recordConflict(self, source: Path, destination: Path, reason: str) -> None:
+    def _recordConflict(
+        self,
+        source: Path,
+        destination: Path,
+        reason: str,
+        progress: Optional[_TvMergeProgress] = None,
+    ) -> None:
         """Record a merge conflict while leaving both entries untouched."""
 
+        if progress is not None:
+            progress.pause()
         self.stats.conflicts += 1
         logger.warning("merge conflict (%s): %s -> %s", reason, source, destination)
+        if progress is not None:
+            progress.resume(source.name)
 
 
 def mergeDuplicateTvShows(
@@ -326,13 +539,37 @@ def mergeDuplicateTvShows(
     filesystem: Optional[FilesystemOperations] = None,
     dryRun: bool = True,
 ) -> TvMergeStats:
-    """Convenience service for the ``media organise --merge`` workflow."""
+    """Merge duplicates from live storage, keeping explicit test catalogues injectable."""
+
+    # The filesystem is authoritative for maintenance. A normal MediaCatalogue is
+    # persisted UI/query state and may legitimately be stale or empty, so replace
+    # it with a fresh in-memory snapshot. Lightweight injected catalogues used by
+    # tests and callers remain honoured.
+    if catalogue is None or isinstance(catalogue, MediaCatalogue):
+        from .tvLibraryScan import scanTvLibrary
+
+        catalogue = scanTvLibrary()
 
     return TvLibraryMerger(
         catalogue=catalogue,
         filesystem=filesystem,
         dryRun=dryRun,
     ).merge()
+
+
+def _directoryDescendantCount(root: Path) -> int:
+    """Return the number of entries beneath *root* for merge progress."""
+
+    try:
+        return sum(1 for _ in root.rglob("*"))
+    except OSError:
+        return 0
+
+
+def _treeEntryCount(root: Path) -> int:
+    """Return one for *root* plus every descendant beneath it."""
+
+    return 1 + _directoryDescendantCount(root)
 
 
 def _seriesIdentityTokens(row: TvSeriesCatalogueRecord) -> set[tuple[str, str]]:
