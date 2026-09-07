@@ -61,10 +61,17 @@ class _TvScanProgress:
 
         if not self.enabled:
             return
-        progress = 1.0 if self.total == 0 else min(completed / self.total, 1.0)
-        filled = int(progress * _SCAN_PROGRESS_BAR_WIDTH)
-        bar = "#" * filled + "-" * (_SCAN_PROGRESS_BAR_WIDTH - filled)
-        prefix = f"{self.label}: [{bar}] {progress * 100:3.0f}% ({completed}/{self.total})"
+        if self.total <= 0:
+            bar = "-" * _SCAN_PROGRESS_BAR_WIDTH
+            prefix = f"{self.label}: [{bar}]   0% ({completed}/?)"
+        else:
+            progress = min(completed / self.total, 1.0)
+            filled = int(progress * _SCAN_PROGRESS_BAR_WIDTH)
+            bar = "#" * filled + "-" * (_SCAN_PROGRESS_BAR_WIDTH - filled)
+            prefix = (
+                f"{self.label}: [{bar}] {progress * 100:3.0f}% "
+                f"({completed}/{self.total})"
+            )
         columns = max(shutil.get_terminal_size(fallback=(80, 24)).columns, 20)
         available = columns - len(prefix) - 1
         suffix = ""

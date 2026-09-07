@@ -1,5 +1,6 @@
 """Tests for provider-identity TV library merging."""
 
+from io import StringIO
 from pathlib import Path
 
 from organiseMyVideo.filesystemOperations import FilesystemOperations
@@ -8,6 +9,13 @@ from organiseMyVideo.mediaCatalogue import (
     TvSeriesCatalogueRecord,
 )
 from organiseMyVideo.mediaMerge import TvLibraryMerger
+
+
+class _TtyStream(StringIO):
+    """In-memory stream treated as a TTY so merge progress actually renders."""
+
+    def isatty(self) -> bool:
+        return True
 
 
 class FakeCatalogue:
@@ -222,8 +230,12 @@ def testMergeDiscardsSourceSeriesXmlWhenDestinationHasOne(tmp_path: Path):
     sourceShow.mkdir(parents=True)
     destinationSeries = destinationShow / "series.xml"
     sourceSeries = sourceShow / "series.xml"
-    destinationSeries.write_text("<Series><SeriesID>123</SeriesID></Series>", encoding="utf-8")
-    sourceSeries.write_text("<Series><SeriesID>123</SeriesID><Old>true</Old></Series>", encoding="utf-8")
+    destinationSeries.write_text(
+        "<Series><SeriesID>123</SeriesID></Series>", encoding="utf-8"
+    )
+    sourceSeries.write_text(
+        "<Series><SeriesID>123</SeriesID><Old>true</Old></Series>", encoding="utf-8"
+    )
     (destinationShow / "Grimm S01E01.mkv").write_bytes(b"episode")
 
     stats = TvLibraryMerger(
@@ -235,7 +247,10 @@ def testMergeDiscardsSourceSeriesXmlWhenDestinationHasOne(tmp_path: Path):
         dryRun=False,
     ).merge()
 
-    assert destinationSeries.read_text(encoding="utf-8") == "<Series><SeriesID>123</SeriesID></Series>"
+    assert (
+        destinationSeries.read_text(encoding="utf-8")
+        == "<Series><SeriesID>123</SeriesID></Series>"
+    )
     assert not sourceSeries.exists()
     assert not sourceShow.exists()
     assert stats.groupsMerged == 1
@@ -269,3 +284,40 @@ def testDryRunPlansSourceSeriesXmlRemovalWithoutDeletingIt(tmp_path: Path):
         operation.action == "remove-file" and operation.source == sourceSeries
         for operation in filesystem.operations
     )
+
+
+def testMergeProgressShowsWorkBeforeMovingFiles(tmp_path: Path):
+    fuller = tmp_path / "video1" / "TV" / "Grimm"
+    smaller = tmp_path / "video2" / "TV" / "Grimm (2011) -"
+    fullerSeason = fuller / "Season 1"
+    smallerSeason = smaller / "Season 1"
+    fullerSeason.mkdir(parents=True)
+    smallerSeason.mkdir(parents=True)
+    existing = fullerSeason / "Grimm S01E01.mkv"
+    extra = fullerSeason / "Grimm S01E03.mkv"
+    incoming = smallerSeason / "Grimm S01E02.mkv"
+    existing.write_bytes(b"one")
+    extra.write_bytes(b"three")
+    incoming.write_bytes(b"two")
+    stream = _TtyStream()
+
+    TvLibraryMerger(
+        catalogue=FakeCatalogue(
+            [_series(fuller), _series(smaller)],
+            [
+                _episode(existing, fuller, 1, 1),
+                _episode(extra, fuller, 1, 3),
+                _episode(incoming, smaller, 1, 2),
+            ],
+        ),
+        filesystem=FilesystemOperations(dryRun=False),
+        dryRun=False,
+        progressStream=stream,
+    ).merge()
+
+    output = stream.getvalue()
+    assert "counting entries" in output
+    assert "listing" in output
+    assert "Grimm S01E02.mkv" in output
+    assert "(0/" in output
+    assert "(1/" in output or "(2/" in output or "(3/" in output
