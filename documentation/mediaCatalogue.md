@@ -41,7 +41,7 @@ Tables use camelCase names: `cardInventory`, `cardInventoryFile`,
 
 A movie row is one library folder. Title, year, and identifiers come from
 known metadata in this order: MCM `movie.xml`, the `metadataLibrary.json`
-cache, then the folder or video filename. The catalogue does not scrape
+cache, then the canonical video filename and folder hints. The catalogue does not scrape
 or re-identify movies.
 
 A TV series row is a show folder. It stores `tvdbId`, `tmdbId`, and
@@ -94,10 +94,27 @@ collection. See [Home video archive](homeVideo.md).
 External provider IDs use nullable TEXT, preserving prefixes and leading zeros.
 They are separate from SQLite primary keys and have no uniqueness constraint:
 multiple local files or folders may refer to the same external identity.
-Existing scans still replace movie and TV rows, so manually stored identities
-are not guaranteed to survive a rescan unless the metadata sources supply them.
-Identity reconciliation and provider provenance belong to future metadata
-resolution work.
+Before replacement, existing provider IDs are read in the same transaction:
+movies and series match by `folderPath`, episodes by `filePath`. Missing IDs
+fall back individually to these stored values. Current MCM and metadata-library
+IDs always win when supplied. Descriptions are rebuilt from current evidence;
+SQLite titles, show names, season numbers and episode titles are never reused.
+Removed paths still disappear. Renamed paths do not inherit old identities.
+
+[REQ-017](../project/requirements/features/017-catalogueMetadataResolution.md)
+uses the existing local MCM readers, library lookup and canonical filename
+parsers through a catalogue-only source, without constructing an organiser or
+calling enrichment, provider, authentication, artwork or scraping workflows.
+Its effective descriptive priority is MCM, metadataLibrary, canonical filename,
+then path inference; provider priority is MCM, metadataLibrary, then persisted
+catalogue IDs as fallback. The existing schema has no separate provenance fields.
+Series provider IDs never stand in for episode IDs. The evidence-only TV reader
+keeps path-derived seasons below canonical filenames and preserves season zero.
+Movie XML can also describe a folder with no video file.
+
+Independent replacement flags leave the other collection untouched. Provider
+conflicts, provenance modelling, ambiguous matches and identity continuity across
+renamed paths remain canonical-media-identification concerns.
 
 `homeVideoItem` is schema preparation only; no home-video scan or list service
 is provided yet. `HomeVideoCatalogueRecord` represents its fields:

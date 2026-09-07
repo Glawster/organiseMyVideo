@@ -458,6 +458,7 @@ class MetadataMixin:
             "showName": showName,
             "imdbId": imdbId,
             "seriesId": seriesId,
+            "tmdbId": self._readFirstXmlText(seriesRoot, ("TMDbId", "TMDBId")),
             "metadataSource": "mcm",
             "mcm": mcmPresence,
         }

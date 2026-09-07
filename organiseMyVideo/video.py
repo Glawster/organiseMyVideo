@@ -1146,7 +1146,13 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
             "mcm": mcmPresence,
         }
 
-    def _readTvMcmHints(self, sourceFile: Path) -> Optional[dict]:
+    def _readTvMcmHints(
+        self,
+        sourceFile: Path,
+        *,
+        evidenceOnly: bool = False,
+        showDir: Optional[Path] = None,
+    ) -> Optional[dict]:
         """
         Return standardised TV hints from nearby MCM XML files.
 
@@ -1157,6 +1163,8 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         Args:
             sourceFile: Episode file whose show/season structure may contain
                         ``series.xml`` and episode metadata XML.
+            evidenceOnly: Exclude inferred seasons and series IMDb fallback.
+            showDir: Known series folder, including nonstandard season layouts.
 
         Returns:
             ``None`` when no usable TV metadata exists, otherwise a dict with
@@ -1173,6 +1181,8 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
             and sourceSeasonDir.parent != self.sourceDir
         ):
             sourceShowDir = sourceSeasonDir.parent
+        if showDir is not None:
+            sourceShowDir = showDir
         seriesRoot = (
             self._readXmlRoot(sourceShowDir / "series.xml") if sourceShowDir else None
         )
@@ -1188,6 +1198,14 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         episodeTitle = self._readFirstXmlText(episodeRoot, ("EpisodeName",))
         imdbId = self._readFirstXmlText(episodeRoot, ("IMDB_ID", "IMDbId")) or (
             self._readFirstXmlText(seriesRoot, ("IMDB_ID", "IMDbId"))
+        )
+        # Evidence consumers must not mistake path hints or series IDs for
+        # episode XML evidence. Keep legacy organiser defaults compatible.
+        if evidenceOnly:
+            season = self._readIntXmlText(episodeRoot, ("SeasonNumber",))
+            imdbId = self._readFirstXmlText(episodeRoot, ("IMDB_ID", "IMDbId"))
+        tmdbEpisodeId = self._readFirstXmlText(
+            episodeRoot, ("TMDbEpisodeId", "TMDBEpisodeId", "TMDbId", "TMDBId")
         )
         seriesId = self._readTvShowSeriesId(sourceShowDir, sourceSeasonDir)
         episodeId = self._readFirstXmlText(episodeRoot, ("EpisodeID",))
@@ -1259,6 +1277,7 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
             "imdbId": imdbId,
             "seriesId": seriesId,
             "episodeId": episodeId,
+            **({"tmdbEpisodeId": tmdbEpisodeId} if tmdbEpisodeId else {}),
             "metadataSource": "mcm",
             "mcm": tvMcm,
         }
