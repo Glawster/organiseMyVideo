@@ -84,13 +84,15 @@ class CameraImportPlanner:
                     excluded.append(item.relativePath)
                     continue
 
+            captureItem = item
             if item.cameraKind == "dji" and item.fileKind == "sidecar":
                 primary = videosByStem.get((item.path.parent, item.path.stem.lower()))
                 if primary is None:
                     excluded.append(item.relativePath)
                     continue
+                captureItem = primary
 
-            captureAt, dateSource = _captureRead(item)
+            captureAt, dateSource = _captureRead(captureItem)
             if captureAt is None:
                 excluded.append(item.relativePath)
                 continue
