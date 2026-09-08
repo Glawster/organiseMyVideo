@@ -2,7 +2,7 @@
 
 ## Status
 
-ToDo
+In progress — planner slice for acceptance criteria 1-7 implemented; verification pending.
 
 ## Outcome
 
@@ -136,8 +136,9 @@ The agreed behaviour and development sequence are maintained in
 
 ## Traceability
 
-- Implementation: pending
-- Tests: pending
+- Implementation: `organiseMyVideo/cameraDetect.py`, `organiseMyVideo/cameraPlan.py`,
+  existing `organiseMyVideo/cameraMetadata.py`; later import/migration services pending.
+- Tests: `tests/test_cameraPlan.py`; later confirmed-import, CLI, migration and failure tests pending.
 - Documentation: `documentation/cameraImport.md`, `README.md`
 - Pull request: pending
 - Agent runs: None
@@ -151,3 +152,5 @@ The agreed behaviour and development sequence are maintained in
 - 2026-09-02: changed — include a separately planned, confirmed, and verified
   migration of current GoPro and Drone files into the new hierarchy.
 - 2026-09-04: changed — include dash-cam originals under `Dashcam/YYYY/MM/DD/`.
+- 2026-09-08: began implementation with typed, non-mutating detection and import
+  planning for acceptance criteria 1-7; verification pending.
