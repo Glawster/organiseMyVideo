@@ -2,45 +2,49 @@
 
 ## Requirement
 
-[REQ-019: Catalogue metadata resolution](requirements/features/019-catalogueMetadataResolution.md)
-on `feature/catalogue-metadata-resolution`.
+[REQ-004: Camera media import](requirements/features/004-cameraMediaImport.md)
+on `feature/camera-media-import`.
 
 ## Objective
 
-Record the best existing movie and TV metadata offline, preserve durable provider
-IDs across replacements, and refresh descriptions from current local evidence
-without provider identification or media mutations.
+Deliver the first REQ-004 increment: a typed, non-mutating camera import planner
+that detects supported GoPro, DJI and dash-cam content, reads capture dates with
+documented fallback, assigns archive destinations, handles companions and ignored
+content, and classifies duplicates and conflicts without changing source,
+destination, application state or manifest storage.
+
+## Scope for this increment
+
+- Acceptance criteria 1-7.
+- Reuse the existing pure-Python camera metadata readers.
+- Accept card roots, DCIM directories and individual supported camera directories.
+- Preserve original filenames and plan GoPro, Drone and Dashcam `YYYY/MM/DD`
+  destinations.
+- Exclude GoPro LRV/THM helpers unless explicitly included.
+- Keep DJI same-stem SRT companions with their MP4.
+- Report unknown or date-ambiguous content rather than importing it.
+- Classify an existing identical destination as already present and a same-name,
+  different-content destination as a conflict.
+- No filesystem mutation, manifest writes, CLI adapter or confirmed import yet.
 
 ## Status
 
-Completed — implementation and final combined-branch verification are complete;
-ready to merge.
+In progress — planner implementation and production-path tests are next.
 
-## Verification result
+## Verification
 
-- Production-path tests cover movie MCM/library/name/folder resolution, XML-only
-  folders, TV source priority and identity scope, series-key episode lookup,
-  season zero, durable SQLite provider-ID fallback, refreshed descriptions and
-  independent movie/TV replacement.
-- A dedicated regression test verifies that current MCM movie, series and episode
-  provider IDs replace older provider IDs persisted in SQLite.
-- Network, input and provider/enrichment guards fail the tests if a catalogue
-  rescan attempts fresh identification.
-- Full `pytest` run on the current combined tree is green.
-- `git diff --check` produces no output.
-- Black identified three combined-tree formatting changes; those were applied.
-- `./tests/runLinter.py` reports no findings in the REQ-019 catalogue-resolution
-  test file. Remaining naming findings are pre-existing or interface-shaped test
-  helpers outside this increment.
-- `./tests/runLinter.py --markup` reports repository-wide pre-existing Markdown
-  findings outside the REQ-019 changed Markdown.
+Run:
 
-## Deferred risks and next action
+- `pytest`
+- `black --check .`
+- `./tests/runLinter.py`
+- `./tests/runLinter.py --markup`
+- `git diff --check`
 
-`feature/canonical-media-identification` owns ambiguous provider matches,
-provenance modelling, conflicting partial IDs and identity continuity across
-renamed paths. Reconciliation deliberately uses stable local paths and cannot
-distinguish a different media item replacing one at the same path. No fresh
-identification is attempted to resolve those cases.
+Do not fix unrelated pre-existing repository lint findings as part of REQ-004.
 
-REQ-019 is complete and ready to merge to `main`.
+## Deferred to later REQ-004 increments
+
+Confirmed copy/verification, atomic finalisation, import manifests, CLI wiring,
+archive migration, rollback-plan evidence and empty-directory cleanup remain
+within REQ-004 but are outside this first planner slice.
