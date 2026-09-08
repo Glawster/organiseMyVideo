@@ -73,8 +73,10 @@ class CameraImportPlanner:
         excluded: list[str] = []
         operations: list[ImportOperation] = []
 
-        detectedByStem = {
-            (item.path.parent, item.path.stem.lower()): item for item in detection.files
+        videosByStem = {
+            (item.path.parent, item.path.stem.lower()): item
+            for item in detection.files
+            if item.fileKind == "video"
         }
         for item in detection.files:
             if item.cameraKind == "gopro" and item.fileKind in {"preview", "thumbnail"}:
@@ -83,8 +85,8 @@ class CameraImportPlanner:
                     continue
 
             if item.cameraKind == "dji" and item.fileKind == "sidecar":
-                primary = detectedByStem.get((item.path.parent, item.path.stem.lower()))
-                if primary is None or primary.fileKind != "video":
+                primary = videosByStem.get((item.path.parent, item.path.stem.lower()))
+                if primary is None:
                     excluded.append(item.relativePath)
                     continue
 
@@ -150,7 +152,11 @@ def _operationBuild(asset: CameraAsset) -> ImportOperation:
     if not destination.exists():
         return ImportOperation(asset=asset, outcome="copy", reason="destination missing")
     if not destination.is_file():
-        return ImportOperation(asset=asset, outcome="conflict", reason="destination is not a file")
+        return ImportOperation(
+            asset=asset,
+            outcome="conflict",
+            reason="destination is not a file",
+        )
 
     sourceDigest = _sha256(asset.sourcePath)
     destinationDigest = _sha256(destination)
