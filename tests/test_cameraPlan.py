@@ -6,12 +6,12 @@ from organiseMyVideo.cameraDetect import cameraDetect
 from organiseMyVideo.cameraPlan import CameraImportPlanner
 
 
-def _setMtime(path: Path, value: datetime) -> None:
+def fileMtimeSet(path: Path, value: datetime) -> None:
     timestamp = value.timestamp()
     os.utime(path, (timestamp, timestamp))
 
 
-def _planner(tmp_path: Path, *, includeGoproCompanions: bool = False):
+def cameraPlannerCreate(tmp_path: Path, *, includeGoproCompanions: bool = False):
     return CameraImportPlanner(
         goproDestination=tmp_path / "archive" / "GoPro",
         droneDestination=tmp_path / "archive" / "Drone",
@@ -54,11 +54,11 @@ def testImportPlanRoutesCameraFamiliesAndReportsFallback(tmp_path: Path):
     for path in (goproFile, djiFile, djiSrt, dashcamFile):
         path.write_bytes(path.name.encode())
     fallback = datetime(2025, 5, 6, 7, 8, 9)
-    _setMtime(goproFile, fallback)
-    _setMtime(djiFile, fallback)
-    _setMtime(djiSrt, datetime(2020, 1, 1, 0, 0, 0))
+    fileMtimeSet(goproFile, fallback)
+    fileMtimeSet(djiFile, fallback)
+    fileMtimeSet(djiSrt, datetime(2020, 1, 1, 0, 0, 0))
 
-    plan = _planner(tmp_path).importPlan(source)
+    plan = cameraPlannerCreate(tmp_path).importPlan(source)
     byName = {operation.asset.sourcePath.name: operation for operation in plan.operations}
 
     assert byName["GH010111.MP4"].asset.destinationPath == (
@@ -85,10 +85,12 @@ def testGoproHelpersExcludedByDefaultAndOptional(tmp_path: Path):
     thumbnail = source / "GH010111.THM"
     for path in (video, preview, thumbnail):
         path.write_bytes(b"content")
-        _setMtime(path, datetime(2024, 4, 20, 12, 0, 0))
+        fileMtimeSet(path, datetime(2024, 4, 20, 12, 0, 0))
 
-    defaultPlan = _planner(tmp_path).importPlan(source)
-    includedPlan = _planner(tmp_path, includeGoproCompanions=True).importPlan(source)
+    defaultPlan = cameraPlannerCreate(tmp_path).importPlan(source)
+    includedPlan = cameraPlannerCreate(
+        tmp_path, includeGoproCompanions=True
+    ).importPlan(source)
 
     assert set(defaultPlan.excludedPaths) == {"GH010111.THM", "GL010111.LRV"}
     assert {item.asset.sourcePath.name for item in includedPlan.operations} == {
@@ -106,15 +108,15 @@ def testPlannerClassifiesIdenticalAndConflictingDestinations(tmp_path: Path):
     identical.write_bytes(b"same")
     conflict.write_bytes(b"source")
     captured = datetime(2024, 4, 20, 12, 0, 0)
-    _setMtime(identical, captured)
-    _setMtime(conflict, captured)
+    fileMtimeSet(identical, captured)
+    fileMtimeSet(conflict, captured)
 
     destination = tmp_path / "archive" / "Drone" / "2024" / "04" / "20"
     destination.mkdir(parents=True)
     (destination / identical.name).write_bytes(b"same")
     (destination / conflict.name).write_bytes(b"different")
 
-    plan = _planner(tmp_path).importPlan(source)
+    plan = cameraPlannerCreate(tmp_path).importPlan(source)
     outcomes = {operation.asset.sourcePath.name: operation.outcome for operation in plan.operations}
 
     assert outcomes == {
@@ -128,10 +130,10 @@ def testPlanningDoesNotMutateSourceOrCreateDestinations(tmp_path: Path):
     source.mkdir(parents=True)
     media = source / "GH010111.MP4"
     media.write_bytes(b"original")
-    _setMtime(media, datetime(2024, 4, 20, 12, 0, 0))
+    fileMtimeSet(media, datetime(2024, 4, 20, 12, 0, 0))
     before = media.read_bytes()
 
-    plan = _planner(tmp_path).importPlan(source)
+    plan = cameraPlannerCreate(tmp_path).importPlan(source)
 
     assert plan.operations[0].outcome == "copy"
     assert media.read_bytes() == before
