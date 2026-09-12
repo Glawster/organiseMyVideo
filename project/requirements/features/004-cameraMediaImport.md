@@ -17,6 +17,20 @@ The existing organiser classifies staged videos as movies or TV episodes. A
 camera card instead contains originals, previews, thumbnails, telemetry, and
 device files that require camera-aware grouping and storage rules.
 
+Numbered removable cards have durable `cardId` identities and may be reused
+many times. REQ-009 records each confirmed observed state of a card as a
+separate durable `snapshotId` with its own complete file inventory. Camera
+import therefore needs to record which physical card and, where available,
+which inventory snapshot supplied an import run. This allows later lifecycle
+logic to prove that the files observed in one particular use of a card were
+archived and verified without confusing them with files from an earlier or
+later reuse of the same physical card.
+
+A Linux mount path is transient runtime context only. It may change when cards
+are swapped, readers are moved, or the same card is mounted later. It must not
+be used as the durable identity for an import or for determining whether a card
+is archived.
+
 The inspected archive stores GoPro footage beneath
 `/mnt/myVideo/Video/GoPro`, mostly in capture-date directories, and DJI footage
 directly beneath `/mnt/myVideo/Video/Drone`. The inspected removable drive uses
@@ -25,6 +39,22 @@ directly beneath `/mnt/myVideo/Video/Drone`. The inspected removable drive uses
 The agreed behaviour and development sequence are maintained in
 [Camera media import](../../../documentation/cameraImport.md).
 
+## Identity and history model
+
+- `cardId` identifies the physical numbered card across all uses.
+- `snapshotId` identifies one confirmed inventory state of that card.
+- `importId` identifies one import run.
+- Imported assets are reconciled to the inventory snapshot using relative path
+  plus verification evidence such as size/digest, not by mount path.
+- Reusing a card does not invalidate or overwrite older snapshot/import history.
+- The latest confirmed inventory snapshot determines the card's current known
+  contents; older snapshots remain audit history.
+- A card may be considered fully archived only when the latest relevant
+  inventory snapshot's archive-worthy files are all accounted for by verified
+  import evidence or an explicit non-archive/ignore classification.
+- A transient source/mount path may be logged for diagnostics, but it is not a
+  durable identity key and must not drive lifecycle decisions.
+
 ## Scope
 
 - Provide camera detection, metadata reading, planning, importing,
@@ -32,6 +62,21 @@ The agreed behaviour and development sequence are maintained in
 - Add `python -m organiseMyVideo camera import -s SOURCE` as the canonical CLI.
 - Require `-s/--source` for canonical camera import; positional source syntax is
   rejected.
+- Resolve the numbered card identity from the existing on-card
+  `organiseMyVideo.NNN` label when importing a numbered removable card.
+- Carry `cardId` through import planning/results and persist it in confirmed
+  import evidence.
+- Link an import to the latest applicable confirmed inventory `snapshotId` when
+  that relationship can be established.
+- Assign a durable `importId` to each confirmed import run.
+- Treat source mount/path text as diagnostic runtime context only, not as the
+  durable identity of the card or import.
+- Require a known `cardId` for confirmed import from a numbered removable card;
+  dry-run may inspect unidentified media but must report that the source is not
+  linked to a known card.
+- Do not infer that a card is fully archived merely because files with matching
+  names exist in the archive; reconciliation must be against the applicable
+  inventory snapshot and verification evidence.
 - Add `python -m organiseMyVideo camera migrate` as the canonical dry-run-first
   action for bringing existing GoPro and Drone media into the new hierarchy.
 - Accept a card root, DCIM directory, or supported camera media directory.
@@ -57,6 +102,9 @@ The agreed behaviour and development sequence are maintained in
 
 - Joining, transcoding, renaming, editing, or playing camera media.
 - Deleting, cleaning, ejecting, or formatting a camera card.
+- Using a transient mount path as card identity.
+- Automatically marking an entire card archived without reconciling a specific
+  inventory snapshot.
 - Automatically moving unrelated, ambiguous, or conflicting legacy content.
 - Automatically executing a migration rollback.
 - Requiring or invoking ExifTool, ffprobe, or shell commands at runtime.
@@ -91,37 +139,63 @@ The agreed behaviour and development sequence are maintained in
    then no incomplete final file remains and the failure is reported without
    deleting the source.
 10. Given a confirmed import, when it completes, then a JSON manifest records
-    source identity, camera information, paths, capture metadata, size, digest,
-    companions, and outcome for every considered asset.
+    camera information, relative source paths, capture metadata, size, digest,
+    companions, outcome for every considered asset, and durable import/card
+    identity where applicable.
 11. Given `python -m organiseMyVideo --help` and `camera --help`, when help is
     displayed, then the camera object and import action are discoverable.
 12. Given the application service is used directly, when it performs the same
     operation as the CLI adapter, then it produces equivalent planning and
     import results without depending on argparse or console output.
-13. Given existing supported media in a GoPro `YYYY-MM-DD` directory or the
+13. Given an import source contains a valid `organiseMyVideo.NNN` card label,
+    when import planning runs, then that numeric value is exposed as the
+    `cardId` for the plan/result without depending on the Linux mount path.
+14. Given the same physical card is mounted under different source paths on
+    different runs, when imports are recorded, then those runs retain the same
+    `cardId`; the changed mount path does not create a new card identity.
+15. Given a confirmed import can be matched to a confirmed inventory snapshot,
+    when the import record/manifest is written, then it records the applicable
+    `snapshotId` together with a new durable `importId`.
+16. Given a numbered removable source has no resolvable `cardId`, when dry-run
+    import is requested, then planning may proceed but clearly reports that the
+    source is unidentified; when confirmed import is requested, it fails before
+    archive mutation.
+17. Given card 6 is inventoried, fully imported, reused, and inventoried again,
+    when lifecycle state is derived, then the second/latest snapshot is treated
+    as the current card contents and the successful import of the first
+    snapshot does not make the reused card appear archived.
+18. Given the latest inventory snapshot contains an archive-worthy file without
+    verified import evidence or an explicit non-archive classification, then the
+    card is not considered fully archived/safe to recycle.
+19. Given existing supported media in a GoPro `YYYY-MM-DD` directory or the
     flat Drone root, when migration planning runs, then each asset targets the
     metadata-derived `YYYY/MM/DD` directory and no file is changed.
-14. Given a legacy asset has an ambiguous date, unrelated type, or destination
+20. Given a legacy asset has an ambiguous date, unrelated type, or destination
     conflict, when migration runs, then that asset remains in place and is
     reported for manual review.
-15. Given a conflict-free migration plan and `--confirm`, when migration runs,
+21. Given a conflict-free migration plan and `--confirm`, when migration runs,
     then originals and companions are moved together, destination content is
     verified, and source files are removed only after successful verification.
-16. Given a confirmed migration, when it completes, then its manifest records
+22. Given a confirmed migration, when it completes, then its manifest records
     old and new paths, hashes, metadata sources, results, and sufficient data
     for a checked rollback plan.
-17. Given a legacy directory becomes empty after successful migration, when
+23. Given a legacy directory becomes empty after successful migration, when
     cleanup is considered, then only that empty directory may be removed;
     directories containing ignored, ambiguous, or failed items remain.
-18. Given `camera --help`, when help is displayed, then both `import` and
+24. Given `camera --help`, when help is displayed, then both `import` and
     `migrate` actions are discoverable.
 
 ## Dependencies and decisions
 
+- [REQ-009: Camera card inventory](009-cameraCardInventory.md) provides durable
+  `cardId` and historical `snapshotId` evidence.
+- [REQ-020: Removable media discovery and lifecycle](020-removableMediaDiscovery.md)
+  consumes inventory/import evidence to derive current card lifecycle state.
 - [ADR-001: Preserve the packaged CLI layout](../../adr/001-packagedCliLayout.md)
 - [ADR-002: Migrate the CLI with compatibility](../../adr/002-cliCompatibility.md)
 - [ADR-003: Centralise filesystem safety](../../adr/003-filesystemSafetyBoundary.md)
 - [ADR-006: Camera import architecture](../../adr/006-cameraImportArchitecture.md)
+- [ADR-007: Persist camera-card inventory in SQLite](../../adr/007-cameraInventoryPersistence.md)
 - The filesystem mutation portion depends on accepting and delivering the
   relevant ADR-003 safety rules.
 
@@ -129,6 +203,11 @@ The agreed behaviour and development sequence are maintained in
 
 - Unit tests using temporary directories and synthetic JPEG, MP4, companion,
   ignored-file, duplicate, and conflict fixtures.
+- Identity tests covering on-card `cardId` discovery, changing mount paths,
+  unidentified dry-run sources, and rejection of unidentified confirmed
+  imports.
+- History tests covering card reuse, multiple inventory snapshots for one card,
+  and import reconciliation to the correct `snapshotId`.
 - Direct service tests proving independence from the CLI adapter.
 - CLI integration tests through `python -m organiseMyVideo camera import` and
   `python -m organiseMyVideo camera migrate`.
@@ -163,3 +242,7 @@ The agreed behaviour and development sequence are maintained in
 - 2026-09-12: added the canonical `camera import -s SOURCE` CLI adapter, help
   discovery, configurable destination overrides, and direct-service equivalence
   coverage for acceptance criteria 11-12.
+- 2026-09-12: added durable import/card/snapshot identity requirements so card
+  reuse is historical rather than destructive and archive state is derived from
+  the latest applicable inventory snapshot rather than mount-path or filename
+  coincidence.
