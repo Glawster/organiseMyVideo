@@ -164,6 +164,38 @@ def _buildSharedFlags(suppressDefaults: bool = False) -> argparse.ArgumentParser
     return shared
 
 
+def _sourceArgumentsAdd(
+    parser: argparse.ArgumentParser,
+    *,
+    dest: str = "source",
+    default: Optional[str] = "/mnt/video2/toFile",
+    helpText: str = "source directory",
+) -> None:
+    """Add positional SOURCE plus -s/--source alias to one action parser."""
+    parser.add_argument(
+        dest,
+        nargs="?",
+        default=default,
+        metavar="SOURCE",
+        help=helpText,
+    )
+    parser.add_argument(
+        "-s",
+        "--source",
+        dest=f"{dest}Option",
+        metavar="SOURCE",
+        help=f"{helpText}; alternative to positional SOURCE",
+    )
+
+
+def _sourceAliasResolve(args: argparse.Namespace, dest: str) -> None:
+    """Prefer an explicit -s/--source value over the positional source."""
+    optionDest = f"{dest}Option"
+    optionValue = getattr(args, optionDest, None)
+    if optionValue is not None:
+        setattr(args, dest, optionValue)
+
+
 def buildParser() -> argparse.ArgumentParser:
     """Return the public CLI parser, including the grok subcommand."""
     parser = argparse.ArgumentParser(
@@ -231,7 +263,7 @@ def buildParser() -> argparse.ArgumentParser:
     mediaOrganise = mediaSub.add_parser(
         "organise", parents=[_buildSharedFlags(True)], help="organise staged media"
     )
-    mediaOrganise.add_argument("source", nargs="?", default="/mnt/video2/toFile")
+    _sourceArgumentsAdd(mediaOrganise, helpText="staging/source directory")
     mediaOrganise.add_argument("--auto", action="store_true")
     mediaOrganise.add_argument(
         "--refresh", dest="refresh_metadata_library", action="store_true"
@@ -246,14 +278,14 @@ def buildParser() -> argparse.ArgumentParser:
         parents=[_buildSharedFlags(True)],
         help="clean staged media names and folders",
     )
-    mediaClean.add_argument("source", nargs="?", default="/mnt/video2/toFile")
+    _sourceArgumentsAdd(mediaClean, helpText="staging/source directory")
 
     libraryParser = subparsers.add_parser("library", help="maintain media libraries")
     librarySub = libraryParser.add_subparsers(dest="libraryAction", required=True)
     libraryRescan = librarySub.add_parser(
         "rescan", parents=[_buildSharedFlags(True)], help="rescan movie and TV metadata"
     )
-    libraryRescan.add_argument("source", nargs="?", default="/mnt/video2/toFile")
+    _sourceArgumentsAdd(libraryRescan, helpText="staging/source directory")
     libraryRescan.add_argument(
         "--target", choices=("both", "movies", "tv"), default="both"
     )
@@ -265,7 +297,7 @@ def buildParser() -> argparse.ArgumentParser:
         parents=[_buildSharedFlags(True)],
         help="remove obsolete torrent files",
     )
-    torrentMaintain.add_argument("source", nargs="?", default="/mnt/video2/toFile")
+    _sourceArgumentsAdd(torrentMaintain, helpText="staging/source directory")
     torrentMaintain.add_argument("--clean-names", action="store_true")
 
     cameraParser = subparsers.add_parser(
@@ -278,11 +310,11 @@ def buildParser() -> argparse.ArgumentParser:
         parents=[_buildSharedFlags(True)],
         help="catalogue a numbered camera SD card",
     )
-    cameraInventory.add_argument(
-        "inventorySource",
-        nargs="?",
-        metavar="SOURCE",
-        help="mounted card or copied card directory",
+    _sourceArgumentsAdd(
+        cameraInventory,
+        dest="inventorySource",
+        default=None,
+        helpText="mounted card or copied card directory",
     )
     cameraInventory.add_argument(
         "--card",
@@ -329,14 +361,19 @@ def _normalizeArguments(args: argparse.Namespace) -> argparse.Namespace:
     """Map canonical commands onto the established workflow argument shape."""
     command = getattr(args, "command", None)
     if command == "media":
+        _sourceAliasResolve(args, "source")
         args.clean = args.mediaAction == "clean"
     elif command == "library":
+        _sourceAliasResolve(args, "source")
         args.rescan = True
         args.movie = args.target == "movies"
         args.video = args.target == "tv"
     elif command == "torrent":
+        _sourceAliasResolve(args, "source")
         args.torrent = True
         args.clean = bool(args.clean_names)
+    elif command == "camera" and getattr(args, "cameraAction", None) == "inventory":
+        _sourceAliasResolve(args, "inventorySource")
     return args
 
 
