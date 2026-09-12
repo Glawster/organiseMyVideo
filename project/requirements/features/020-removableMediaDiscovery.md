@@ -25,7 +25,8 @@ only as historical snapshots. Typical questions include:
 - Which empty card has gone unused for the longest time?
 - Which card has enough free space for the planned recording?
 - Where is card 4 and what device is it associated with?
-- Is card 4 currently loaded in the GoPro, drone, dash cam, or somewhere else?
+- Is card 4 currently loaded in the GoPro, drone, dash cam, stored loose, or MIA?
+- Which cards are currently marked missing?
 - Which card is currently loaded in a particular camera?
 - Is card 4 a GoPro card, drone card, dash-cam card, or general USB volume?
 - Which camera make/model was most recently associated with a numbered card?
@@ -58,10 +59,15 @@ only as historical snapshots. Typical questions include:
   evidence.
 - Support explicitly loading a numbered card into a registered camera/device.
 - Support explicitly unloading/removing a card from a registered camera/device.
-- Record card-placement transitions with timestamps so current placement and
-  historical device use can both be queried.
+- Support marking a numbered card `MIA` when its physical location is unknown
+  and the operator cannot currently account for it.
+- Support clearing `MIA` when the card is found, preserving when it was marked
+  missing and when it was recovered.
+- Record card-placement and location-state transitions with timestamps so
+  current placement and historical device/location use can both be queried.
 - Enforce one current placement for a card. Loading a card into a new device
-  closes its previous placement rather than leaving two current locations.
+  closes its previous placement or MIA state rather than leaving two current
+  locations.
 - Where a device can have more than one card slot, support an optional slot
   identifier so current placement is unambiguous.
 - For a numbered card, report the best-known device association from both
@@ -76,7 +82,8 @@ only as historical snapshots. Typical questions include:
 - Preserve uncertainty: when a card has been used by multiple device classes or
   the latest evidence is insufficient, report that history/ambiguity rather
   than inventing a single association.
-- Recommend cards for use according to free space and lifecycle state.
+- Recommend cards for use according to free space, lifecycle state, and physical
+  availability. Cards marked `MIA` are never recommendation candidates.
 - Prefer the oldest suitable empty/recyclable card when several equivalent
   cards are available, so physical cards are rotated rather than repeatedly
   using the same one.
@@ -86,9 +93,11 @@ only as historical snapshots. Typical questions include:
   the available evidence rather than inventing a duration estimate.
 - Derive operational status from catalogue/import evidence rather than storing
   a manually maintained status where possible.
-- Distinguish at least the following concepts: ready to use, contains
-  unarchived/current content, archived/safe to recycle, needs review, and
-  insufficient space.
+- Distinguish at least the following content lifecycle concepts: ready to use,
+  contains unarchived/current content, archived/safe to recycle, needs review,
+  and insufficient space.
+- Track physical availability separately from content lifecycle, including at
+  least loaded, unloaded/accounted-for, and MIA/missing.
 - Identify content that has not been successfully imported and verified.
 - Identify import conflicts, failures, unknown content, or other evidence that
   prevents a safe-to-recycle decision.
@@ -96,7 +105,8 @@ only as historical snapshots. Typical questions include:
   where digest/identity evidence permits it.
 - Keep historical inventory snapshots; selection/search should normally use
   the latest snapshot while retaining older evidence for audit, device-use
-  history, placement history, and lifecycle calculations.
+  history, placement history, missing/recovery history, and lifecycle
+  calculations.
 - Expose the capability through importable Python catalogue/query services
   before adding CLI or Qt presentation layers.
 
@@ -105,6 +115,9 @@ only as historical snapshots. Typical questions include:
 - Automatically formatting, erasing, or ejecting cards or USB volumes.
 - Physically detecting that a card has been inserted into or removed from a
   powered-off camera unless a later hardware integration supplies that evidence.
+- Automatically declaring a card MIA merely because it has not been inventoried
+  recently; MIA is an explicit operator assertion unless stronger hardware
+  evidence is introduced later.
 - Declaring a card safe to erase solely because its free space is low or its
   content is old.
 - Guessing that content was archived when there is no verification evidence.
@@ -134,6 +147,8 @@ organiseMyVideo camera remove --name gopro9
 organiseMyVideo camera load --card 4 --camera gopro9
 organiseMyVideo camera load --card 7 --camera drone
 organiseMyVideo camera unload --card 4
+organiseMyVideo camera mia --card 4
+organiseMyVideo camera found --card 4
 ```
 
 For devices with multiple media slots, `camera load` may additionally accept a
@@ -142,12 +157,13 @@ slot identifier, for example `--slot 2`.
 For `camera show`, exactly one of `--card ID` or `--all` is required. A single
 card view should answer both “what is on this card?” and “where is this card
 now?”. A device view/query should likewise make it possible to answer “which
-card is currently in the GoPro?”. The service layer must not depend on these
-exact CLI spellings.
+card is currently in the GoPro?”. `camera show --all` should make MIA cards
+visually obvious. The service layer must not depend on these exact CLI
+spellings.
 
 ## Lifecycle model
 
-Initial derived states are:
+Initial derived content states are:
 
 - `READY`: empty or otherwise verified safe for immediate reuse.
 - `IN_USE`: contains current content that has not yet been fully archived and
@@ -160,20 +176,29 @@ Initial derived states are:
   query result layered on top of the underlying content lifecycle state rather
   than a permanently stored status.
 
-Physical placement is tracked separately from content lifecycle. For example, a
-card may be `READY` but currently `LOADED` in the GoPro, or `ARCHIVED` and
-currently `UNLOADED`.
+Physical location/availability is tracked separately:
+
+- `LOADED`: explicitly recorded in a known camera/device, optionally in a named
+  slot.
+- `UNLOADED`: accounted for but not currently loaded in a registered device.
+- `MIA`: explicitly reported missing / whereabouts unknown.
+
+A card can therefore be `READY` + `MIA`, `ARCHIVED` + `UNLOADED`, or `IN_USE` +
+`LOADED`. `MIA` does not change the content-safety judgement, but it does make
+the card physically unavailable and excludes it from recommendations.
 
 ## Acceptance criteria
 
 1. Given multiple inventoried removable volumes, when the operator asks for a
-   suitable card without further constraints, then cards not safe for reuse
-   are excluded and the oldest suitable empty/recyclable card is preferred.
+   suitable card without further constraints, then cards not safe for reuse or
+   physically unavailable/MIA are excluded and the oldest suitable
+   empty/recyclable card is preferred.
 2. Given a minimum free-space requirement, when recommendation runs, then only
-   safe cards meeting that threshold are returned, ordered deterministically.
-3. Given no safe card meeting the requested space, when recommendation runs,
-   then the result explicitly reports that no suitable card is available and
-   does not recommend a card with unverified content.
+   safe, physically available cards meeting that threshold are returned,
+   ordered deterministically.
+3. Given no safe available card meeting the requested space, when recommendation
+   runs, then the result explicitly reports that no suitable card is available
+   and does not recommend a card with unverified content or MIA status.
 4. Given a date or date range, when search runs, then matching removable-volume
    snapshots/content are returned with the numbered volume ID and enough
    context to locate the physical card.
@@ -186,7 +211,8 @@ currently `UNLOADED`.
    to be classified as camera media.
 7. Given a card whose relevant files were imported and verified successfully,
    with no unique unknown/unverified content remaining, when lifecycle status
-   is derived, then it can be reported as safe to recycle.
+   is derived, then it can be reported as safe to recycle independently of
+   whether its physical availability is loaded, unloaded, or MIA.
 8. Given any failed import, destination conflict, unknown unique file, or
    missing verification affecting content on a card, when lifecycle status is
    derived, then the card is not reported safe to recycle and the blocking
@@ -194,13 +220,13 @@ currently `UNLOADED`.
 9. Given repeated inventory snapshots for the same numbered volume, when
    search/recommendation runs, then the latest snapshot supplies current
    capacity/content state while historical snapshots remain available for
-   audit, rotation, device-association, and placement history.
+   audit, rotation, device-association, placement, and MIA/recovery history.
 10. Given digest or durable identity evidence showing the same content on more
     than one removable volume, when queried, then duplicate locations can be
     reported without deleting either copy.
 11. Given `camera show --card ID`, when the ID exists, then the latest detailed
     record for that removable volume is shown, including volume kind, best-known
-    device class, current physical placement when known, camera
+    device class, current physical placement or MIA state, camera
     manufacturer/model/serial when known, latest location evidence, free space,
     lifecycle state, and content summary.
 12. Given a card whose inventory consistently identifies one device class, when
@@ -209,7 +235,8 @@ currently `UNLOADED`.
     then it reports the ambiguity/history rather than silently choosing one.
 13. Given `camera show --all`, then all known removable volumes are shown in a
     deterministic summary including card ID, volume/device kind, current
-    placement, capacity/free space, lifecycle status, and latest inventory date.
+    placement or MIA state, capacity/free space, lifecycle status, and latest
+    inventory date.
 14. Given `camera show` with both `--card` and `--all`, or with neither, then
     argument validation fails before a catalogue query is executed.
 15. Given a camera/device is added, then it receives a stable local identity and
@@ -220,22 +247,33 @@ currently `UNLOADED`.
 17. Given `camera load --card ID --camera DEVICE`, when both exist and the
     placement is valid, then the card is recorded as currently loaded in that
     device with a timestamp; loading it elsewhere closes the previous current
-    placement.
+    placement or MIA state.
 18. Given a multi-slot device and a slot identifier, when a card is loaded, then
     the current placement records that slot and prevents an incompatible second
     current card assignment to the same slot.
 19. Given `camera unload --card ID`, when the card is currently loaded, then the
-    placement is closed with a timestamp and the card becomes currently
-    unloaded/unknown-location while its placement history is retained.
-20. Given `camera show --card ID` after load or unload operations, then current
-    placement reflects the latest explicit transition and historical placements
-    remain available for audit.
-21. Given the Python query/recommendation/device-placement services are called
+    placement is closed with a timestamp and the card becomes `UNLOADED` while
+    its placement history is retained.
+20. Given `camera mia --card ID`, when the card exists, then its current physical
+    state becomes `MIA` with a timestamp and its last known placement/location
+    remains available as history.
+21. Given `camera found --card ID`, when the card is currently `MIA`, then the
+    MIA interval is closed with a recovery timestamp and the card becomes
+    `UNLOADED` unless a simultaneous/new `load` operation establishes a camera
+    placement.
+22. Given a card marked `MIA`, when recommendation runs, then that card is never
+    offered even if its content lifecycle is `READY` or `ARCHIVED` and it has
+    sufficient free space.
+23. Given `camera show --card ID` after load, unload, MIA, or found operations,
+    then current physical state reflects the latest explicit transition and all
+    prior placement/missing history remains available for audit.
+24. Given the Python query/recommendation/device-placement services are called
     directly, then they return structured results without depending on argparse,
     console parsing, or the Qt UI.
-22. Search, recommendation, listing, show, and status queries do not mutate
-    removable media or archive content. Device-registry and load/unload actions
-    may update application catalogue state but never write to the physical card.
+25. Search, recommendation, listing, show, and status queries do not mutate
+    removable media or archive content. Device-registry and physical-state
+    actions may update application catalogue state but never write to the
+    physical card.
 
 ## Dependencies and decisions
 
@@ -258,13 +296,14 @@ currently `UNLOADED`.
 - Device-registry tests covering add, retire/remove, stable identity, and
   retention of historical associations.
 - Placement tests covering load, unload, reassignment, current placement,
-  historical placement, and optional multi-slot devices.
-- Recommendation tests proving minimum-space filtering and oldest-suitable-card
-  rotation.
+  historical placement, optional multi-slot devices, MIA, and recovery.
+- Recommendation tests proving minimum-space filtering, oldest-suitable-card
+  rotation, and exclusion of MIA cards.
 - `camera show` tests covering `--card ID`, `--all`, device association, current
-  placement, latest location evidence, and mutual-exclusion/error handling.
+  placement/MIA state, latest location evidence, and mutual-exclusion/error
+  handling.
 - Safety tests proving ambiguous/unverified cards are never labelled safe to
-  recycle.
+  recycle and MIA cards are never recommended for immediate use.
 - Direct service tests independent of CLI and Qt layers.
 - `pytest`
 - `git diff --check`
@@ -292,3 +331,6 @@ currently `UNLOADED`.
 - 2026-09-12: added a persistent camera/device registry plus explicit card
   load/unload placement history so the catalogue can answer where a card is
   physically located and which card is currently in each camera.
+- 2026-09-12: added explicit `MIA`/missing and recovery transitions, kept
+  physical availability separate from content lifecycle, and excluded missing
+  cards from recommendation results.
