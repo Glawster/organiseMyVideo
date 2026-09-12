@@ -14,11 +14,16 @@ Do not invoke ExifTool, ffprobe, shell commands, or other external executables.
 Wire the thin command adapter as:
 
 ```text
-python -m organiseMyVideo camera import SOURCE
-python -m organiseMyVideo camera import SOURCE --confirm
+python -m organiseMyVideo camera import -s SOURCE
+python -m organiseMyVideo camera import -s SOURCE --confirm
 python -m organiseMyVideo camera migrate
 python -m organiseMyVideo camera migrate --confirm
 ```
+
+For canonical `camera import`, `-s/--source` is required and positional source
+syntax is rejected. The CLI adapter must call the same importable application
+service used by direct Python callers; do not duplicate planning or import
+behaviour in `__main__.py`.
 
 Keep dry-run as the default. Preserve the source card, original filenames, and
 DJI SRT companions. Store new GoPro and DJI imports beneath their respective
