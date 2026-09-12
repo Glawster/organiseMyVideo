@@ -330,6 +330,41 @@ def buildParser() -> argparse.ArgumentParser:
         "--brand",
         help="SD card brand to store on the card, for example SanDisk",
     )
+    cameraImport = cameraSub.add_parser(
+        "import",
+        parents=[_buildSharedFlags(True)],
+        help="plan or import supported camera media",
+    )
+    cameraImport.add_argument(
+        "-s",
+        "--source",
+        dest="importSource",
+        required=True,
+        metavar="SOURCE",
+        help="mounted card or copied card directory",
+    )
+    cameraImport.add_argument(
+        "--gopro-destination",
+        help="override the configured GoPro archive destination",
+    )
+    cameraImport.add_argument(
+        "--drone-destination",
+        help="override the configured Drone archive destination",
+    )
+    cameraImport.add_argument(
+        "--dashcam-destination",
+        help="override the configured Dashcam archive destination",
+    )
+    cameraImport.add_argument(
+        "--manifest-directory",
+        help="override the camera-import manifest directory",
+    )
+    cameraImport.add_argument(
+        "--include-gopro-companions",
+        action="store_true",
+        help="retain GoPro LRV and THM helper files",
+    )
+
     grokParser = subparsers.add_parser(
         "grok",
         parents=[_buildSharedFlags(True)],
@@ -405,7 +440,8 @@ def _validateArguments(
     ):
         parser.error("do not combine a canonical command with a legacy mode flag")
     if args.command == "camera":
-        if getattr(args, "cameraAction", None) == "inventory":
+        cameraAction = getattr(args, "cameraAction", None)
+        if cameraAction == "inventory":
             cardId = getattr(args, "card", None)
             inventorySource = getattr(args, "inventorySource", None)
             if cardId is not None and cardId < 1:
@@ -422,6 +458,11 @@ def _validateArguments(
                 if not sourcePath.is_dir():
                     parser.error(f"source directory does not exist: {sourcePath}")
                 args.inventorySource = str(sourcePath)
+        elif cameraAction == "import":
+            sourcePath = Path(args.importSource).expanduser()
+            if not sourcePath.is_dir():
+                parser.error(f"source directory does not exist: {sourcePath}")
+            args.importSource = str(sourcePath)
         return
     if args.command in {"media", "library", "torrent"}:
         sourcePath = Path(args.source).expanduser()
@@ -462,8 +503,60 @@ def _selectedMode(args: argparse.Namespace) -> str:
     return "process"
 
 
+def _runCameraImportWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
+    """Run camera media import through the public application service."""
+
+    from . import constants
+    from .cameraImport import cameraImportRun, cameraImportSummary
+
+    config = _loadAppConfig(_getAppConfigPath())
+    configuredStorage = config.get("storage_locations", {})
+    if not isinstance(configuredStorage, dict):
+        configuredStorage = {}
+    homeVideoRoot = Path("/mnt/myVideo/Video")
+    goproDestination = Path(
+        args.gopro_destination
+        or configuredStorage.get("gopro")
+        or homeVideoRoot / "GoPro"
+    )
+    droneDestination = Path(
+        args.drone_destination
+        or configuredStorage.get("drone")
+        or homeVideoRoot / "Drone"
+    )
+    dashcamDestination = Path(
+        args.dashcam_destination
+        or configuredStorage.get("dashcam")
+        or homeVideoRoot / "Dashcam"
+    )
+    manifestDirectory = Path(
+        args.manifest_directory
+        or constants.applicationStateDirectory() / "cameraImports"
+    )
+    logger.value("mode", "camera-import")
+    logger.value("source directory", args.importSource)
+    try:
+        result = cameraImportRun(
+            source=Path(args.importSource),
+            goproDestination=goproDestination,
+            droneDestination=droneDestination,
+            dashcamDestination=dashcamDestination,
+            manifestDirectory=manifestDirectory,
+            dryRun=dryRun,
+            includeGoproCompanions=bool(args.include_gopro_companions),
+        )
+    except (OSError, RuntimeError, ValueError) as error:
+        logger.error("%s", error)
+        return 1
+    drawBox(cameraImportSummary(result))
+    return 1 if result.failed else 0
+
+
 def _runCameraWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
-    """Run camera-card inventory through the Python application service."""
+    """Run the selected camera workflow through its Python application service."""
+
+    if getattr(args, "cameraAction", None) == "import":
+        return _runCameraImportWorkflow(args, dryRun)
 
     from . import constants
     from .cameraInventory import cameraInventoryRun, cameraInventorySummary
@@ -552,9 +645,6 @@ def _normaliseSeasonFolders(organizer, dryRun: bool, *, refreshCatalogue: bool):
 
     storageLocations = organizer.scanStorageLocations()
     if not isinstance(storageLocations, (tuple, list)) or len(storageLocations) != 2:
-        # A malformed discovery result cannot be used safely. This is principally
-        # useful for lightweight mocked organizers, while keeping production
-        # behaviour explicit rather than attempting to infer locations.
         logger.debug("skipping TV folder normalisation: storage locations unavailable")
         return SeasonFolderStats()
 
