@@ -3,43 +3,62 @@
 ## Requirement
 
 [REQ-004: Camera media import](requirements/features/004-cameraMediaImport.md)
-on `feature/camera-media-import`.
+on `feature/camera-media-import`, with supporting changes in
+[REQ-009: Camera card inventory](requirements/features/009-cameraCardInventory.md).
 
 ## Objective
 
-Deliver the third REQ-004 increment: expose the existing camera import planner
-and confirmed import service through the canonical `camera import` CLI while
-keeping the domain behaviour in importable Python services.
+Deliver the next REQ-004 increment: propagate durable numbered-card identity and
+inventory-snapshot history through camera import so verified archive evidence
+can be attributed to the exact observed contents of a reused physical card.
 
 ## Scope for this increment
 
-- Acceptance criteria 11-12.
-- Add `camera import` beneath the existing `camera` object.
-- Require canonical `-s/--source`; reject positional source syntax.
-- Validate the source directory before invoking the import service.
-- Reuse the completed camera import planner and confirmed-copy service from
-  acceptance criteria 1-10.
-- Keep dry-run as the default and `--confirm` as the only archive-write switch.
-- Resolve GoPro, Drone, and Dashcam archive roots from application configuration
-  with the documented archive paths as fallbacks.
-- Permit explicit destination and manifest-directory overrides so tests and
-  operator diagnostics never need to touch the real archive.
-- Keep GoPro helper retention behind `--include-gopro-companions`.
-- Print a concise import summary without parsing domain-service console output.
-- Add help-discovery and thin-adapter tests.
-- Add direct-service equivalence evidence proving the same operation is
-  available without argparse or the CLI.
+- Preserve the completed planner/import/CLI behaviour from acceptance criteria
+  1-12.
+- Resolve `cardId` from the existing `organiseMyVideo.NNN` label on the card.
+- Treat source/mount paths as transient runtime context only; do not use them as
+  durable card identity or lifecycle keys.
+- Extend confirmed inventory persistence so every saved card observation has a
+  durable unique `snapshotId` while retaining prior snapshots for the same
+  `cardId`.
+- Carry `cardId` through camera import planning/results.
+- Link confirmed imports to the latest applicable inventory `snapshotId` when
+  that relationship can be established.
+- Assign a durable `importId` to each confirmed import run.
+- Reconcile imported files to snapshot files by relative path plus verification
+  evidence such as size/digest rather than mount path.
+- Allow unidentified dry-run inspection but clearly report that it is not tied
+  to a known card.
+- Reject confirmed import from a numbered removable source when `cardId` cannot
+  be resolved, before archive mutation.
+- Ensure a fully archived old snapshot for card 6 does not make a later reused
+  snapshot for card 6 appear archived.
+- Keep historical inventory/import relationships queryable for later REQ-020
+  lifecycle and `camera show --history` work.
+
+## Identity model
+
+```text
+cardId      = physical numbered card
+snapshotId  = one confirmed observed state of that card
+relativePath = file location within that snapshot
+importId    = one confirmed import run
+```
+
+The latest confirmed inventory snapshot is the current known contents. Earlier
+snapshots and their import evidence remain immutable history.
 
 ## Status
 
-In progress — CLI adapter, public application-service wrapper, and focused tests
-implemented remotely; local verification is next.
+Planned — requirements, prompts, and ADR clarified on 2026-09-12; implementation
+has not yet started.
 
 ## Verification
 
 Run:
 
-- `pytest tests/test_cameraPlan.py tests/test_cameraImport.py tests/test_cli.py`
+- `pytest tests/test_cameraInventory.py tests/test_cameraPlan.py tests/test_cameraImport.py tests/test_cli.py`
 - `pytest`
 - `black --check .`
 - `./tests/runLinter.py`
@@ -47,10 +66,13 @@ Run:
 - `manageProject --check`
 - `git diff --check`
 
+Add focused tests for card reuse, changing mount paths, unique snapshot IDs,
+unidentified dry-run vs confirmed import, import-to-snapshot linkage, and
+current-state derivation from the latest snapshot only.
+
 Do not fix unrelated pre-existing repository lint findings as part of REQ-004.
 
 ## Deferred to later REQ-004 increments
 
-Archive migration, rollback-plan evidence, and empty-directory cleanup
-(acceptance criteria 13-18) remain within REQ-004 but are outside this CLI
-adapter slice.
+Archive migration, rollback-plan evidence, and empty-directory cleanup remain
+within REQ-004 but are outside this card/snapshot identity slice.
