@@ -6,10 +6,10 @@ ToDo
 
 ## Outcome
 
-As a media-library operator, I need to search, assess, and select numbered SD
+As a media-library operator, I need to search, assess, locate, and select numbered SD
 cards and USB volumes from the catalogue so that I can find stored content,
-choose an appropriate card before going out, and know when a card is safe to
-recycle.
+identify what device a card belongs to, choose an appropriate card before going out,
+and know when a card is safe to recycle.
 
 ## Context
 
@@ -24,6 +24,9 @@ only as historical snapshots. Typical questions include:
 - Which card should I take with me?
 - Which empty card has gone unused for the longest time?
 - Which card has enough free space for the planned recording?
+- Where is card 4 and what device is it associated with?
+- Is card 4 a GoPro card, drone card, dash-cam card, or general USB volume?
+- Which camera make/model was most recently associated with a numbered card?
 - Where is footage from a particular date or event?
 - Which numbered volume contains a named file, software package, document, or
   other non-media content?
@@ -39,12 +42,21 @@ only as historical snapshots. Typical questions include:
   can locate software installers/packages, documents, archives, and other
   stored files.
 - List known removable volumes with current capacity, free space, most recent
-  inventory date, content date range, volume kind, and derived lifecycle
-  status.
+  inventory date, content date range, volume kind, device/camera association,
+  and derived lifecycle status.
 - Show a detailed view of one numbered removable volume with
   `camera show --card ID`.
 - Show the complete removable-volume inventory with `camera show --all`.
 - Treat `--card` and `--all` as mutually exclusive selectors for `camera show`.
+- For a numbered card, report the best-known device association from inventory
+  evidence, distinguishing at least GoPro/camera, DJI/drone, dash cam, and
+  general USB/removable storage.
+- Include recorded manufacturer/model/serial information when available, and
+  report the latest known source/mount identity or other location evidence that
+  helps the operator identify the physical volume.
+- Preserve uncertainty: when a card has been used by multiple device classes or
+  the latest evidence is insufficient, report that history/ambiguity rather
+  than inventing a single association.
 - Recommend cards for use according to free space and lifecycle state.
 - Prefer the oldest suitable empty/recyclable card when several equivalent
   cards are available, so physical cards are rotated rather than repeatedly
@@ -64,8 +76,8 @@ only as historical snapshots. Typical questions include:
 - Detect likely duplicate content recorded on more than one removable volume
   where digest/identity evidence permits it.
 - Keep historical inventory snapshots; selection/search should normally use
-  the latest snapshot while retaining older evidence for audit and lifecycle
-  calculations.
+  the latest snapshot while retaining older evidence for audit, device-use
+  history, and lifecycle calculations.
 - Expose the capability through importable Python catalogue/query services
   before adding CLI or Qt presentation layers.
 
@@ -75,6 +87,7 @@ only as historical snapshots. Typical questions include:
 - Declaring a card safe to erase solely because its free space is low or its
   content is old.
 - Guessing that content was archived when there is no verification evidence.
+- Guessing a device association when inventory evidence is ambiguous.
 - Replacing the camera-import verification/manifest process.
 - Requiring every removable volume to contain camera media.
 
@@ -92,8 +105,10 @@ organiseMyVideo camera recommend --free 100GB
 organiseMyVideo camera status --card 12
 ```
 
-For `camera show`, exactly one of `--card ID` or `--all` is required. The
-service layer must not depend on these exact CLI spellings.
+For `camera show`, exactly one of `--card ID` or `--all` is required. A single
+card view should answer both “what is on this card?” and “what device is this
+card associated with?”. The service layer must not depend on these exact CLI
+spellings.
 
 ## Lifecycle model
 
@@ -143,19 +158,27 @@ preserved.
 9. Given repeated inventory snapshots for the same numbered volume, when
    search/recommendation runs, then the latest snapshot supplies current
    capacity/content state while historical snapshots remain available for
-   audit and oldest-use/rotation calculations.
+   audit, rotation, and device-association history.
 10. Given digest or durable identity evidence showing the same content on more
     than one removable volume, when queried, then duplicate locations can be
     reported without deleting either copy.
 11. Given `camera show --card ID`, when the ID exists, then the latest detailed
-    record for that removable volume is shown; given `camera show --all`, then
-    all known removable volumes are shown in a deterministic summary.
-12. Given `camera show` with both `--card` and `--all`, or with neither, then
+    record for that removable volume is shown, including volume kind, best-known
+    device class, camera manufacturer/model/serial when known, latest location
+    evidence, free space, lifecycle state, and content summary.
+12. Given a card whose inventory consistently identifies one device class, when
+    `camera show --card ID` runs, then it reports that association (for example
+    GoPro, DJI/drone, or dash cam); given conflicting historical device evidence,
+    then it reports the ambiguity/history rather than silently choosing one.
+13. Given `camera show --all`, then all known removable volumes are shown in a
+    deterministic summary including card ID, volume/device kind, capacity/free
+    space, lifecycle status, and latest inventory date.
+14. Given `camera show` with both `--card` and `--all`, or with neither, then
     argument validation fails before a catalogue query is executed.
-13. Given the Python query/recommendation services are called directly, then
+15. Given the Python query/recommendation services are called directly, then
     they return structured results without depending on argparse, console
     parsing, or the Qt UI.
-14. No search, recommendation, listing, show, or status query mutates removable
+16. No search, recommendation, listing, show, or status query mutates removable
     media or archive content.
 
 ## Dependencies and decisions
@@ -174,10 +197,12 @@ preserved.
   archived, unimported, conflicted, nearly full, and unknown-content states.
 - Search tests for date ranges, keywords, filenames, camera metadata, and
   non-media file types.
+- Device-association tests covering GoPro, DJI/drone, dash cam, USB, unknown,
+  and historically mixed-device cards.
 - Recommendation tests proving minimum-space filtering and oldest-suitable-card
   rotation.
-- `camera show` tests covering `--card ID`, `--all`, and mutual-exclusion/error
-  handling.
+- `camera show` tests covering `--card ID`, `--all`, device association, latest
+  location evidence, and mutual-exclusion/error handling.
 - Safety tests proving ambiguous/unverified cards are never labelled safe to
   recycle.
 - Direct service tests independent of CLI and Qt layers.
@@ -201,3 +226,6 @@ preserved.
 - 2026-09-12: refined CLI direction so removable-media discovery remains under
   `camera`; added `camera show --card ID` and `camera show --all`, with mutually
   exclusive selectors.
+- 2026-09-12: added numbered-card device/location lookup so `camera show --card`
+  reports whether a card is associated with GoPro, DJI/drone, dash cam, USB, or
+  ambiguous historical use, together with available camera/device identity.
