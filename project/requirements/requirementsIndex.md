@@ -1,6 +1,6 @@
 # Requirements
 
-Next available number: 020
+Next available number: 021
 
 Requirements created after adoption of the managed process are recorded here.
 Historical behaviour is not assigned invented retrospective requirements.
@@ -26,6 +26,7 @@ Historical behaviour is not assigned invented retrospective requirements.
 | 017 | [Merge duplicate TV and movie folders](features/017-mergeDuplicateTvFolders.md) | Merge provider-identified duplicate TV and movie folders into the most complete existing folder. | Completed | [Prompt](prompt/017-mergeDuplicateTvFolders.md) | Not required |
 | 018 | [TV show folder leading articles](features/018-tvShowFolderArticles.md) | Store ``The Show`` folders as ``Show, The`` and repair existing library folders. | Completed | [Prompt](prompt/018-tvShowFolderArticles.md) | Not required |
 | 019 | [Catalogue metadata resolution](features/019-catalogueMetadataResolution.md) | Resolve the best already-known movie, series and episode metadata offline while preserving durable provider IDs. | In progress | [Prompt](prompt/019-catalogueMetadataResolution.md) | [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
+| 020 | [Removable media discovery and lifecycle](features/020-removableMediaDiscovery.md) | Search numbered SD/USB volumes, recommend suitable cards, and derive safe-to-recycle status from inventory and verified import evidence. | ToDo | [Prompt](prompt/020-removableMediaDiscovery.md) | [ADR-008](../adr/008-sqliteMediaCatalogue.md), [ADR-009](../adr/009-numberedRemovableVolumes.md) |
 
 ## Prompt index
 
@@ -49,4 +50,5 @@ Historical behaviour is not assigned invented retrospective requirements.
 - [017-mergeDuplicateTvFolders](prompt/017-mergeDuplicateTvFolders.md)
 - [018-tvShowFolderArticles](prompt/018-tvShowFolderArticles.md)
 - [019-catalogueMetadataResolution](prompt/019-catalogueMetadataResolution.md)
+- [020-removableMediaDiscovery](prompt/020-removableMediaDiscovery.md)
 <!-- OMP-PROMPT-INDEX-END -->
