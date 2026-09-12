@@ -4,8 +4,8 @@ Read REQ-020 together with REQ-004, REQ-009, REQ-010, REQ-015, REQ-016,
 ADR-008, and ADR-009.
 
 Implement removable-media discovery as importable Python catalogue/query
-services first. Support listing/show, search, lifecycle derivation, and card
-recommendation without depending on argparse or Qt.
+services first. Support listing/show, search, lifecycle derivation, device
+association lookup, and card recommendation without depending on argparse or Qt.
 
 Key behaviours:
 
@@ -19,7 +19,8 @@ Key behaviours:
   safe recommendations.
 - Recommend cards by lifecycle safety and requested free-space threshold;
   prefer the oldest suitable empty/recyclable card to rotate physical media.
-- Preserve historical inventory snapshots for audit and rotation calculations.
+- Preserve historical inventory snapshots for audit, rotation calculations,
+  and device-association history.
 - Report duplicate locations when durable identity/digest evidence permits it.
 - Keep all search/list/show/recommend/status operations non-mutating.
 - Keep removable-media lifecycle/discovery under the `camera` command; movie/TV
@@ -28,7 +29,20 @@ Key behaviours:
   `camera show --all` for the complete known inventory. Require exactly one of
   `--card` or `--all` and fail validation before querying when both or neither
   are supplied.
+- Make `camera show --card ID` answer both “what is on this card?” and “what
+  device is this card associated with?”. Report the best-known device class,
+  distinguishing at least GoPro/camera, DJI/drone, dash cam, and general USB.
+- Include camera manufacturer/model/serial and latest source/mount/location
+  evidence when available.
+- If a card has historical use across multiple device classes or evidence is
+  insufficient, preserve and show that ambiguity/history instead of inventing
+  a single association.
+- Make `camera show --all` include card ID, device/volume kind, capacity/free
+  space, lifecycle status, and latest inventory date so the operator can answer
+  questions such as “where is card 4?” and “which camera does it belong to?”.
 
 Use synthetic test fixtures for multiple card/USB histories and verify direct
-service use independently of any CLI/UI adapter. The CLI adapter must remain
-thin and call the same structured query services used by direct Python callers.
+service use independently of any CLI/UI adapter. Include tests for GoPro,
+DJI/drone, dash cam, USB, unknown, and mixed historical associations. The CLI
+adapter must remain thin and call the same structured query services used by
+direct Python callers.
