@@ -1,4 +1,4 @@
-<!-- deployed from Glawster/organiseMyProjects release 0.6 -- do not edit directly -->
+<!-- deployed from Glawster/organiseMyProjects release 0.7 -- do not edit directly -->
 # Agent Instructions -- Master Development Guidelines (v2)
 
 ## Table of Contents
@@ -251,7 +251,7 @@ business logic and persistence.
 
 - Group functions by domain or purpose.
 - Use `##` section headers with short lowercase names.
-- Function names should use the `domainAction` pattern.
+- Module-level function names should use the `domainAction` pattern.
   - domain first, then action. Use camelCase.
   - examples:
     - `configLoad`
@@ -260,10 +260,18 @@ business logic and persistence.
     - `messageParse`
     - `whatsappWaitForReady`
   - avoid reversing the pattern (e.g. `loadConfig`, `extractMessage`).
+- Class methods, classmethods and staticmethods may use an action-only name
+  because the enclosing class already supplies the domain. `Project.update()`
+  is valid; `projectUpdate()` remains valid too. Module-level functions still
+  require `domainAction`.
+- Nested or local helper functions may use ordinary descriptive names such as
+  `fail`, `empty` or `box`. Do not require `domainAction` for them.
 - Keep functions alphabetically ordered within each section unless readability will be reduced or precedence order is needed.
 - Keep public workflow near the top.
 - Keep low-level utilities near the bottom.
 - Private helpers must start with `_`.
+- Private constants may use a leading underscore on UPPER_CASE names, for
+  example `_MAX_RETRIES`.
 
 #### Example
 

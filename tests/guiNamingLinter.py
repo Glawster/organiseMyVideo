@@ -1,4 +1,4 @@
-# deployed from Glawster/organiseMyProjects release 0.6 -- do not edit directly
+# deployed from Glawster/organiseMyProjects release 0.7 -- do not edit directly
 """
 guiNamingLinter.py - GUI Code Quality Linter
 
@@ -8,7 +8,10 @@ This linter enforces project-specific guidelines for Python GUI development:
 - Constant and variable naming rules
 - Logging message formatting
 - Misspelling detection (e.g., 'iCloud')
-- Function naming using domainAction style
+- Function naming using domainAction style at module level
+- Class method names may be action-only when the class supplies the domain
+- Nested or local helpers may use ordinary descriptive names
+- Private constants may use a leading underscore on UPPER_CASE names
 """
 
 import ast
@@ -18,6 +21,7 @@ import re
 ## constants
 
 DOMAIN_ACTION_PATTERN = r"^_?[a-z]+[A-Z][a-zA-Z0-9]*$"
+CLASS_METHOD_NAME_PATTERN = r"^_?[a-z][a-zA-Z0-9]*$"
 
 FUNCTION_NAME_EXCEPTIONS = {
     "main",
@@ -60,7 +64,7 @@ NAMING_RULES = {
     "Radiobutton": r"^rdo[A-Z]\w+",
     "Combobox": r"^cmb[A-Z]\w+",
     "Handler": r"^on[A-Z]\w+",
-    "Constant": r"^[A-Z_]+$",
+    "Constant": r"^_?[A-Z][A-Z0-9_]*$",
     "Class": r"^_?[A-Z][a-zA-Z0-9]*$",
 }
 
@@ -221,8 +225,23 @@ class GuiNamingVisitor(ast.NodeVisitor):
     ## function
 
     def functionCheckName(self, node) -> None:
-        """Check function names use the domainAction pattern."""
+        """Check module-level domainAction names and class method names.
+
+        Nested or local helpers keep ordinary descriptive names and are not
+        required to use domainAction.
+        """
         if self.functionIsNamingExempt(node):
+            return
+
+        parent = getattr(node, "parent", None)
+        if isinstance(parent, ast.ClassDef):
+            if not re.match(CLASS_METHOD_NAME_PATTERN, node.name):
+                self.violations.append(
+                    (node.name, "Method name (action or domainAction)", node.lineno)
+                )
+            return
+
+        if not isinstance(parent, ast.Module):
             return
 
         if not re.match(DOMAIN_ACTION_PATTERN, node.name):
