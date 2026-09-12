@@ -1,4 +1,4 @@
-"""Confirmed camera-media import service for REQ-004 acceptance criteria 8-10."""
+"""Confirmed camera-media import service for REQ-004 acceptance criteria 8-12."""
 
 from __future__ import annotations
 
@@ -152,6 +152,52 @@ class CameraImporter:
             stateKind="camera-import-manifest",
         )
         return manifestPath
+
+
+def cameraImportRun(
+    *,
+    source: Path,
+    goproDestination: Path,
+    droneDestination: Path,
+    dashcamDestination: Path,
+    manifestDirectory: Path,
+    dryRun: bool = True,
+    includeGoproCompanions: bool = False,
+) -> CameraImportResult:
+    """Run camera import through the public application-service boundary."""
+
+    planner = CameraImportPlanner(
+        goproDestination=Path(goproDestination),
+        droneDestination=Path(droneDestination),
+        dashcamDestination=Path(dashcamDestination),
+        includeGoproCompanions=includeGoproCompanions,
+    )
+    importer = CameraImporter(
+        planner=planner,
+        manifestDirectory=Path(manifestDirectory),
+        dryRun=dryRun,
+    )
+    return importer.importMedia(Path(source))
+
+
+def cameraImportSummary(result: CameraImportResult) -> str:
+    """Return a concise CLI-neutral summary for one camera import result."""
+
+    plannedCopies = sum(
+        1 for operation in result.plan.operations if operation.outcome == "copy"
+    )
+    manifest = str(result.manifestPath) if result.manifestPath is not None else "(none)"
+    return f"""CAMERA IMPORT SUMMARY
+Source:            {result.plan.sourcePath}
+Mode:              {'confirmed' if result.confirmed else 'dry-run'}
+Planned copies:    {plannedCopies}
+Copied:            {result.copied}
+Already present:   {result.alreadyPresent}
+Failed:            {result.failed}
+Excluded:          {len(result.plan.excludedPaths)}
+Unknown:           {len(result.plan.unknownPaths)}
+Manifest:          {manifest}
+"""
 
 
 def _sha256(path: Path) -> str:
