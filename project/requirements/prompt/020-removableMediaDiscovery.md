@@ -14,6 +14,19 @@ Key behaviours:
   keywords/content summary, camera/device metadata, and file type.
 - Include non-media files such as installers/packages, documents, and archives
   in searchable USB-volume inventory.
+- Consume the complete per-snapshot relative file inventory captured by REQ-009;
+  `show` and search must query stored catalogue evidence rather than rescanning a
+  card that may no longer be mounted.
+- Provide `camera show --card ID --full` to display the stored relative file
+  listing for the latest snapshot of one card.
+- Keep raw inventory storage complete, but apply presentation visibility rules.
+  Known operating-system/system clutter is hidden by default from full display.
+- Provide an explicit override such as `--show-system` to include files hidden
+  by the default system/clutter visibility rule.
+- Visibility/filter rules affect display/search presentation only; they must not
+  remove entries from persisted historical inventory.
+- Do not expand `camera show --all` into every stored filename by default; it
+  remains a concise cross-card summary.
 - Derive safe operational lifecycle state from latest inventory plus verified
   import evidence; never infer safe-to-recycle from age or free space alone.
 - Keep content lifecycle separate from physical availability/location.
@@ -78,6 +91,8 @@ organiseMyVideo camera unload --card 4
 organiseMyVideo camera mia --card 4
 organiseMyVideo camera found --card 4
 organiseMyVideo camera show --card 4
+organiseMyVideo camera show --card 4 --full
+organiseMyVideo camera show --card 4 --full --show-system
 organiseMyVideo camera show --all
 ```
 
@@ -85,5 +100,6 @@ Use synthetic test fixtures for multiple card/USB histories and verify direct
 service use independently of any CLI/UI adapter. Include tests for GoPro,
 DJI/drone, dash cam, USB, unknown, and mixed historical associations, plus
 add/remove device lifecycle, load/unload placement transitions, MIA/recovery,
+full stored-file display, default system-file suppression and explicit override,
 and recommendation exclusion for missing cards. The CLI adapter must remain
 thin and call the same structured services used by direct Python callers.
