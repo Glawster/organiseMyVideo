@@ -41,6 +41,10 @@ only as historical snapshots. Typical questions include:
 - List known removable volumes with current capacity, free space, most recent
   inventory date, content date range, volume kind, and derived lifecycle
   status.
+- Show a detailed view of one numbered removable volume with
+  `camera show --card ID`.
+- Show the complete removable-volume inventory with `camera show --all`.
+- Treat `--card` and `--all` as mutually exclusive selectors for `camera show`.
 - Recommend cards for use according to free space and lifecycle state.
 - Prefer the oldest suitable empty/recyclable card when several equivalent
   cards are available, so physical cards are rotated rather than repeatedly
@@ -76,18 +80,20 @@ only as historical snapshots. Typical questions include:
 
 ## Candidate operator interface
 
-The exact command hierarchy is subject to CLI refinement, but the intended
-operations are represented by examples such as:
+Removable-media lifecycle and discovery remain under the `camera` command,
+while movie/TV organisation remains under `media`.
 
 ```bash
-organiseMyVideo camera list
+organiseMyVideo camera show --card 6
+organiseMyVideo camera show --all
 organiseMyVideo camera find --date 2026-09-12
 organiseMyVideo camera find --keyword hillsborough
 organiseMyVideo camera recommend --free 100GB
 organiseMyVideo camera status --card 12
 ```
 
-The service layer must not depend on these exact spellings.
+For `camera show`, exactly one of `--card ID` or `--all` is required. The
+service layer must not depend on these exact CLI spellings.
 
 ## Lifecycle model
 
@@ -141,11 +147,16 @@ preserved.
 10. Given digest or durable identity evidence showing the same content on more
     than one removable volume, when queried, then duplicate locations can be
     reported without deleting either copy.
-11. Given the Python query/recommendation services are called directly, then
+11. Given `camera show --card ID`, when the ID exists, then the latest detailed
+    record for that removable volume is shown; given `camera show --all`, then
+    all known removable volumes are shown in a deterministic summary.
+12. Given `camera show` with both `--card` and `--all`, or with neither, then
+    argument validation fails before a catalogue query is executed.
+13. Given the Python query/recommendation services are called directly, then
     they return structured results without depending on argparse, console
     parsing, or the Qt UI.
-12. No search, recommendation, listing, or status query mutates removable media
-    or archive content.
+14. No search, recommendation, listing, show, or status query mutates removable
+    media or archive content.
 
 ## Dependencies and decisions
 
@@ -165,6 +176,8 @@ preserved.
   non-media file types.
 - Recommendation tests proving minimum-space filtering and oldest-suitable-card
   rotation.
+- `camera show` tests covering `--card ID`, `--all`, and mutual-exclusion/error
+  handling.
 - Safety tests proving ambiguous/unverified cards are never labelled safe to
   recycle.
 - Direct service tests independent of CLI and Qt layers.
@@ -185,3 +198,6 @@ preserved.
   content across numbered removable media, finding non-media files on USB
   volumes, and deriving safe-to-recycle lifecycle state from inventory and
   verified import evidence.
+- 2026-09-12: refined CLI direction so removable-media discovery remains under
+  `camera`; added `camera show --card ID` and `camera show --all`, with mutually
+  exclusive selectors.
