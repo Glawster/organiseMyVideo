@@ -15,8 +15,9 @@ and know when a card is safe to recycle.
 
 The camera-card inventory already records numbered removable media, including
 size, free space, capture dates, camera/device metadata, file counts, and a
-content summary. USB-volume inventory is planned to use the same numbered
-volume model. Camera import will add verified archive outcomes.
+content summary. REQ-009 is extended to persist the complete relative filename
+inventory for every confirmed snapshot. USB-volume inventory is planned to use
+the same numbered volume model. Camera import will add verified archive outcomes.
 
 The catalogue should use those records as operational knowledge rather than
 only as historical snapshots. Typical questions include:
@@ -33,6 +34,7 @@ only as historical snapshots. Typical questions include:
 - Where is footage from a particular date or event?
 - Which numbered volume contains a named file, software package, document, or
   other non-media content?
+- What exact files were on card 4 at its latest inventory?
 - Which cards still contain unique or unimported content?
 - Which cards are safe to reuse or format?
 
@@ -51,6 +53,18 @@ only as historical snapshots. Typical questions include:
   `camera show --card ID`.
 - Show the complete removable-volume inventory with `camera show --all`.
 - Treat `--card` and `--all` as mutually exclusive selectors for `camera show`.
+- Support `camera show --card ID --full` to display the complete stored relative
+  filename/path inventory from the card's latest snapshot without rescanning
+  the physical card.
+- Keep persisted filename inventory complete, while allowing presentation rules
+  to suppress low-value entries by default.
+- Hide known operating-system/system clutter by default in `--full` output.
+- Support an explicit override such as `--show-system` to include entries hidden
+  by the default system-file visibility rule.
+- Treat display filtering as presentation only; it must never delete or omit
+  entries from persisted historical snapshot data.
+- Keep `camera show --all` as a concise cross-card summary rather than expanding
+  every card's complete file inventory by default.
 - Maintain a registry of known cameras/devices, including at least a stable
   local device ID/name, device class, manufacturer/model, serial number when
   known, and active/inactive state.
@@ -105,8 +119,8 @@ only as historical snapshots. Typical questions include:
   where digest/identity evidence permits it.
 - Keep historical inventory snapshots; selection/search should normally use
   the latest snapshot while retaining older evidence for audit, device-use
-  history, placement history, missing/recovery history, and lifecycle
-  calculations.
+  history, placement history, missing/recovery history, file-inventory history,
+  and lifecycle calculations.
 - Expose the capability through importable Python catalogue/query services
   before adding CLI or Qt presentation layers.
 
@@ -124,6 +138,8 @@ only as historical snapshots. Typical questions include:
 - Guessing a device association when inventory and placement evidence are
   ambiguous.
 - Deleting historical device or placement records when a camera is retired.
+- Defining all future filename suppression categories beyond the initial
+  default system-file rule.
 - Replacing the camera-import verification/manifest process.
 - Requiring every removable volume to contain camera media.
 
@@ -134,6 +150,8 @@ while movie/TV organisation remains under `media`.
 
 ```bash
 organiseMyVideo camera show --card 6
+organiseMyVideo camera show --card 6 --full
+organiseMyVideo camera show --card 6 --full --show-system
 organiseMyVideo camera show --all
 organiseMyVideo camera find --date 2026-09-12
 organiseMyVideo camera find --keyword hillsborough
@@ -156,10 +174,11 @@ slot identifier, for example `--slot 2`.
 
 For `camera show`, exactly one of `--card ID` or `--all` is required. A single
 card view should answer both “what is on this card?” and “where is this card
-now?”. A device view/query should likewise make it possible to answer “which
-card is currently in the GoPro?”. `camera show --all` should make MIA cards
-visually obvious. The service layer must not depend on these exact CLI
-spellings.
+now?”. `--full` expands a single card view to the latest stored relative file
+listing; known system files remain hidden unless `--show-system` is supplied.
+A device view/query should likewise make it possible to answer “which card is
+currently in the GoPro?”. `camera show --all` should make MIA cards visually
+obvious. The service layer must not depend on these exact CLI spellings.
 
 ## Lifecycle model
 
@@ -220,7 +239,8 @@ the card physically unavailable and excludes it from recommendations.
 9. Given repeated inventory snapshots for the same numbered volume, when
    search/recommendation runs, then the latest snapshot supplies current
    capacity/content state while historical snapshots remain available for
-   audit, rotation, device-association, placement, and MIA/recovery history.
+   audit, rotation, device-association, placement, MIA/recovery, and file-list
+   history.
 10. Given digest or durable identity evidence showing the same content on more
     than one removable volume, when queried, then duplicate locations can be
     reported without deleting either copy.
@@ -239,38 +259,47 @@ the card physically unavailable and excludes it from recommendations.
     inventory date.
 14. Given `camera show` with both `--card` and `--all`, or with neither, then
     argument validation fails before a catalogue query is executed.
-15. Given a camera/device is added, then it receives a stable local identity and
+15. Given `camera show --card ID --full`, when the card has a persisted filename
+    inventory, then the latest snapshot's stored relative paths are displayed
+    without requiring the physical card to be mounted or rescanned.
+16. Given known operating-system/system clutter is present in a stored filename
+    inventory, when `--full` is used, then those entries are hidden by default;
+    when the explicit system-file override is supplied, those same stored
+    entries are displayed.
+17. Given display filtering hides an entry, then the underlying persisted
+    snapshot remains unchanged and later queries can still access that entry.
+18. Given a camera/device is added, then it receives a stable local identity and
     can subsequently be used as a load target.
-16. Given an active camera/device is removed/retired, then it is no longer
+19. Given an active camera/device is removed/retired, then it is no longer
     offered as a normal load target, but its historical card placements and
     inventory associations remain queryable.
-17. Given `camera load --card ID --camera DEVICE`, when both exist and the
+20. Given `camera load --card ID --camera DEVICE`, when both exist and the
     placement is valid, then the card is recorded as currently loaded in that
     device with a timestamp; loading it elsewhere closes the previous current
     placement or MIA state.
-18. Given a multi-slot device and a slot identifier, when a card is loaded, then
+21. Given a multi-slot device and a slot identifier, when a card is loaded, then
     the current placement records that slot and prevents an incompatible second
     current card assignment to the same slot.
-19. Given `camera unload --card ID`, when the card is currently loaded, then the
+22. Given `camera unload --card ID`, when the card is currently loaded, then the
     placement is closed with a timestamp and the card becomes `UNLOADED` while
     its placement history is retained.
-20. Given `camera mia --card ID`, when the card exists, then its current physical
+23. Given `camera mia --card ID`, when the card exists, then its current physical
     state becomes `MIA` with a timestamp and its last known placement/location
     remains available as history.
-21. Given `camera found --card ID`, when the card is currently `MIA`, then the
+24. Given `camera found --card ID`, when the card is currently `MIA`, then the
     MIA interval is closed with a recovery timestamp and the card becomes
     `UNLOADED` unless a simultaneous/new `load` operation establishes a camera
     placement.
-22. Given a card marked `MIA`, when recommendation runs, then that card is never
+25. Given a card marked `MIA`, when recommendation runs, then that card is never
     offered even if its content lifecycle is `READY` or `ARCHIVED` and it has
     sufficient free space.
-23. Given `camera show --card ID` after load, unload, MIA, or found operations,
+26. Given `camera show --card ID` after load, unload, MIA, or found operations,
     then current physical state reflects the latest explicit transition and all
     prior placement/missing history remains available for audit.
-24. Given the Python query/recommendation/device-placement services are called
+27. Given the Python query/recommendation/device-placement services are called
     directly, then they return structured results without depending on argparse,
     console parsing, or the Qt UI.
-25. Search, recommendation, listing, show, and status queries do not mutate
+28. Search, recommendation, listing, show, and status queries do not mutate
     removable media or archive content. Device-registry and physical-state
     actions may update application catalogue state but never write to the
     physical card.
@@ -291,6 +320,8 @@ the card physically unavailable and excludes it from recommendations.
   archived, unimported, conflicted, nearly full, and unknown-content states.
 - Search tests for date ranges, keywords, filenames, camera metadata, and
   non-media file types.
+- Full-file display tests proving latest stored snapshot paths are used without
+  rescanning and that default system-file hiding can be explicitly overridden.
 - Device-association tests covering GoPro, DJI/drone, dash cam, USB, unknown,
   and historically mixed-device cards.
 - Device-registry tests covering add, retire/remove, stable identity, and
@@ -299,9 +330,9 @@ the card physically unavailable and excludes it from recommendations.
   historical placement, optional multi-slot devices, MIA, and recovery.
 - Recommendation tests proving minimum-space filtering, oldest-suitable-card
   rotation, and exclusion of MIA cards.
-- `camera show` tests covering `--card ID`, `--all`, device association, current
-  placement/MIA state, latest location evidence, and mutual-exclusion/error
-  handling.
+- `camera show` tests covering `--card ID`, `--card ID --full`, `--all`, device
+  association, current placement/MIA state, latest location evidence,
+  system-file visibility override, and mutual-exclusion/error handling.
 - Safety tests proving ambiguous/unverified cards are never labelled safe to
   recycle and MIA cards are never recommended for immediate use.
 - Direct service tests independent of CLI and Qt layers.
@@ -334,3 +365,6 @@ the card physically unavailable and excludes it from recommendations.
 - 2026-09-12: added explicit `MIA`/missing and recovery transitions, kept
   physical availability separate from content lifecycle, and excluded missing
   cards from recommendation results.
+- 2026-09-12: added `camera show --card ID --full` using stored per-snapshot
+  filename inventory; known system files are hidden by default with an explicit
+  override, while persisted raw inventory remains complete.
