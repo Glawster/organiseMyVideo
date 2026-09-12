@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress — planner slice for acceptance criteria 1-7 implemented; verification pending.
+In progress — acceptance criteria 1-12 implemented; local verification pending.
 
 ## Outcome
 
@@ -29,7 +29,9 @@ The agreed behaviour and development sequence are maintained in
 
 - Provide camera detection, metadata reading, planning, importing,
   verification, and manifest generation as importable Python services.
-- Add `python -m organiseMyVideo camera import SOURCE` as the canonical CLI.
+- Add `python -m organiseMyVideo camera import -s SOURCE` as the canonical CLI.
+- Require `-s/--source` for canonical camera import; positional source syntax is
+  rejected.
 - Add `python -m organiseMyVideo camera migrate` as the canonical dry-run-first
   action for bringing existing GoPro and Drone media into the new hierarchy.
 - Accept a card root, DCIM directory, or supported camera media directory.
@@ -136,9 +138,11 @@ The agreed behaviour and development sequence are maintained in
 
 ## Traceability
 
-- Implementation: `organiseMyVideo/cameraDetect.py`, `organiseMyVideo/cameraPlan.py`,
-  existing `organiseMyVideo/cameraMetadata.py`; later import/migration services pending.
-- Tests: `tests/test_cameraPlan.py`; later confirmed-import, CLI, migration and failure tests pending.
+- Implementation: `organiseMyVideo/cameraDetect.py`,
+  `organiseMyVideo/cameraMetadata.py`, `organiseMyVideo/cameraPlan.py`,
+  `organiseMyVideo/cameraImport.py`, `organiseMyVideo/__main__.py`.
+- Tests: `tests/test_cameraPlan.py`, `tests/test_cameraImport.py`,
+  `tests/test_cli.py`.
 - Documentation: `documentation/cameraImport.md`, `README.md`
 - Pull request: pending
 - Agent runs: None
@@ -154,3 +158,8 @@ The agreed behaviour and development sequence are maintained in
 - 2026-09-04: changed — include dash-cam originals under `Dashcam/YYYY/MM/DD/`.
 - 2026-09-08: began implementation with typed, non-mutating detection and import
   planning for acceptance criteria 1-7; verification pending.
+- 2026-09-12: implemented confirmed copy/verification/manifest service for
+  acceptance criteria 8-10.
+- 2026-09-12: added the canonical `camera import -s SOURCE` CLI adapter, help
+  discovery, configurable destination overrides, and direct-service equivalence
+  coverage for acceptance criteria 11-12.
