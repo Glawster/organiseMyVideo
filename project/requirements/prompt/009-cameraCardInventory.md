@@ -21,19 +21,35 @@ python -m organiseMyVideo camera inventory -s SOURCE --card ID --confirm
 Canonical inventory requires explicit `-s/--source` and must fail before
 scanning when it is omitted.
 
+Model identity explicitly:
+
+- `cardId` is the durable identity of the physical numbered card.
+- Every confirmed inventory run creates a new durable `snapshotId`.
+- Reusing the same physical card creates another snapshot under the same
+  `cardId`; it must not overwrite earlier snapshots or their file lists.
+- The latest confirmed snapshot is the current known card contents; older
+  snapshots remain historical audit evidence.
+- The Linux mount path is temporary runtime context only and must not be used as
+  card identity or lifecycle identity.
+
 Persist SQLite under the application local-state directory. Each confirmed
 snapshot must retain the complete set of relative file paths found beneath the
 selected source, including non-camera files such as packages, installers,
-documents, and archives. Preserve the raw list as observed; filename filtering
-or suppression policy is intentionally deferred so later presentation/search
-rules do not destroy historical evidence.
+documents, and archives. Preserve the raw list as observed; presentation
+filtering must not destroy historical evidence.
+
+Expose `cardId` and `snapshotId` through the application service so camera import
+and removable-media lifecycle services can link verified archive outcomes to
+the exact observed card contents they apply to.
 
 Use xAI image understanding for `.THM` (or JPEG fallback) summaries, with an
 injectable vision function so tests never require a network or API key.
 
 Use temporary paths and synthetic fixtures; never depend on a real removable
 drive. Include tests proving later snapshots do not overwrite prior filename
-inventories and that arbitrary non-camera filenames are persisted.
+inventories, arbitrary non-camera filenames are persisted, reuse creates a new
+snapshot for the same card, and changing the mount path does not change durable
+identity.
 
 Verify with:
 
