@@ -1,5 +1,6 @@
 """Tests for the SQLite movie and TV catalogue updated on library scan."""
 
+from contextlib import nullcontext
 import json
 from pathlib import Path
 
@@ -106,7 +107,7 @@ def testLibraryRescanUpdatesSharedCatalogue(tmp_path: Path):
         "errors": 0,
     }
     organizer._writeSummaryReport = lambda: None
-    organizer._suppressResetNoiseLogs = _nullContext
+    organizer._suppressResetNoiseLogs = nullcontext
 
     organizer.resetLibraryMetadata(target="both")
 
