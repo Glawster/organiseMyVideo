@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from organiseMyVideo import cameraImport as cameraImportModule
-from organiseMyVideo.cameraImport import CameraImporter
+from organiseMyVideo.cameraImport import CameraImporter, cameraImportRun
 from organiseMyVideo.cameraPlan import CameraImportPlanner
 
 
@@ -47,6 +47,36 @@ def testCameraImportDryRunDoesNotWriteArchiveOrManifest(tmp_path: Path):
     assert result.manifestPath is None
     assert result.copied == 0
     assert media.read_bytes() == before
+    assert not (tmp_path / "archive").exists()
+    assert not (tmp_path / "state").exists()
+
+
+def testCameraImportRunMatchesDirectImporterDryRun(tmp_path: Path):
+    source, _ = cameraSourceCreate(tmp_path)
+    gopro = tmp_path / "archive" / "GoPro"
+    drone = tmp_path / "archive" / "Drone"
+    dashcam = tmp_path / "archive" / "Dashcam"
+    manifests = tmp_path / "state" / "camera-imports"
+
+    serviceResult = cameraImportRun(
+        source=source,
+        goproDestination=gopro,
+        droneDestination=drone,
+        dashcamDestination=dashcam,
+        manifestDirectory=manifests,
+        dryRun=True,
+    )
+    directResult = CameraImporter(
+        planner=CameraImportPlanner(
+            goproDestination=gopro,
+            droneDestination=drone,
+            dashcamDestination=dashcam,
+        ),
+        manifestDirectory=manifests,
+        dryRun=True,
+    ).importMedia(source)
+
+    assert serviceResult == directResult
     assert not (tmp_path / "archive").exists()
     assert not (tmp_path / "state").exists()
 
