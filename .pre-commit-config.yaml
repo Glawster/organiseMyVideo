@@ -7,17 +7,7 @@ repos:
     hooks:
       - id: black
 
-  - repo: local
-    hooks:
-      - id: gui-naming-linter
-        name: GUI Naming Linter
-        entry: python -m organiseMyProjects.runLinter
-        language: python
-        additional_dependencies:
-          - organiseMyProjects @ git+https://github.com/Glawster/organiseMyProjects.git@0.6
-        types: [python]
-
-# OMP-MANAGED-BEGIN
+  # OMP-MANAGED-BEGIN
   - repo: local
     hooks:
       - id: gui-naming-linter
@@ -25,4 +15,4 @@ repos:
         entry: runLinter
         language: python
         types: [python]
-# OMP-MANAGED-END
+  # OMP-MANAGED-END

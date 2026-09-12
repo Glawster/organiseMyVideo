@@ -1,8 +1,4 @@
-black
 build
-pre-commit
-pytest
-ruff
 
 # OMP-MANAGED-BEGIN
 black
