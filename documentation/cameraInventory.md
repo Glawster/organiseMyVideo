@@ -26,18 +26,23 @@ the volume itself records its numeric ID and the latest inventory summary. Archi
 
 ## Command-line interface
 
+The source may be supplied positionally or with `-s/--source`; both forms are
+equivalent:
+
 ```bash
 $ python -m organiseMyVideo camera inventory /media/andy/7000-8000 --card 12
+$ python -m organiseMyVideo camera inventory -s /media/andy/7000-8000 --card 12
+$ python -m organiseMyVideo camera inventory --source /media/andy/7000-8000 --card 12
 $ python -m organiseMyVideo camera inventory /media/andy/7000-8000 --card 12 --confirm
 $ python -m organiseMyVideo camera inventory /media/andy/7000-8000
 $ python -m organiseMyVideo camera inventory --card 12
 ```
 
-The first form scans and prints a dry-run report. The second form writes
-SQLite and `organiseMyVideo.NNN` on the card, where `NNN` is the zero-padded
-card ID (`organiseMyVideo.001`). After that file exists, a scan can omit
-`--card` and read the ID from the volume. The file contains the same summary
-shown in the console, including free space. The last form prints
+The first three forms all scan the same source and print a dry-run report. The
+confirmed form writes SQLite and `organiseMyVideo.NNN` on the card, where `NNN`
+is the zero-padded card ID (`organiseMyVideo.001`). After that file exists, a
+scan can omit `--card` and read the ID from the volume. The file contains the
+same summary shown in the console, including free space. The last form prints
 the latest stored snapshot for that card ID.
 
 `--card` is required on the first scan of an unlabelled card. Dry-run remains
@@ -47,7 +52,7 @@ the on-card file is refused unless `--reassign` is also given:
 
 ```bash
 $ python -m organiseMyVideo camera inventory /media/andy/7000-8000 --card 5 --reassign
-$ python -m organiseMyVideo camera inventory /media/andy/7000-8000 --card 5 --reassign --confirm
+$ python -m organiseMyVideo camera inventory -s /media/andy/7000-8000 --card 5 --reassign --confirm
 ```
 
 `--reassign` replaces `organiseMyVideo.001` with `organiseMyVideo.005` (for a
@@ -129,8 +134,8 @@ Ignored clutter matches the camera-import rules: `._*` files, `_gsdata_`,
 Tests use temporary directories and synthetic JPEG, MP4, `.THM`, DJI, and
 ignored-file fixtures. They cover dry-run immutability, confirmed snapshots,
 repeat card IDs, capture-time precedence, vision injection, missing API keys,
-invalid card IDs, show-without-source, and execution through
-`python -m organiseMyVideo camera inventory`.
+invalid card IDs, show-without-source, positional and `-s/--source` source
+forms, and execution through `python -m organiseMyVideo camera inventory`.
 
 ## Source and permission errors
 
