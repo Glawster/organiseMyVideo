@@ -8,12 +8,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+from organiseMediaStudio.metadata.captureDate import captureDateFromFilename
+
 # MP4/QuickTime creation times count seconds from 1904-01-01 UTC.
 _MP4_EPOCH = datetime(1904, 1, 1, tzinfo=timezone.utc)
 
 _JPEG_SUFFIXES = {".jpg", ".jpeg", ".thm"}
 _MP4_SUFFIXES = {".mp4", ".mov"}
-_DASHCAM_DATE_YMD_HMS = re.compile(r"^(\d{8})_(\d{6})")
 _DASHCAM_DATE_YYMD_HMS = re.compile(r"^(\d{6})_(\d{6})_")
 _DASHCAM_DATE_Y_MD_HMS = re.compile(r"^(\d{4})_(\d{4})_(\d{6})")
 _DASHCAM_DATE_Y_M_D_HMS = re.compile(r"^(\d{4})_(\d{2})_(\d{2})_(\d{6})")
@@ -45,16 +46,17 @@ def metadataCaptureRead(path: Path) -> Optional[datetime]:
 
 
 def metadataFilenameCaptureRead(path: Path) -> Optional[datetime]:
-    """Return a timestamp encoded in common dash-cam filenames, if any."""
+    """Return a timestamp encoded in common camera/dash-cam filenames, if any."""
+
+    shared = captureDateFromFilename(path)
+    if shared is not None and shared.precision == "second":
+        return shared.captureAt
 
     stem = path.stem
     match = _DASHCAM_DATE_COMPACT.match(stem)
     if match:
         digits = match.group(1)
         return _datetimeFromParts(digits[:8], digits[8:])
-    match = _DASHCAM_DATE_YMD_HMS.match(stem)
-    if match:
-        return _datetimeFromParts(match.group(1), match.group(2))
     match = _DASHCAM_DATE_YYMD_HMS.match(stem)
     if match:
         return _datetimeFromParts("20" + match.group(1), match.group(2))
