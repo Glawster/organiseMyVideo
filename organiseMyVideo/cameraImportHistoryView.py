@@ -50,11 +50,11 @@ def cameraImportHistoryFullSummary(
             elif outcome == "failed":
                 failedCount += 1
 
-            lines.append(f"    {_outcomeDisplay(outcome):<15} {destination}")
-            lines.append(f"      from {source}")
+            line = f"    {_outcomeDisplay(outcome):<15} {source} -> {destination}"
             error = asset.get("error")
             if outcome == "failed" and error:
-                lines.append(f"      error: {error}")
+                line += f" | error: {error}"
+            lines.append(line)
 
     lines.extend(
         [
