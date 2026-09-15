@@ -12,6 +12,7 @@ from typing import Callable, Optional, Sequence
 from . import constants
 from . import mainLegacy as _legacy
 from .cameraImport import cameraImportHistory, cameraImportHistorySummary
+from .cameraImportHistoryView import cameraImportHistoryFullSummary
 
 APP_VERSION = _legacy.APP_VERSION
 APP_CONFIG_FILE = _legacy.APP_CONFIG_FILE
@@ -45,6 +46,11 @@ def _cameraImportParserBuild() -> argparse.ArgumentParser:
         dest="listHistory",
         action="store_true",
         help="list previous confirmed camera imports",
+    )
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="with --list --card, show the files recorded by each import",
     )
     parser.add_argument(
         "--card",
@@ -211,6 +217,8 @@ def _cameraImportHistoryRun(arguments: Sequence[str]) -> int:
         parser.error("--list is required for camera import history")
     if args.card is not None and args.card < 1:
         parser.error("--card must be a positive integer")
+    if args.full and args.card is None:
+        parser.error("--full requires --card")
     if args.importSource is not None:
         parser.error("--list identifies a card with --card, not -s/--source")
     if args.confirm:
@@ -225,6 +233,9 @@ def _cameraImportHistoryRun(arguments: Sequence[str]) -> int:
         or constants.applicationStateDirectory() / "cameraImports"
     )
     records = cameraImportHistory(manifestDirectory, cardId=args.card)
+    if args.full:
+        print(cameraImportHistoryFullSummary(records, cardId=args.card), end="")
+        return 0
     print(cameraImportHistorySummary(records, cardId=args.card), end="")
     return 0
 
@@ -235,6 +246,8 @@ def _cameraImportArgumentsValidate(
 ) -> None:
     """Validate non-history camera-import arguments handled by this entry point."""
 
+    if args.full:
+        parser.error("--full is only valid with --list --card")
     if args.importSource is None:
         parser.error("-s/--source is required unless --list is used")
     source = Path(args.importSource).expanduser()
