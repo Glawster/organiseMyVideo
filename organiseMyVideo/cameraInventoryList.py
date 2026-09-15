@@ -124,13 +124,16 @@ def cameraInventoryFullSummary(entry: CardInventoryListEntry) -> str:
 
 
 def _status(entry: CardInventoryListEntry) -> str:
-    """Return the current derived status for one known card."""
+    """Return the current lifecycle status for one known card."""
 
-    if entry.location and entry.location.strip().lower() == "missing":
+    location = (entry.location or "").strip().lower()
+    if location == "missing":
         return "missing"
-    if entry.inventory is None:
-        return "registered"
-    return "inventoried"
+    if location in {"archive", "archived"}:
+        return "archived"
+    if location:
+        return "in use"
+    return "available"
 
 
 def _snapshotCount(databasePath: Path, cardId: int) -> int:
