@@ -61,12 +61,15 @@ def testCameraImportHistoryFullSummaryShowsPerFileDestinations(tmp_path: Path):
     summary = cameraImportHistoryFullSummary((record,), cardId=4)
 
     assert "CAMERA IMPORT HISTORY — CARD 004 — FULL" in summary
-    assert "copied" in summary
-    assert "/mnt/myVideo/Video/GoPro/2026/09-Sep/15/A.MP4" in summary
-    assert "already present" in summary
-    assert "/mnt/myVideo/Video/GoPro/2026/09-Sep/15/B.MP4" in summary
-    assert "failed" in summary
-    assert "OSError: verification failed" in summary
+    copiedLine = next(line for line in summary.splitlines() if "A.MP4" in line)
+    presentLine = next(line for line in summary.splitlines() if "B.MP4" in line)
+    failedLine = next(line for line in summary.splitlines() if "C.MP4" in line)
+    assert "copied" in copiedLine
+    assert "/media/card/DCIM/A.MP4 -> /mnt/myVideo/Video/GoPro/2026/09-Sep/15/A.MP4" in copiedLine
+    assert "already present" in presentLine
+    assert "/media/card/DCIM/B.MP4 -> /mnt/myVideo/Video/GoPro/2026/09-Sep/15/B.MP4" in presentLine
+    assert "failed" in failedLine
+    assert "OSError: verification failed" in failedLine
     assert "2 archived files" in summary
     assert "1 failed file" in summary
 
