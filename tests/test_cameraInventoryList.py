@@ -79,6 +79,7 @@ def testListIncludesInventoriedAndLocationOnlyCards(tmp_path: Path):
 
     summary = cameraInventoryListSummary(entries)
     assert "Status" in summary
+    assert "Archived" in summary
     assert "Type" in summary
     assert "003" in summary
     assert "to archive" in summary
@@ -128,9 +129,10 @@ def testArchivedContentMakesUnlocatedCardAvailable(tmp_path: Path):
     summary = cameraInventoryListSummary(entries)
 
     assert entries[0].archived is True
-    assert "011" in summary
-    assert "available" in summary
-    assert "to archive" not in summary
+    row = next(line for line in summary.splitlines() if line.startswith("011"))
+    assert "available" in row
+    assert "yes" in row
+    assert "to archive" not in row
 
 
 def testMissingCardDoesNotPresentOldCameraAsCurrent(tmp_path: Path):
@@ -187,6 +189,7 @@ def testInventoryListCliSupportsFullCardView(
     assert applicationMain.main(["camera", "inventory", "--list"]) == 0
     compact = capsys.readouterr().out
     assert "Status" in compact
+    assert "Archived" in compact
     assert "Type" in compact
     assert "009" in compact
     assert "missing" in compact
