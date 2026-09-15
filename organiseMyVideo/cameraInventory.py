@@ -434,6 +434,42 @@ class CameraInventory:
         records.sort(key=lambda item: item.relativePath)
         return records
 
+    def _cardIdsStored(self) -> set[int]:
+        """Return card IDs already present in the inventory database without writing it."""
+
+        if not self.databasePath.is_file():
+            return set()
+        try:
+            connection = sqlite3.connect(
+                f"file:{self.databasePath}?mode=ro",
+                uri=True,
+            )
+        except sqlite3.Error:
+            return set()
+        try:
+            table = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='cardInventory'"
+            ).fetchone()
+            if table is None:
+                return set()
+            rows = connection.execute(
+                "SELECT DISTINCT cardId FROM cardInventory WHERE cardId >= 1"
+            ).fetchall()
+        except sqlite3.Error:
+            return set()
+        finally:
+            connection.close()
+        return {int(row[0]) for row in rows}
+
+    def _cardIdNextAvailable(self) -> int:
+        """Return the lowest positive card ID not already stored."""
+
+        used = self._cardIdsStored()
+        candidate = 1
+        while candidate in used:
+            candidate += 1
+        return candidate
+
     def _cardIdResolve(
         self,
         cardId: Optional[int],
@@ -448,9 +484,15 @@ class CameraInventory:
             if reassign:
                 raise ValueError("--reassign requires --card with the new ID")
             if storedId is None:
+                suggested = self._cardIdNextAvailable()
+                existing = sorted(self._cardIdsStored())
+                existingText = ", ".join(str(value) for value in existing) or "none"
                 raise ValueError(
-                    "card ID is required on first scan; pass --card or write "
-                    "organiseMyVideo.001 first"
+                    "no card ID found on this card; "
+                    f"existing card IDs: {existingText}; "
+                    f"suggested card ID: {suggested}; "
+                    f"re-run with --card {suggested} "
+                    "(add --confirm to write the card label)"
                 )
             return storedId
         resolved = self._cardIdValidate(cardId)
