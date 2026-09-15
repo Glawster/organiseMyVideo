@@ -13,8 +13,6 @@ from . import constants
 from . import mainLegacy as _legacy
 from .cameraImport import cameraImportHistory, cameraImportHistorySummary
 
-# Keep the established CLI API visible to tests and callers while the camera
-# import history syntax is layered on top of it.
 APP_VERSION = _legacy.APP_VERSION
 APP_CONFIG_FILE = _legacy.APP_CONFIG_FILE
 buildParser = _legacy.buildParser
@@ -85,6 +83,62 @@ def _cameraImportParserBuild() -> argparse.ArgumentParser:
     parser.add_argument("--debug", action="store_true", help="enable debug-level logging")
     parser.add_argument("--quiet", action="store_true", help="show errors only")
     return parser
+
+
+def _cameraInventoryLocationParserBuild() -> argparse.ArgumentParser:
+    """Return the parser for card-location metadata commands."""
+
+    parser = argparse.ArgumentParser(
+        prog="organiseMyVideo camera inventory",
+        description="show or update the physical location of a numbered card",
+    )
+    parser.add_argument("--card", type=int, required=True)
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument(
+        "--location",
+        action="store_true",
+        help="show the currently stored physical location",
+    )
+    group.add_argument(
+        "--set-location",
+        metavar="LOCATION",
+        help="set the current physical location, for example 'Car JSZ5017'",
+    )
+    parser.add_argument(
+        "-y",
+        "--confirm",
+        "--y",
+        dest="confirm",
+        action="store_true",
+        help="confirm the location update; default is dry-run",
+    )
+    parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--quiet", action="store_true")
+    return parser
+
+
+def _cameraInventoryLocationRun(arguments: Sequence[str]) -> int:
+    """Show or update persistent location metadata for one card."""
+
+    from .cardLocation import cardLocationGet, cardLocationSet, cardLocationSummary
+
+    parser = _cameraInventoryLocationParserBuild()
+    args = parser.parse_args(list(arguments))
+    if args.card < 1:
+        parser.error("--card must be a positive integer")
+
+    if args.location:
+        print(cardLocationSummary(args.card, cardLocationGet(args.card)), end="")
+        return 0
+
+    location = cardLocationSet(
+        args.card,
+        args.set_location,
+        dryRun=not args.confirm,
+    )
+    print(cardLocationSummary(args.card, location), end="")
+    print(f"  Persisted:        {'yes' if args.confirm else 'no (dry-run)'}")
+    return 0
 
 
 def _cameraImportHistoryRun(arguments: Sequence[str]) -> int:
@@ -201,6 +255,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     """Run the command-line application and return a process status."""
 
     arguments = list(sys.argv[1:] if argv is None else argv)
+
+    if len(arguments) >= 2 and arguments[:2] == ["camera", "inventory"]:
+        inventoryArguments = arguments[2:]
+        if "--location" in inventoryArguments or "--set-location" in inventoryArguments:
+            return _cameraInventoryLocationRun(inventoryArguments)
+
     if len(arguments) >= 2 and arguments[:2] == ["camera", "import"]:
         importArguments = arguments[2:]
         if "--help" in importArguments or "-h" in importArguments:
