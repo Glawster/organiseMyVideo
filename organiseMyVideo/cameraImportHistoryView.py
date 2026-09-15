@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -14,7 +15,7 @@ def cameraImportHistoryFullSummary(
     *,
     cardId: Optional[int] = None,
 ) -> str:
-    """Return per-file camera import history from the recorded manifests."""
+    """Return a compact per-file camera import history from recorded manifests."""
 
     title = "CAMERA IMPORT HISTORY"
     if cardId is not None:
@@ -26,34 +27,55 @@ def cameraImportHistoryFullSummary(
     archivedCount = 0
     failedCount = 0
     for record in records:
+        assets = _manifestAssetsRead(record.manifestPath)
+        sourceRoot = Path(record.sourcePath)
+        archiveRoot = _archiveRoot(assets)
+
         lines.extend(
             [
                 "",
-                f"Import {_historyDateDisplay(record.createdAt)}",
-                f"  Source:   {record.sourcePath}",
-                f"  Manifest: {_pathDisplay(record.manifestPath)}",
-                "  Files:",
+                f"IMPORT {_historyDateDisplay(record.createdAt)}",
+                f"  Source root:   {sourceRoot}",
+                f"  Archive root:  {archiveRoot or '-'}",
+                f"  Manifest:      {_pathDisplay(record.manifestPath)}",
+                f"  Result:        {_resultDisplay(record)}",
+                "",
             ]
         )
-        assets = _manifestAssetsRead(record.manifestPath)
+
         if not assets:
-            lines.append("    none recorded")
+            lines.append("  No files recorded.")
             continue
 
+        rows: list[tuple[str, str, str, str]] = []
         for asset in assets:
             outcome = str(asset.get("outcome") or "unknown")
             source = str(asset.get("sourcePath") or asset.get("relativePath") or "unknown")
             destination = str(asset.get("destinationPath") or "unknown")
+            error = str(asset.get("error") or "")
+
             if outcome in {"copied", "alreadyPresent"}:
                 archivedCount += 1
             elif outcome == "failed":
                 failedCount += 1
 
-            line = f"    {_outcomeDisplay(outcome):<15} {source} -> {destination}"
-            error = asset.get("error")
-            if outcome == "failed" and error:
-                line += f" | error: {error}"
-            lines.append(line)
+            sourceDisplay = _relativeDisplay(source, sourceRoot)
+            destinationDisplay = _relativeDisplay(destination, archiveRoot)
+            rows.append((_outcomeDisplay(outcome), sourceDisplay, destinationDisplay, error))
+
+        resultWidth = max(len("Result"), *(len(row[0]) for row in rows))
+        sourceWidth = max(len("Source"), *(len(row[1]) for row in rows))
+        lines.append(
+            f"  {'Result'.ljust(resultWidth)}  {'Source'.ljust(sourceWidth)}  Archive"
+        )
+        lines.append(
+            f"  {'-' * resultWidth}  {'-' * sourceWidth}  {'-' * len('Archive')}"
+        )
+        for result, source, destination, error in rows:
+            line = f"  {result.ljust(resultWidth)}  {source.ljust(sourceWidth)}  {destination}"
+            if error:
+                line += f"  | {error}"
+            lines.append(line.rstrip())
 
     lines.extend(
         [
@@ -80,6 +102,46 @@ def _manifestAssetsRead(path: Path) -> tuple[dict, ...]:
     if not isinstance(assets, list):
         return ()
     return tuple(item for item in assets if isinstance(item, dict))
+
+
+def _archiveRoot(assets: tuple[dict, ...]) -> Optional[Path]:
+    """Return the deepest common destination directory for one import."""
+
+    destinations = [
+        Path(str(asset["destinationPath"]))
+        for asset in assets
+        if asset.get("destinationPath")
+    ]
+    if not destinations:
+        return None
+    parents = [str(path.parent) for path in destinations]
+    try:
+        return Path(os.path.commonpath(parents))
+    except ValueError:
+        return None
+
+
+def _relativeDisplay(pathValue: str, root: Optional[Path]) -> str:
+    """Return a path relative to the displayed root when possible."""
+
+    path = Path(pathValue)
+    if root is None:
+        return str(path)
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _resultDisplay(record: CameraImportHistoryRecord) -> str:
+    """Return a concise per-import result summary."""
+
+    parts = [f"{record.copied} copied"]
+    if record.alreadyPresent:
+        parts.append(f"{record.alreadyPresent} already present")
+    if record.failed:
+        parts.append(f"{record.failed} failed")
+    return ", ".join(parts)
 
 
 def _outcomeDisplay(outcome: str) -> str:
