@@ -10,7 +10,7 @@ from organiseMyVideo.cameraImportHistoryView import cameraImportHistoryFullSumma
 
 
 def _manifestWrite(path: Path, *, cardId: int = 4) -> None:
-    path.parent.mkdir(parents=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
             {
