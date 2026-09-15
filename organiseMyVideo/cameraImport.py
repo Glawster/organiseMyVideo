@@ -79,6 +79,7 @@ class CameraImporter:
         """Plan or execute one camera-media import."""
 
         plan = self.planner.importPlan(source)
+        _plannedDestinationCollisionsRaise(plan)
         conflicts = [item for item in plan.operations if item.outcome == "conflict"]
         if conflicts:
             destinations = ", ".join(str(item.asset.destinationPath) for item in conflicts)
@@ -98,11 +99,6 @@ class CameraImporter:
                 cardId=cardId,
             )
 
-        copyOperations = [
-            operation for operation in plan.operations if operation.outcome == "copy"
-        ]
-        _destinationSpaceValidate(copyOperations)
-
         snapshotId = None
         if cardId is not None:
             snapshotId = cameraSnapshotMatch(
@@ -112,6 +108,10 @@ class CameraImporter:
                 assignIdentity=True,
             )
 
+        copyOperations = [
+            operation for operation in plan.operations if operation.outcome == "copy"
+        ]
+        _destinationSpaceValidate(copyOperations)
         totalBytes = sum(
             operation.asset.sourcePath.stat().st_size for operation in copyOperations
         )
@@ -149,7 +149,7 @@ class CameraImporter:
                     self._recordBuild(
                         operation,
                         outcome="failed",
-                        error=str(error),
+                        error=_errorDisplay(error),
                     )
                 )
             else:
@@ -437,60 +437,62 @@ def cameraImportHistorySummary(
     return "\n".join(lines) + "\n"
 
 
-def _destinationSpaceValidate(operations: list[ImportOperation]) -> None:
-    """Refuse a confirmed import when a destination filesystem lacks free space."""
+def _plannedDestinationCollisionsRaise(plan: ImportPlan) -> None:
+    """Reject multiple planned copies targeting the same final archive path."""
 
-    filesystems: dict[int, dict[str, object]] = {}
-    for operation in operations:
-        required = operation.asset.sourcePath.stat().st_size
-        anchor = _existingPath(operation.asset.destinationPath.parent)
-        try:
-            device = anchor.stat().st_dev
-            free = shutil.disk_usage(anchor).free
-        except OSError as error:
-            raise RuntimeError(
-                f"cannot determine free space for destination {anchor}: {error}"
-            ) from error
-        details = filesystems.setdefault(
-            device,
-            {"anchor": anchor, "required": 0, "free": free},
-        )
-        details["required"] = int(details["required"]) + required
-        details["free"] = min(int(details["free"]), free)
-
-    for details in filesystems.values():
-        required = int(details["required"])
-        free = int(details["free"])
-        if required <= free:
+    byDestination: dict[Path, list[ImportOperation]] = {}
+    for operation in plan.operations:
+        if operation.outcome != "copy":
             continue
-        anchor = Path(details["anchor"])
-        raise RuntimeError(
-            "insufficient destination disk space; "
-            f"need {_bytesDisplay(required)}, free {_bytesDisplay(free)} at {anchor}; "
-            "import not started"
+        byDestination.setdefault(operation.asset.destinationPath, []).append(operation)
+
+    collisions = [
+        (destination, operations)
+        for destination, operations in byDestination.items()
+        if len(operations) > 1
+    ]
+    if not collisions:
+        return
+
+    lines = ["camera import has planned destination collisions:"]
+    for destination, operations in collisions[:10]:
+        lines.append(f"  {destination}")
+        for operation in operations:
+            lines.append(f"    <- {operation.asset.relativePath}")
+    if len(collisions) > 10:
+        lines.append(f"  ...and {len(collisions) - 10} more collision(s)")
+    raise RuntimeError("\n".join(lines))
+
+
+def _destinationSpaceValidate(copyOperations: list[ImportOperation]) -> None:
+    """Reject confirmed imports that cannot fit on their destination filesystems."""
+
+    requiredByDevice: dict[int, int] = {}
+    samplePathByDevice: dict[int, Path] = {}
+    for operation in copyOperations:
+        destination = operation.asset.destinationPath
+        existing = destination.parent
+        while not existing.exists() and existing.parent != existing:
+            existing = existing.parent
+        stats = os.stat(existing)
+        device = stats.st_dev
+        requiredByDevice[device] = (
+            requiredByDevice.get(device, 0) + operation.asset.sourcePath.stat().st_size
         )
+        samplePathByDevice.setdefault(device, existing)
 
-
-def _existingPath(path: Path) -> Path:
-    """Return the nearest existing ancestor of *path*."""
-
-    current = Path(path)
-    while not current.exists() and current.parent != current:
-        current = current.parent
-    return current
-
-
-def _bytesDisplay(value: int) -> str:
-    """Return a compact binary byte count."""
-
-    amount = float(max(value, 0))
-    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
-        if amount < 1024.0 or unit == "TiB":
-            if unit == "B":
-                return f"{int(amount)} {unit}"
-            return f"{amount:.1f} {unit}"
-        amount /= 1024.0
-    return f"{amount:.1f} TiB"
+    failures: list[str] = []
+    for device, required in requiredByDevice.items():
+        path = samplePathByDevice[device]
+        free = shutil.disk_usage(path).free
+        if required > free:
+            failures.append(
+                f"need {_byteDisplay(required)}, free {_byteDisplay(free)} at {path}"
+            )
+    if failures:
+        raise RuntimeError(
+            "insufficient destination disk space; " + "; ".join(failures) + "; import not started"
+        )
 
 
 def _manifestFailureGroups(path: Path) -> list[tuple[str, int, tuple[str, ...]]]:
@@ -514,6 +516,32 @@ def _manifestFailureGroups(path: Path) -> list[tuple[str, int, tuple[str, ...]]]
 
     ordered = sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0]))
     return [(error, len(paths), tuple(paths[:3])) for error, paths in ordered]
+
+
+def _errorDisplay(error: Exception) -> str:
+    """Return an actionable exception description for manifests and summaries."""
+
+    message = str(error).strip()
+    name = type(error).__name__
+    if isinstance(error, OSError) and error.errno is not None:
+        detail = error.strerror or message or "operating system error"
+        return f"{name} [{error.errno}]: {detail}"
+    if message:
+        return f"{name}: {message}"
+    return name
+
+
+def _byteDisplay(value: int) -> str:
+    """Return a compact binary byte count."""
+
+    amount = float(max(value, 0))
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if amount < 1024.0 or unit == "TiB":
+            if unit == "B":
+                return f"{int(amount)} {unit}"
+            return f"{amount:.1f} {unit}"
+        amount /= 1024.0
+    return f"{amount:.1f} TiB"
 
 
 def _pathDisplay(path: Path) -> str:
