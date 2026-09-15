@@ -54,7 +54,7 @@ def cameraInventoryListSummary(entries: tuple[CardInventoryListEntry, ...]) -> s
     if not entries:
         return "CAMERA CARD INVENTORY\n\nNo cards registered.\n"
 
-    rows: list[tuple[str, str, str, str, str, str]] = []
+    rows: list[tuple[str, str, str, str, str, str, str]] = []
     for entry in entries:
         record = entry.inventory
         size = (
@@ -72,6 +72,7 @@ def cameraInventoryListSummary(entries: tuple[CardInventoryListEntry, ...]) -> s
         rows.append(
             (
                 f"{entry.cardId:03d}",
+                _status(entry),
                 size,
                 kind,
                 camera,
@@ -80,7 +81,15 @@ def cameraInventoryListSummary(entries: tuple[CardInventoryListEntry, ...]) -> s
             )
         )
 
-    headers = ("Card", "Size", "Kind", "Camera", "Location", "Last inventory")
+    headers = (
+        "Card",
+        "Status",
+        "Size",
+        "Kind",
+        "Camera",
+        "Location",
+        "Last inventory",
+    )
     widths = [
         max(len(headers[index]), *(len(row[index]) for row in rows))
         for index in range(len(headers))
@@ -99,6 +108,7 @@ def cameraInventoryFullSummary(entry: CardInventoryListEntry) -> str:
 
     header = (
         f"CAMERA CARD {entry.cardId:03d}\n"
+        f"  Status:           {_status(entry)}\n"
         f"  Location:         {entry.location or 'unknown'}\n"
         f"  Snapshots:        {entry.snapshotCount}\n"
     )
@@ -111,6 +121,16 @@ def cameraInventoryFullSummary(entry: CardInventoryListEntry) -> str:
         + f"  Last inventoried: {record.inventoriedAt}\n\n"
         + _cardVolumeSummary(record)
     )
+
+
+def _status(entry: CardInventoryListEntry) -> str:
+    """Return the current derived status for one known card."""
+
+    if entry.location and entry.location.strip().lower() == "missing":
+        return "missing"
+    if entry.inventory is None:
+        return "registered"
+    return "inventoried"
 
 
 def _snapshotCount(databasePath: Path, cardId: int) -> int:
