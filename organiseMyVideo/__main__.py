@@ -231,12 +231,25 @@ def _getSummaryReportPath(sourcePath: str, mode: str) -> Path:
     return _legacy._getSummaryReportPath(sourcePath, mode)
 
 
+def _cameraImportPlainSummaryRun(arguments: Sequence[str]) -> int:
+    """Delegate camera import while rendering its summary without an ASCII box."""
+
+    originalDrawBox = _legacy.drawBox
+    _legacy.drawBox = lambda text: print(text, end="" if text.endswith("\n") else "\n")
+    try:
+        _legacyGlobalsSync()
+        return _legacy.main(arguments)
+    finally:
+        _legacy.drawBox = originalDrawBox
+
+
 def _cameraImportConfirmedRun(arguments: Sequence[str]) -> int:
-    """Delegate confirmed camera import while injecting terminal progress."""
+    """Delegate confirmed camera import with progress and a plain final summary."""
 
     from . import cameraImport as cameraImportModule
 
     originalRun = cameraImportModule.cameraImportRun
+    originalDrawBox = _legacy.drawBox
     progressCallback = _cameraImportProgressRenderer()
 
     def _runWithProgress(**kwargs):
@@ -244,11 +257,13 @@ def _cameraImportConfirmedRun(arguments: Sequence[str]) -> int:
         return originalRun(**kwargs)
 
     cameraImportModule.cameraImportRun = _runWithProgress
+    _legacy.drawBox = lambda text: print(text, end="" if text.endswith("\n") else "\n")
     try:
         _legacyGlobalsSync()
         return _legacy.main(arguments)
     finally:
         cameraImportModule.cameraImportRun = originalRun
+        _legacy.drawBox = originalDrawBox
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -269,6 +284,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return _cameraImportHistoryRun(importArguments)
         if any(option in importArguments for option in ("-y", "--y", "--confirm")):
             return _cameraImportConfirmedRun(arguments)
+        return _cameraImportPlainSummaryRun(arguments)
 
     _legacyGlobalsSync()
     return _legacy.main(arguments)
