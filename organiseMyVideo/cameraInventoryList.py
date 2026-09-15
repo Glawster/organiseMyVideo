@@ -64,6 +64,7 @@ def cameraInventoryListSummary(entries: tuple[CardInventoryListEntry, ...]) -> s
     rows: list[tuple[str, str, str, str, str, str, str]] = []
     for entry in entries:
         record = entry.inventory
+        status = _status(entry)
         size = (
             f"{record.cardRatedGigabytes} GB"
             if record is not None and record.cardRatedGigabytes
@@ -71,7 +72,7 @@ def cameraInventoryListSummary(entries: tuple[CardInventoryListEntry, ...]) -> s
         )
         mediaType = record.volumeKind if record is not None and record.volumeKind else "-"
         camera = "-"
-        if record is not None and _status(entry) != "missing":
+        if record is not None and status != "missing":
             camera = " ".join(
                 part for part in (record.manufacturer, record.cameraModel) if part
             ) or "-"
@@ -79,7 +80,7 @@ def cameraInventoryListSummary(entries: tuple[CardInventoryListEntry, ...]) -> s
         rows.append(
             (
                 f"{entry.cardId:03d}",
-                _status(entry),
+                status,
                 mediaType,
                 size,
                 camera,
@@ -141,7 +142,9 @@ def _status(entry: CardInventoryListEntry) -> str:
         return "in use"
 
     record = entry.inventory
-    if record is None or record.capacity.contentBytes <= 0:
+    if record is None:
+        return "available"
+    if record.capacity.contentBytes <= 0:
         return "empty"
     if entry.archived:
         return "available"
@@ -167,7 +170,7 @@ def _latestSnapshotArchived(
         if not isinstance(payload, dict) or payload.get("snapshotId") != snapshotId:
             continue
         assets = payload.get("assets")
-        if not isinstance(assets, list):
+        if not isinstance(assets, list) or not assets:
             continue
         if all(
             isinstance(asset, dict)
