@@ -70,6 +70,6 @@ def testCameraImportSummaryGroupsFailureReasons(
     assert result.failed == 1
     assert "WARNING: import incomplete" in summary
     assert "Failure reasons" in summary
-    assert "1 × verification failed" in summary
+    assert "1 × OSError: verification failed" in summary
     assert "GH010111.MP4" in summary
     assert "See the manifest for the complete failed-file list." in summary
