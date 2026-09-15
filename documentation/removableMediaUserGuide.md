@@ -1,15 +1,32 @@
 # Removable media user guide
 
 This guide covers numbered removable-media handling in `organiseMyVideo`, including
-camera SD cards and USB storage.
+camera SD cards and USB storage. A numeric card ID is durable for the life of the
+physical medium. Inventory snapshots describe what was on the medium at a point in
+time; import manifests record what was copied into the archive.
 
-The same numeric card ID is retained for the life of the physical medium. Inventory
-records describe what was on the medium at a point in time; import manifests record
-what was copied into the archive.
+## Canonical query commands
 
-## Basic workflow
+The normal read-only commands are deliberately small in number:
 
-A typical camera-card lifecycle is:
+```bash
+organiseMyVideo camera inventory --list
+organiseMyVideo camera inventory --card 18
+organiseMyVideo camera import --list
+organiseMyVideo camera import --card 18
+```
+
+They mean:
+
+- `camera inventory --list` — compact register of all known cards;
+- `camera inventory --card ID` — all useful current and historical details for one card;
+- `camera import --list` — summary of all recorded import runs;
+- `camera import --card ID` — full per-file import manifest history for one card.
+
+`--full` is no longer part of the normal user workflow. Older combined forms remain
+accepted where practical for compatibility, but should not be used in new examples.
+
+## Basic lifecycle
 
 ```text
 new/unregistered
@@ -26,80 +43,88 @@ new/unregistered
 
 `missing` is an exceptional state for a known card whose whereabouts are not known.
 
-## 1. Register or inventory a card
+## Register or inventory a card
 
-Inventory is non-destructive. It scans the removable medium and records its identity,
-capacity, current content, date range, and detected camera information.
-
-Dry-run first:
+Inventory is non-destructive. Preview a scan:
 
 ```bash
 organiseMyVideo camera inventory -s /media/andy/CARD --card 4
 ```
 
-Confirm the inventory and write the numbered label to the card:
+Persist the inventory and durable identity:
 
 ```bash
 organiseMyVideo camera inventory -s /media/andy/CARD --card 4 --confirm
 ```
 
-The card receives a label such as:
+The medium receives an identity file such as `organiseMyVideo.004`. Once labelled,
+that numeric ID remains the identity of the physical medium.
 
-```text
-organiseMyVideo.004
-```
+Inventory options such as `--brand`, `--reassign`, `--location`, `--set-location`,
+and `--format` are metadata/action overrides. They do not create alternative report
+formats. A source plus `--card` means scan/import that physical card; `--card` by
+itself means show the stored details/history for that card.
 
-Once a card is labelled, its numeric ID is its durable identity. Do not silently
-assign a different ID to a labelled card.
-
-## 2. List known cards
-
-Show the compact removable-media register:
+## List all cards
 
 ```bash
 organiseMyVideo camera inventory --list
 ```
 
-Restrict the register to one card:
+The compact register contains Card, Status, Archived, Type, Size, Camera, Location,
+and Last inventory. Displayed timestamps use `yyyy/mm/dd hh:mm`.
+
+`Archived` in this compact register answers whether the **latest inventory snapshot**
+has successful archive evidence. It is not a permanent property of the card.
+
+## Show one card
 
 ```bash
-organiseMyVideo camera inventory --list --card 4
+organiseMyVideo camera inventory --card 18
 ```
 
-Show the detailed latest inventory for one card:
+The one-card view is the authoritative human-readable card report. It includes
+lifecycle state and archive history followed by the useful latest inventory data.
+Transient mount details such as source mount path and current filesystem volume name
+are intentionally omitted.
 
-```bash
-organiseMyVideo camera inventory --list --full --card 4
+Example shape:
+
+```text
+CAMERA CARD 018
+  Status:             available
+  Location:           unknown
+  Snapshots:          1
+  Last archived:      2026/09/15 18:05
+  Previous archives:  2026/08/21 14:32, 2026/07/04 09:17
+  Last inventoried:   2026/09/15 14:10
+
+CAMERA CARD INVENTORY
+  Card ID:            18
+  Brand:              unknown
+  Type:               sd
+  Card size:          128 GB
+  Free space:         104.5 MB
+  Content size:       118.8 GB
+  Volume size:        119.1 GB
+  Date range:         2026/05/13 to 2026/05/16 (capture-metadata)
+  Camera:             Transcend DrivePro 250
+  Videos:             1573
+  Photos:             0
+  Thumbnails:         0
+  Content:            no-thumbnails
+  Keywords:           -
 ```
 
-The compact register includes:
+`Last archived` and `Previous archives` are successful import dates for that physical
+card, newest first. This archive history remains visible even after a later format or
+new inventory snapshot. `Status`, by contrast, describes the current/latest known
+state of the card.
 
-- `Card` — durable numeric card ID.
-- `Status` — current derived lifecycle state.
-- `Archived` — whether the latest inventoried content has been successfully archived/imported.
-- `Type` — physical media type, for example `sd` or `usb`.
-- `Size` — marketed capacity where known.
-- `Camera` — latest known camera identity where it is meaningful to display it.
-- `Location` — current stored physical/use location.
-- `Last inventory` — most recent stored inventory snapshot time.
+`Keywords` are derived from stored content-analysis text when useful analysis exists;
+otherwise the field is `-`.
 
-A card can therefore show `Status` `available` and `Archived` `yes` at the same time:
-its latest inventoried content has been archived and the physical card is safe to
-wipe or reuse.
-
-`Archived` always refers to the **latest inventory snapshot**. It is not a permanent
-property of the card. If the card later receives new content, OMV cannot know that
-until it is inventoried again. The next non-empty inventory therefore becomes
-`Archived` `no` until that new snapshot is successfully imported.
-
-For a card marked `missing`, the compact list does not present the previous camera
-association as though it were current. The full view still retains the historical
-inventory information.
-
-## 3. Card status meanings
-
-Status is derived from location, latest inventory content, and successful import
-history.
+## Status meanings
 
 | Status | Meaning |
 | --- | --- |
@@ -107,107 +132,75 @@ history.
 | `missing` | Location is explicitly `missing`. |
 | `empty` | No active location is set and the latest inventory contains no content. |
 | `to archive` | No active location is set, content exists, and the latest inventory snapshot has not yet been successfully imported. |
-| `available` | No active location is set and the latest inventoried content has already been successfully archived/imported. The card is safe to wipe/reuse. |
+| `available` | No active location is set and the latest inventoried content has been successfully archived. The card is safe to wipe/reuse. |
 
-`available` does not mean the card is already empty. It means its latest known
-contents have been dealt with and the medium may now be recycled. The separate
-`Archived` column makes that evidence visible in the compact list.
+A card can therefore be `available` while still physically containing the old files.
+Formatting is the explicit transition from `available` to `empty`.
 
-## 4. Set or inspect a card location
+## Location and metadata overrides
 
-Show the current location:
+Show the stored location:
 
 ```bash
 organiseMyVideo camera inventory --card 4 --location
 ```
 
-Set a location in dry-run mode:
+Set it, previewing first and then confirming:
 
 ```bash
 organiseMyVideo camera inventory --card 4 --set-location "Car JSZ5017"
-```
-
-Persist it:
-
-```bash
 organiseMyVideo camera inventory --card 4 --set-location "Car JSZ5017" --confirm
 ```
 
-Mark a card as missing:
+Mark a card missing:
 
 ```bash
 organiseMyVideo camera inventory --card 4 --set-location missing --confirm
 ```
 
-A normal location implies `in use`. `missing` is treated specially.
+When scanning a card, metadata overrides such as brand remain source-scoped, for
+example:
 
-When a card is removed from its device and no longer has a current location, its
-status should be based on its content/import state: `empty`, `to archive`, or
-`available`.
+```bash
+organiseMyVideo camera inventory -s /media/andy/CARD --card 4 --brand Transcend --confirm
+```
 
-## 5. Preview a camera import
+## Preview and run an import
 
-Camera import is separate from inventory. Inventory identifies and describes the
-medium; import copies supported camera media into the archive.
-
-Preview an import:
+Preview:
 
 ```bash
 organiseMyVideo camera import -s /media/andy/CARD --card 4
 ```
 
-`--card 4` is an identity assertion. It does not assign card 4 to an unlabelled
-medium. Register the card with `camera inventory` first.
-
-The dry-run shows how many files would be copied, excluded, or are already present.
-
-## 6. Archive/import the media
-
-Run the confirmed import:
+Confirm:
 
 ```bash
 organiseMyVideo camera import -s /media/andy/CARD --card 4 --confirm
 ```
 
-The importer:
+With a source present, `--card 4` is an identity assertion. It does not assign an ID
+to an unlabelled medium.
 
-- preserves source files on the card;
-- copies supported media to the configured archive destinations;
-- verifies copied files;
-- handles filename collisions without overwriting different content;
-- records every considered asset in a JSON import manifest;
-- links the successful import to the relevant card inventory snapshot where possible.
+The importer preserves the source, verifies copied files, avoids overwriting different
+content, writes a JSON manifest, and links the import to the relevant inventory
+snapshot where possible.
 
-A successful import of the latest inventory snapshot allows a card with no active
-location to become `available` with `Archived` `yes`.
+## View import history
 
-## 7. View import history for a card
-
-Show all confirmed camera imports:
+All imports, summary form:
 
 ```bash
 organiseMyVideo camera import --list
 ```
 
-Show imports associated with card 4:
+Full manifest history for one card:
 
 ```bash
-organiseMyVideo camera import --list --card 4
+organiseMyVideo camera import --card 4
 ```
 
-This gives the per-import summary, including date, copied count, already-present
-count, failures, and source.
-
-## 8. See the actual files archived for a card
-
-Use the full history view for one numbered card:
-
-```bash
-organiseMyVideo camera import --list --card 4 --full
-```
-
-The full view reads the recorded import manifests and shows one logical line per
-asset in the form:
+The per-card view emits one logical line per asset:
 
 ```text
 copied          /source/file.MP4 -> /archive/file.MP4
@@ -215,51 +208,20 @@ already present /source/file.MP4 -> /archive/file.MP4
 failed          /source/file.MP4 -> /archive/file.MP4 | error: ...
 ```
 
-A very long path may still wrap visually in the terminal, but each asset is emitted
-as a single output line.
-
-`copied` and `already present` both count as successfully archived content:
-
-- `copied` means the importer copied and verified the file;
-- `already present` means identical content was already at the chosen archive
-  destination, so another copy was unnecessary.
-
-The underlying JSON manifests remain under:
+The underlying manifests are stored under:
 
 ```text
 ~/.local/state/organiseMyVideo/cameraImports/
 ```
 
-For advanced inspection, the same records can still be queried directly. For
-example, to print source, destination, and outcome for card 4:
+## Format an archived card for reuse
 
-```bash
-jq -r '
-  select(.source.cardId == 4)
-  | .assets[]
-  | [.sourcePath, .destinationPath, .outcome]
-  | @tsv
-' ~/.local/state/organiseMyVideo/cameraImports/camera-import-*.json
-```
-
-The manifest audit is authoritative for what an import attempted and where each
-asset was intended to go.
-
-## 9. Format an archived card for reuse
-
-A card whose latest contents have been safely archived is `available`, but it may
-still physically contain all of those files. Formatting is the explicit transition
-from `available` to `empty`.
-
-Always preview first:
+A card whose latest content has been safely archived becomes `available`. Preview the
+wipe first:
 
 ```bash
 organiseMyVideo camera inventory --format card18
 ```
-
-For an eligible mounted card, the dry-run reports the card ID, mounted path, block
-device, filesystem type, and the new filesystem label (`Card18`). It makes no
-changes.
 
 Then confirm the destructive operation:
 
@@ -267,55 +229,30 @@ Then confirm the destructive operation:
 organiseMyVideo camera inventory --format card18 -y
 ```
 
-The confirmed format workflow:
+The format workflow verifies archive evidence and removable-device identity, preserves
+the supported filesystem family, labels the filesystem `Card18`, recreates
+`organiseMyVideo.018`, and writes a new empty inventory snapshot.
 
-1. verifies that the mounted volume still contains `organiseMyVideo.018`;
-2. verifies that it is a removable block device;
-3. refuses to proceed if card 18 has an active location;
-4. refuses to proceed if its latest non-empty inventory has not been completely archived;
-5. unmounts the card;
-6. preserves its current supported filesystem family (`exfat` or `vfat`) while formatting;
-7. labels the filesystem `Card18`;
-8. remounts it;
-9. recreates `organiseMyVideo.018` through the normal inventory persistence path;
-10. records a new empty inventory snapshot.
+After formatting, the current state becomes `empty`. The latest snapshot itself has no
+archive requirement, while `Last archived` and `Previous archives` continue to show
+successful historical imports of previous content.
 
-After the confirmed format, the card should appear as:
+## Re-inventory after reuse
 
-```text
-Card  Status  Archived
-018   empty   no
-```
-
-`Archived` becomes `no` because the latest snapshot is now the new empty snapshot.
-The previous `Archived: yes` evidence is not lost: it remains in the older inventory
-snapshot and camera-import manifest history.
-
-Formatting uses the system filesystem tools and may require an administrator (`sudo`)
-password when the actual filesystem is created.
-
-## 10. Re-inventory after manual clearing or reuse
-
-If files are removed without using the format workflow, inventory the card again so
-the catalogue knows its current content state:
+OMV cannot know that a card has acquired new content until it is inventoried again.
+After reuse, run:
 
 ```bash
 organiseMyVideo camera inventory -s /media/andy/CARD --card 4 --confirm
 ```
 
-If the latest inventory now contains no content and the card has no current location,
-its status becomes `empty` and `Archived` is `no` for that latest snapshot.
+A new non-empty snapshot without matching successful archive evidence changes the
+current status to `to archive` (unless a current location makes it `in use`). Previous
+archive dates remain historical evidence only and do not make the new content safe to
+wipe.
 
-If the card has been reused and now contains new content, the new inventory snapshot
-also has `Archived` `no`; without a location its status becomes `to archive`.
+## USB sticks
 
-If the card is assigned to a device/location again, set that location and its status
-becomes `in use`.
-
-## 11. USB sticks
-
-USB storage uses the same numbered removable-media register and ID space. Its
-physical media `Type` is `usb` rather than `sd`.
-
-USB inventory does not make a USB stick a camera source and does not cause camera
-import to run. Camera import remains restricted to recognised camera-media layouts.
+USB storage uses the same numbered removable-media register and ID space. Its Type is
+`usb` rather than `sd`. USB inventory does not make a USB stick a camera import source;
+camera import remains restricted to recognised camera-media layouts.
