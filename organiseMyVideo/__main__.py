@@ -88,6 +88,64 @@ def _cameraImportParserBuild() -> argparse.ArgumentParser:
     return parser
 
 
+def _cameraInventoryListParserBuild() -> argparse.ArgumentParser:
+    """Return the parser for read-only camera-card register views."""
+
+    parser = argparse.ArgumentParser(
+        prog="organiseMyVideo camera inventory",
+        description="list registered camera cards",
+    )
+    parser.add_argument(
+        "--list",
+        dest="listInventory",
+        action="store_true",
+        required=True,
+        help="list registered camera cards",
+    )
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="show full details for the selected --card",
+    )
+    parser.add_argument(
+        "--card",
+        type=int,
+        help="restrict the register to one numbered card",
+    )
+    return parser
+
+
+def _cameraInventoryListRun(arguments: Sequence[str]) -> int:
+    """Render the read-only camera-card register."""
+
+    from .cameraInventoryList import (
+        cameraInventoryFullSummary,
+        cameraInventoryList,
+        cameraInventoryListSummary,
+    )
+
+    parser = _cameraInventoryListParserBuild()
+    args = parser.parse_args(list(arguments))
+    if args.card is not None and args.card < 1:
+        parser.error("--card must be a positive integer")
+    if args.full and args.card is None:
+        parser.error("--full requires --card")
+
+    entries = cameraInventoryList(
+        databasePath=constants.CAMERA_INVENTORY_DATABASE,
+        cardId=args.card,
+    )
+    if args.full:
+        if not entries:
+            print(f"CAMERA CARD {args.card:03d}\n\nNo card registered.\n", end="")
+            return 1
+        print(cameraInventoryFullSummary(entries[0]), end="")
+        return 0
+
+    print(cameraInventoryListSummary(entries), end="")
+    return 0
+
+
 def _cameraInventoryLocationParserBuild() -> argparse.ArgumentParser:
     """Return the parser for card-location metadata commands."""
 
@@ -345,6 +403,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if len(arguments) >= 2 and arguments[:2] == ["camera", "inventory"]:
         inventoryArguments = arguments[2:]
+        if "--list" in inventoryArguments:
+            return _cameraInventoryListRun(inventoryArguments)
         if "--location" in inventoryArguments or "--set-location" in inventoryArguments:
             return _cameraInventoryLocationRun(inventoryArguments)
 
