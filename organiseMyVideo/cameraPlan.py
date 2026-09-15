@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -30,6 +31,7 @@ _MONTH_NAMES = (
     "Nov",
     "Dec",
 )
+_INCREMENT_SUFFIX = re.compile(r"^(?P<base>.*) \((?P<number>\d+)\)$")
 
 
 @dataclass(frozen=True)
@@ -88,6 +90,7 @@ class CameraImportPlanner:
         detection = cameraDetect(source)
         excluded: list[str] = []
         operations: list[ImportOperation] = []
+        plannedCopies: dict[Path, Path] = {}
 
         videosByStem = {
             (item.path.parent, item.path.stem.lower()): item
@@ -123,7 +126,10 @@ class CameraImportPlanner:
                 dateSource=dateSource,
                 destinationPath=destination,
             )
-            operations.append(_operationBuild(asset))
+            operation = _operationBuild(asset, plannedCopies)
+            operations.append(operation)
+            if operation.outcome == "copy":
+                plannedCopies[operation.asset.destinationPath] = operation.asset.sourcePath
 
         return ImportPlan(
             sourcePath=detection.sourcePath,
@@ -170,36 +176,96 @@ def _captureRead(item: CameraDetectedFile) -> tuple[Optional[datetime], str]:
         return None, "unavailable"
 
 
-def _operationBuild(asset: CameraAsset) -> ImportOperation:
-    """Classify destination state without writing either source or destination."""
+def _operationBuild(
+    asset: CameraAsset,
+    plannedCopies: Optional[dict[Path, Path]] = None,
+) -> ImportOperation:
+    """Resolve duplicate/collision state without mutating source or archive.
 
-    destination = asset.destinationPath
-    if not destination.exists():
-        return ImportOperation(asset=asset, outcome="copy", reason="destination missing")
-    if not destination.is_file():
-        return ImportOperation(
-            asset=asset,
-            outcome="conflict",
-            reason="destination is not a file",
+    Candidate names follow the established organiseMyPhotos convention:
+    ``name.ext``, ``name (2).ext``, ``name (3).ext`` and so on. At every
+    occupied candidate, content identity is checked first. Identical content is
+    ``alreadyPresent``; only different content advances to the next name.
+    ``plannedCopies`` makes the same rule apply to earlier files in this plan.
+    """
+
+    plannedCopies = plannedCopies or {}
+    sourceDigest: Optional[str] = None
+    candidate = asset.destinationPath
+    counter = _incrementStart(candidate)
+
+    for _ in range(10_000):
+        plannedSource = plannedCopies.get(candidate)
+        if plannedSource is not None:
+            sourceDigest = sourceDigest or _sha256(asset.sourcePath)
+            plannedDigest = _sha256(plannedSource)
+            if sourceDigest == plannedDigest:
+                resolvedAsset = replace(asset, destinationPath=candidate)
+                return ImportOperation(
+                    asset=resolvedAsset,
+                    outcome="alreadyPresent",
+                    reason="identical content already planned for destination",
+                    sourceDigest=sourceDigest,
+                    destinationDigest=plannedDigest,
+                )
+            candidate = _incrementedPath(asset.destinationPath, counter)
+            counter += 1
+            continue
+
+        if candidate.exists():
+            if candidate.is_file():
+                sourceDigest = sourceDigest or _sha256(asset.sourcePath)
+                destinationDigest = _sha256(candidate)
+                if sourceDigest == destinationDigest:
+                    resolvedAsset = replace(asset, destinationPath=candidate)
+                    return ImportOperation(
+                        asset=resolvedAsset,
+                        outcome="alreadyPresent",
+                        reason="identical destination content",
+                        sourceDigest=sourceDigest,
+                        destinationDigest=destinationDigest,
+                    )
+            candidate = _incrementedPath(asset.destinationPath, counter)
+            counter += 1
+            continue
+
+        resolvedAsset = replace(asset, destinationPath=candidate)
+        reason = (
+            "destination missing"
+            if candidate == asset.destinationPath
+            else "destination name occupied by different content; incremented filename"
         )
-
-    sourceDigest = _sha256(asset.sourcePath)
-    destinationDigest = _sha256(destination)
-    if sourceDigest == destinationDigest:
         return ImportOperation(
-            asset=asset,
-            outcome="alreadyPresent",
-            reason="identical destination content",
+            asset=resolvedAsset,
+            outcome="copy",
+            reason=reason,
             sourceDigest=sourceDigest,
-            destinationDigest=destinationDigest,
         )
+
     return ImportOperation(
         asset=asset,
         outcome="conflict",
-        reason="same destination name has different content",
+        reason="no collision-free destination filename available",
         sourceDigest=sourceDigest,
-        destinationDigest=destinationDigest,
     )
+
+
+def _incrementStart(path: Path) -> int:
+    """Return the first counter used by the organiseMyPhotos naming convention."""
+
+    match = _INCREMENT_SUFFIX.fullmatch(path.stem)
+    if match is None:
+        return 2
+    return max(2, int(match.group("number")) + 1)
+
+
+def _incrementedPath(path: Path, counter: int) -> Path:
+    """Return ``name (N).ext`` while avoiding repeated counter suffixes."""
+
+    stem = path.stem.strip()
+    match = _INCREMENT_SUFFIX.fullmatch(stem)
+    base = match.group("base").rstrip() if match is not None else stem
+    return path.with_name(f"{base} ({counter}){path.suffix}")
 
 
 def _sha256(path: Path) -> str:
