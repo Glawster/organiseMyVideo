@@ -338,27 +338,68 @@ def cameraImportHistory(
 
 
 def cameraImportSummary(result: CameraImportResult) -> str:
-    """Return a concise CLI-neutral summary for one camera import result."""
+    """Return a compact operational summary for one camera import result."""
 
     plannedCopies = sum(
         1 for operation in result.plan.operations if operation.outcome == "copy"
     )
-    manifest = str(result.manifestPath) if result.manifestPath is not None else "(none)"
     card = _cardDisplay(result.cardId)
-    snapshot = result.snapshotId or "unmatched"
-    return f"""CAMERA IMPORT SUMMARY
-Card:              {card}
-Snapshot:          {snapshot}
-Source:            {result.plan.sourcePath}
-Mode:              {'confirmed' if result.confirmed else 'dry-run'}
-Planned copies:    {plannedCopies}
-Copied:            {result.copied}
-Already present:   {result.alreadyPresent}
-Failed:            {result.failed}
-Excluded:          {len(result.plan.excludedPaths)}
-Unknown:           {len(result.plan.unknownPaths)}
-Manifest:          {manifest}
-"""
+    mode = "CONFIRMED" if result.confirmed else "DRY-RUN"
+    lines = [
+        "",
+        "CAMERA IMPORT COMPLETE" if result.confirmed else "CAMERA IMPORT PLAN",
+        "",
+        f"Card {card}   {_pathDisplay(result.plan.sourcePath)}",
+        f"Mode        {mode}",
+        "",
+        "Files",
+        f"  Planned             {plannedCopies}",
+        f"  Copied              {result.copied}",
+    ]
+    if result.alreadyPresent:
+        lines.append(f"  Already present     {result.alreadyPresent}")
+    if result.failed:
+        lines.append(f"  Failed              {result.failed}")
+    excluded = len(result.plan.excludedPaths)
+    unknown = len(result.plan.unknownPaths)
+    if excluded:
+        lines.append(f"  Excluded            {excluded}")
+    if unknown:
+        lines.append(f"  Unknown             {unknown}")
+
+    lines.extend(["", "Result"])
+    if not result.confirmed:
+        lines.append(f"  Dry-run — {plannedCopies} file{'s' if plannedCopies != 1 else ''} would be copied")
+    elif result.failed:
+        lines.append(
+            f"  WARNING: import incomplete — {result.copied} copied, {result.failed} failed"
+        )
+    else:
+        lines.append(
+            f"  OK: import complete — {result.copied} file{'s' if result.copied != 1 else ''} copied successfully"
+        )
+
+    if result.failed and result.manifestPath is not None:
+        failures = _manifestFailureGroups(result.manifestPath)
+        if failures:
+            lines.extend(["", "Failure reasons"])
+            for error, count, examples in failures:
+                lines.append(f"  {count} × {error}")
+                for example in examples:
+                    lines.append(f"      {example}")
+            lines.append("  See the manifest for the complete failed-file list.")
+
+    if result.manifestPath is not None:
+        lines.extend(
+            [
+                "",
+                "Manifest",
+                f"  {_pathDisplay(result.manifestPath.parent)}/",
+                f"  {result.manifestPath.name}",
+            ]
+        )
+    lines.append("")
+    return "\n".join(lines)
 
 
 def cameraImportHistorySummary(
@@ -389,6 +430,43 @@ def cameraImportHistorySummary(
     lines.append("")
     lines.append(f"{len(records)} import{'s' if len(records) != 1 else ''}")
     return "\n".join(lines) + "\n"
+
+
+def _manifestFailureGroups(path: Path) -> list[tuple[str, int, tuple[str, ...]]]:
+    """Group failed manifest assets by error text with representative filenames."""
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return []
+    assets = payload.get("assets") if isinstance(payload, dict) else None
+    if not isinstance(assets, list):
+        return []
+
+    grouped: dict[str, list[str]] = {}
+    for item in assets:
+        if not isinstance(item, dict) or item.get("outcome") != "failed":
+            continue
+        error = str(item.get("error") or "unspecified error").strip()
+        relative = str(item.get("relativePath") or item.get("sourcePath") or "unknown")
+        grouped.setdefault(error, []).append(relative)
+
+    ordered = sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0]))
+    return [
+        (error, len(paths), tuple(paths[:3]))
+        for error, paths in ordered
+    ]
+
+
+def _pathDisplay(path: Path) -> str:
+    """Return a terminal-friendly path using ``~`` for the user's home."""
+
+    resolved = Path(path).expanduser()
+    try:
+        relative = resolved.relative_to(Path.home())
+    except ValueError:
+        return str(resolved)
+    return "~" if not relative.parts else f"~/{relative.as_posix()}"
 
 
 def _cardLabelIdRead(path: Path, filenameId: int) -> Optional[int]:
