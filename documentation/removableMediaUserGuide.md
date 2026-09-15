@@ -187,53 +187,43 @@ count, failures, and source.
 
 ## 8. See the actual files archived for a card
 
-The detailed file audit is stored in JSON manifests under:
+Use the full history view for one numbered card:
+
+```bash
+organiseMyVideo camera import --list --card 4 --full
+```
+
+The full view reads the recorded import manifests and shows each import followed by
+its per-file audit. For every asset it displays the archive destination, original
+source path, and result such as `copied`, `already present`, or `failed`. Failed
+records also display their recorded error.
+
+`copied` and `already present` both count as successfully archived content:
+
+- `copied` means the importer copied and verified the file;
+- `already present` means identical content was already at the chosen archive
+  destination, so another copy was unnecessary.
+
+The underlying JSON manifests remain under:
 
 ```text
 ~/.local/state/organiseMyVideo/cameraImports/
 ```
 
-Each asset record contains the source path, destination archive path, outcome, size,
-camera kind, and capture information.
-
-To list the destination paths for files successfully archived from card 4:
+For advanced inspection, the same records can still be queried directly. For
+example, to print source, destination, and outcome for card 4:
 
 ```bash
 jq -r '
   select(.source.cardId == 4)
   | .assets[]
-  | select(.outcome == "copied" or .outcome == "alreadyPresent")
-  | .destinationPath
-' ~/.local/state/organiseMyVideo/cameraImports/camera-import-*.json
-```
-
-To show source file, archive destination, and result together:
-
-```bash
-jq -r '
-  select(.source.cardId == 4)
-  | .assets[]
-  | select(.outcome == "copied" or .outcome == "alreadyPresent")
   | [.sourcePath, .destinationPath, .outcome]
   | @tsv
 ' ~/.local/state/organiseMyVideo/cameraImports/camera-import-*.json
 ```
 
-To inspect failed files for card 4:
-
-```bash
-jq -r '
-  select(.source.cardId == 4)
-  | .assets[]
-  | select(.outcome == "failed")
-  | [.sourcePath, .destinationPath, .error]
-  | @tsv
-' ~/.local/state/organiseMyVideo/cameraImports/camera-import-*.json
-```
-
-This manifest audit is authoritative for what an import attempted and where each
-asset was intended to go. `alreadyPresent` means matching content was already at the
-archive destination and therefore did not need another copy.
+The manifest audit is authoritative for what an import attempted and where each
+asset was intended to go.
 
 ## 9. Re-inventory after clearing or reusing a card
 
@@ -257,40 +247,3 @@ physical media `Type` is `usb` rather than `sd`.
 
 USB inventory does not make a USB stick a camera source and does not cause camera
 import to run. Camera import remains restricted to recognised camera-media layouts.
-
-## Safety notes
-
-- Inventory is dry-run by default; use `--confirm` to persist the snapshot and label.
-- Camera import is dry-run by default; use `--confirm` to copy files.
-- Camera import does not delete source media from the removable medium.
-- Never treat `--card N` on import as card assignment; it verifies the identity already written to the card.
-- A previous camera association in inventory history is historical evidence, not necessarily the card's current use.
-- Status reflects the latest known catalogue/import state. If a card has changed outside `organiseMyVideo`, inventory it again before relying on the status.
-
-## Quick reference
-
-```bash
-# List all cards
-organiseMyVideo camera inventory --list
-
-# Full details for one card
-organiseMyVideo camera inventory --list --full --card 4
-
-# Show location
-organiseMyVideo camera inventory --card 4 --location
-
-# Set location
-organiseMyVideo camera inventory --card 4 --set-location "Car JSZ5017" --confirm
-
-# Inventory a mounted card
-organiseMyVideo camera inventory -s /media/andy/CARD --card 4 --confirm
-
-# Preview import
-organiseMyVideo camera import -s /media/andy/CARD --card 4
-
-# Confirm import
-organiseMyVideo camera import -s /media/andy/CARD --card 4 --confirm
-
-# Import history for a card
-organiseMyVideo camera import --list --card 4
-```
