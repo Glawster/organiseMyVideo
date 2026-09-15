@@ -19,6 +19,8 @@ new/unregistered
     -> to archive
     -> camera import
     -> available
+    -> format/recycle
+    -> empty
     -> in use again
 ```
 
@@ -82,7 +84,13 @@ The compact register includes:
 - `Last inventory` — most recent stored inventory snapshot time.
 
 A card can therefore show `Status` `available` and `Archived` `yes` at the same time:
-its content has been archived and the physical card is now free for reuse.
+its latest inventoried content has been archived and the physical card is safe to
+wipe or reuse.
+
+`Archived` always refers to the **latest inventory snapshot**. It is not a permanent
+property of the card. If the card later receives new content, OMV cannot know that
+until it is inventoried again. The next non-empty inventory therefore becomes
+`Archived` `no` until that new snapshot is successfully imported.
 
 For a card marked `missing`, the compact list does not present the previous camera
 association as though it were current. The full view still retains the historical
@@ -99,11 +107,11 @@ history.
 | `missing` | Location is explicitly `missing`. |
 | `empty` | No active location is set and the latest inventory contains no content. |
 | `to archive` | No active location is set, content exists, and the latest inventory snapshot has not yet been successfully imported. |
-| `available` | No active location is set and the latest inventoried content has already been successfully archived/imported. The card is available for reuse. |
+| `available` | No active location is set and the latest inventoried content has already been successfully archived/imported. The card is safe to wipe/reuse. |
 
-`available` does not mean that the card has never contained files. It means its latest
-known content has already been dealt with and the medium may be reused. The separate
-`Archived` column makes that historical state visible in the compact list.
+`available` does not mean the card is already empty. It means its latest known
+contents have been dealt with and the medium may now be recycled. The separate
+`Archived` column makes that evidence visible in the compact list.
 
 ## 4. Set or inspect a card location
 
@@ -171,7 +179,7 @@ The importer:
 - links the successful import to the relevant card inventory snapshot where possible.
 
 A successful import of the latest inventory snapshot allows a card with no active
-location to become `available`.
+location to become `available` with `Archived` `yes`.
 
 ## 7. View import history for a card
 
@@ -237,22 +245,74 @@ jq -r '
 The manifest audit is authoritative for what an import attempted and where each
 asset was intended to go.
 
-## 9. Re-inventory after clearing or reusing a card
+## 9. Format an archived card for reuse
 
-After files have been removed from a card, inventory it again so the catalogue knows
-its current content state:
+A card whose latest contents have been safely archived is `available`, but it may
+still physically contain all of those files. Formatting is the explicit transition
+from `available` to `empty`.
+
+Always preview first:
+
+```bash
+organiseMyVideo camera inventory --format card18
+```
+
+For an eligible mounted card, the dry-run reports the card ID, mounted path, block
+device, filesystem type, and the new filesystem label (`Card18`). It makes no
+changes.
+
+Then confirm the destructive operation:
+
+```bash
+organiseMyVideo camera inventory --format card18 -y
+```
+
+The confirmed format workflow:
+
+1. verifies that the mounted volume still contains `organiseMyVideo.018`;
+2. verifies that it is a removable block device;
+3. refuses to proceed if card 18 has an active location;
+4. refuses to proceed if its latest non-empty inventory has not been completely archived;
+5. unmounts the card;
+6. preserves its current supported filesystem family (`exfat` or `vfat`) while formatting;
+7. labels the filesystem `Card18`;
+8. remounts it;
+9. recreates `organiseMyVideo.018` through the normal inventory persistence path;
+10. records a new empty inventory snapshot.
+
+After the confirmed format, the card should appear as:
+
+```text
+Card  Status  Archived
+018   empty   no
+```
+
+`Archived` becomes `no` because the latest snapshot is now the new empty snapshot.
+The previous `Archived: yes` evidence is not lost: it remains in the older inventory
+snapshot and camera-import manifest history.
+
+Formatting uses the system filesystem tools and may require an administrator (`sudo`)
+password when the actual filesystem is created.
+
+## 10. Re-inventory after manual clearing or reuse
+
+If files are removed without using the format workflow, inventory the card again so
+the catalogue knows its current content state:
 
 ```bash
 organiseMyVideo camera inventory -s /media/andy/CARD --card 4 --confirm
 ```
 
 If the latest inventory now contains no content and the card has no current location,
-its status becomes `empty`.
+its status becomes `empty` and `Archived` is `no` for that latest snapshot.
+
+If the card has been reused and now contains new content, the new inventory snapshot
+also has `Archived` `no`; without a location its status becomes `to archive`.
 
 If the card is assigned to a device/location again, set that location and its status
 becomes `in use`.
 
-## 10. USB sticks
+## 11. USB sticks
 
 USB storage uses the same numbered removable-media register and ID space. Its
 physical media `Type` is `usb` rather than `sd`.
