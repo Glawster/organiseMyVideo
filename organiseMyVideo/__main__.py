@@ -38,9 +38,7 @@ def _cameraImportParserBuild() -> argparse.ArgumentParser:
         "--list", dest="listHistory", action="store_true",
         help="list all previous confirmed camera imports",
     )
-    parser.add_argument(
-        "--full", action="store_true", help=argparse.SUPPRESS,
-    )
+    parser.add_argument("--full", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--card", type=int,
         help="without SOURCE show this card's full import manifest; with SOURCE assert card identity",
@@ -81,7 +79,6 @@ def _cameraInventoryListRun(arguments: Sequence[str]) -> int:
     args = parser.parse_args(list(arguments))
     if args.card is not None and args.card < 1:
         parser.error("--card must be a positive integer")
-
     entries = cameraInventoryList(
         databasePath=constants.CAMERA_INVENTORY_DATABASE,
         cardId=args.card,
@@ -97,8 +94,6 @@ def _cameraInventoryListRun(arguments: Sequence[str]) -> int:
 
 
 def _cameraInventoryCardRun(arguments: Sequence[str]) -> int:
-    """Show all known details for one numbered card."""
-
     from .cameraInventoryList import cameraInventoryFullSummary, cameraInventoryList
 
     parser = argparse.ArgumentParser(
@@ -180,8 +175,6 @@ def _cameraInventoryLocationRun(arguments: Sequence[str]) -> int:
 
 
 def _cameraImportHistoryRun(arguments: Sequence[str]) -> int:
-    """Show all imports or the full per-file manifest history for one card."""
-
     parser = _cameraImportParserBuild()
     args = parser.parse_args(list(arguments))
     if args.card is not None and args.card < 1:
@@ -346,17 +339,19 @@ def _inventoryCardQuery(arguments: Sequence[str]) -> bool:
     """Return True only for the pure read-only ``--card ID`` detail form."""
 
     values = list(arguments)
-    if "--card" not in values and not any(value.startswith("--card=") for value in values):
+    cardIndexes: set[int] = set()
+    for index, value in enumerate(values):
+        if value == "--card":
+            if index + 1 >= len(values):
+                return False
+            cardIndexes.update({index, index + 1})
+        elif value.startswith("--card="):
+            cardIndexes.add(index)
+        elif value == "--full":
+            cardIndexes.add(index)
+    if not cardIndexes:
         return False
-    actionOptions = {
-        "-s", "--source", "--brand", "--reassign", "--location", "--set-location",
-        "--format", "--list", "-y", "--confirm", "--y", "--auto", "--clean",
-        "--refresh", "--rescan",
-    }
-    return not any(
-        value in actionOptions or any(value.startswith(option + "=") for option in actionOptions if option.startswith("--"))
-        for value in values
-    )
+    return all(index in cardIndexes for index in range(len(values)))
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
