@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
@@ -12,6 +13,13 @@ from typing import Optional
 from .cameraInventory import CameraInventory, CardInventoryRecord
 from .cardLocation import cardLocationGet
 from .constants import CAMERA_INVENTORY_DATABASE, applicationStateDirectory
+
+_KEYWORD_STOPWORDS = {
+    "about", "after", "along", "also", "appears", "around", "been", "being",
+    "camera", "card", "content", "during", "footage", "from", "have", "into",
+    "looks", "mixed", "mostly", "notable", "one", "scene", "shows", "some",
+    "that", "the", "their", "there", "these", "this", "through", "video", "with",
+}
 
 
 @dataclass(frozen=True)
@@ -325,7 +333,17 @@ def _bytesDisplay(value: Optional[int]) -> str:
 
 
 def _keywordsDisplay(record: CardInventoryRecord) -> str:
+    """Return concise keywords derived from persisted content-analysis text."""
+
     summary = (record.contentSummary or "").strip()
     if not summary or summary.lower() in {"no-thumbnails", "unavailable", "unknown"}:
         return "-"
-    return summary
+    keywords: list[str] = []
+    for token in re.findall(r"[A-Za-z][A-Za-z'-]{2,}", summary.lower()):
+        word = token.strip("'-")
+        if word in _KEYWORD_STOPWORDS or word in keywords:
+            continue
+        keywords.append(word)
+        if len(keywords) == 8:
+            break
+    return ", ".join(keywords) if keywords else "-"
