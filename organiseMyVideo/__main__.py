@@ -152,6 +152,50 @@ def _cameraInventoryListRun(arguments: Sequence[str]) -> int:
     return 0
 
 
+def _cameraInventoryFormatParserBuild() -> argparse.ArgumentParser:
+    """Return the parser for the safe destructive card-format workflow."""
+
+    parser = argparse.ArgumentParser(
+        prog="organiseMyVideo camera inventory",
+        description="format an archived numbered card and record a fresh empty inventory",
+    )
+    parser.add_argument(
+        "--format",
+        dest="formatTarget",
+        metavar="CARD",
+        required=True,
+        help="numbered card to format, for example card18",
+    )
+    parser.add_argument(
+        "-y",
+        "--confirm",
+        "--y",
+        dest="confirm",
+        action="store_true",
+        help="confirm destructive formatting; default is dry-run",
+    )
+    return parser
+
+
+def _cameraInventoryFormatRun(arguments: Sequence[str]) -> int:
+    """Plan or execute safe formatting of one archived numbered card."""
+
+    from .cameraFormat import cameraFormatRun, cameraFormatSummary
+
+    parser = _cameraInventoryFormatParserBuild()
+    args = parser.parse_args(list(arguments))
+    try:
+        plan = cameraFormatRun(
+            args.formatTarget,
+            dryRun=not args.confirm,
+            databasePath=constants.CAMERA_INVENTORY_DATABASE,
+        )
+    except (RuntimeError, ValueError) as error:
+        parser.error(str(error))
+    print(cameraFormatSummary(plan, dryRun=not args.confirm), end="")
+    return 0
+
+
 def _cameraInventoryLocationParserBuild() -> argparse.ArgumentParser:
     """Return the parser for card-location metadata commands."""
 
@@ -416,6 +460,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if len(arguments) >= 2 and arguments[:2] == ["camera", "inventory"]:
         inventoryArguments = arguments[2:]
+        if "--format" in inventoryArguments:
+            return _cameraInventoryFormatRun(inventoryArguments)
         if "--list" in inventoryArguments:
             return _cameraInventoryListRun(inventoryArguments)
         if "--location" in inventoryArguments or "--set-location" in inventoryArguments:
