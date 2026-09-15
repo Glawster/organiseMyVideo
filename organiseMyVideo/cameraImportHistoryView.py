@@ -19,7 +19,6 @@ def cameraImportHistoryFullSummary(
     title = "CAMERA IMPORT HISTORY"
     if cardId is not None:
         title += f" — CARD {cardId:03d}"
-    title += " — FULL"
     if not records:
         return f"{title}\nNo recorded imports.\n"
 
@@ -90,20 +89,16 @@ def _outcomeDisplay(outcome: str) -> str:
 
 
 def _historyDateDisplay(value: str) -> str:
-    """Return the stable display form already used by import history."""
-
     from datetime import datetime
 
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return value[:19] or "unknown"
-    return parsed.strftime("%Y-%m-%d %H:%M")
+    return parsed.strftime("%Y/%m/%d %H:%M")
 
 
 def _pathDisplay(path: Path) -> str:
-    """Display paths under the current home directory using ``~``."""
-
     expanded = Path(path).expanduser()
     try:
         relative = expanded.relative_to(Path.home())
