@@ -61,7 +61,7 @@ def cameraInventoryListSummary(entries: tuple[CardInventoryListEntry, ...]) -> s
     if not entries:
         return "CAMERA CARD INVENTORY\n\nNo cards registered.\n"
 
-    rows: list[tuple[str, str, str, str, str, str, str]] = []
+    rows: list[tuple[str, str, str, str, str, str, str, str]] = []
     for entry in entries:
         record = entry.inventory
         status = _status(entry)
@@ -81,6 +81,7 @@ def cameraInventoryListSummary(entries: tuple[CardInventoryListEntry, ...]) -> s
             (
                 f"{entry.cardId:03d}",
                 status,
+                "yes" if entry.archived else "no",
                 mediaType,
                 size,
                 camera,
@@ -92,6 +93,7 @@ def cameraInventoryListSummary(entries: tuple[CardInventoryListEntry, ...]) -> s
     headers = (
         "Card",
         "Status",
+        "Archived",
         "Type",
         "Size",
         "Camera",
