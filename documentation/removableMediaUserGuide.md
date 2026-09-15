@@ -200,15 +200,27 @@ Full manifest history for one card:
 organiseMyVideo camera import --card 4
 ```
 
-The per-card view emits one logical line per asset:
+The per-card manifest avoids repeating the same long path prefixes on every line.
+Each import shows its source root and deepest common archive root once, then renders
+an aligned table using paths relative to those roots. For example:
 
 ```text
-copied          /source/file.MP4 -> /archive/file.MP4
-already present /source/file.MP4 -> /archive/file.MP4
-failed          /source/file.MP4 -> /archive/file.MP4 | error: ...
+CAMERA IMPORT HISTORY — CARD 004
+
+IMPORT 2026/09/15 12:34
+  Source root:   /media/card
+  Archive root:  /mnt/myVideo/Video/GoPro/2026/09-Sep/15
+  Manifest:      ~/.local/state/organiseMyVideo/cameraImports/camera-import-....json
+  Result:        2 copied, 1 already present
+
+  Result           Source              Archive
+  ---------------  ------------------  -------
+  copied           DCIM/A.MP4          A.MP4
+  already present  DCIM/B.MP4          B.MP4
 ```
 
-The underlying manifests are stored under:
+Each asset still occupies one logical line. Failed assets include their error at the
+end of the row. The underlying manifests are stored under:
 
 ```text
 ~/.local/state/organiseMyVideo/cameraImports/
