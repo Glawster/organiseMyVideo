@@ -2,7 +2,7 @@
 
 ## Status
 
-ToDo
+In progress
 
 ## Outcome
 
@@ -189,12 +189,25 @@ a separate video-processing implementation.
 
 ## Traceability
 
-- Implementation: pending
-- Tests: pending
+- Implementation:
+  - `organiseMyVideo/cameraPlan.py` and `cameraImport.py` use shared SHA-256
+    hashing while preserving import conflict and manifest semantics.
+  - `organiseMyVideo/cameraMetadata.py` uses shared precise filename parsing
+    and delegates MP4/QuickTime embedded creation-time probing to
+    `organiseMediaStudio.video.probe.videoProbe`.
+  - Dashcam-specific filename parsing and JPEG/THM EXIF remain application
+    behaviour until corresponding generic shared services are adopted.
+- Tests:
+  - `tests/test_mediaStudioAdoption.py`
+  - `tests/test_cameraMetadata.py`
+  - `tests/test_cameraPlan.py`
 - Pull request: pending
 - Agent runs: None
 
 ## Change history
 
+- 2026-09-15: adopted shared video probing for MP4/QuickTime creation metadata;
+  removed the application-local MP4 `mvhd` parser while preserving filename
+  fallback behaviour.
 - 2026-09-14: created — establish `organiseMediaStudio` as the shared media
   processing platform for `organiseMyVideo` and `organiseMyPhotos`.
