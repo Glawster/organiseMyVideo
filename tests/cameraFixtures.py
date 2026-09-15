@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import struct
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -43,7 +44,7 @@ def jpegWithoutExif() -> bytes:
 
 
 def mp4WithCreation(capture: datetime) -> bytes:
-    """Return a tiny MP4 whose mvhd creation time is *capture*."""
+    """Return a tiny MP4-like byte fixture whose mvhd creation time is *capture*."""
 
     if capture.tzinfo is None:
         capture = capture.replace(tzinfo=timezone.utc)
@@ -69,6 +70,36 @@ def mp4WithCreation(capture: datetime) -> bytes:
     )
 
 
+def videoWithCreationWrite(path: Path, capture: datetime) -> None:
+    """Write a tiny valid MP4 whose creation time can be read by ffprobe."""
+
+    if capture.tzinfo is None:
+        capture = capture.replace(tzinfo=timezone.utc)
+    creationTime = capture.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    command = [
+        "ffmpeg",
+        "-v",
+        "error",
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        "color=c=black:s=16x16:d=0.1",
+        "-metadata",
+        f"creation_time={creationTime}",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        str(path),
+    ]
+    completed = subprocess.run(command, check=False, capture_output=True, text=True)
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"could not create camera MP4 fixture {path}: {completed.stderr.strip()}"
+        )
+
+
 def cardTreeBuild(
     root: Path,
     *,
@@ -82,10 +113,9 @@ def cardTreeBuild(
     jpegCapture = jpegCapture or datetime(2024, 4, 20, 12, 0, 0)
     mp4Capture = mp4Capture or datetime(2024, 4, 18, 9, 0, 0, tzinfo=timezone.utc)
     jpeg = jpegWithExif(jpegCapture)
-    mp4 = mp4WithCreation(mp4Capture)
     gopro = root / "DCIM" / "100GOPRO"
     gopro.mkdir(parents=True)
-    (gopro / "GH010111.MP4").write_bytes(mp4)
+    videoWithCreationWrite(gopro / "GH010111.MP4", mp4Capture)
     (gopro / "GH010111.LRV").write_bytes(b"lrv-preview")
     (gopro / "G0010111.JPG").write_bytes(jpeg)
     if withThm:
@@ -108,7 +138,7 @@ def cardTreeBuild(
     if withDji:
         dji = root / "DCIM" / "101MEDIA"
         dji.mkdir()
-        (dji / "DJI_0021.MP4").write_bytes(mp4)
+        videoWithCreationWrite(dji / "DJI_0021.MP4", mp4Capture)
         (dji / "DJI_0021.SRT").write_text(
             "1\n00:00:00,000 --> 00:00:01,000\n", encoding="utf-8"
         )
