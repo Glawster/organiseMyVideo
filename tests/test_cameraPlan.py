@@ -100,29 +100,29 @@ def testGoproHelpersExcludedByDefaultAndOptional(tmp_path: Path):
     }
 
 
-def testPlannerClassifiesIdenticalAndConflictingDestinations(tmp_path: Path):
+def testPlannerClassifiesIdenticalAndIncrementsDifferentDestinations(tmp_path: Path):
     source = tmp_path / "card" / "DCIM" / "101MEDIA"
     source.mkdir(parents=True)
     identical = source / "DJI_0001.MP4"
-    conflict = source / "DJI_0002.MP4"
+    different = source / "DJI_0002.MP4"
     identical.write_bytes(b"same")
-    conflict.write_bytes(b"source")
+    different.write_bytes(b"source")
     captured = datetime(2024, 4, 20, 12, 0, 0)
     fileMtimeSet(identical, captured)
-    fileMtimeSet(conflict, captured)
+    fileMtimeSet(different, captured)
 
     destination = tmp_path / "archive" / "Drone" / "2024" / "04-Apr" / "20"
     destination.mkdir(parents=True)
     (destination / identical.name).write_bytes(b"same")
-    (destination / conflict.name).write_bytes(b"different")
+    (destination / different.name).write_bytes(b"different")
 
     plan = cameraPlannerCreate(tmp_path).importPlan(source)
-    outcomes = {operation.asset.sourcePath.name: operation.outcome for operation in plan.operations}
+    byName = {operation.asset.sourcePath.name: operation for operation in plan.operations}
 
-    assert outcomes == {
-        "DJI_0001.MP4": "alreadyPresent",
-        "DJI_0002.MP4": "conflict",
-    }
+    assert byName["DJI_0001.MP4"].outcome == "alreadyPresent"
+    assert byName["DJI_0001.MP4"].asset.destinationPath.name == "DJI_0001.MP4"
+    assert byName["DJI_0002.MP4"].outcome == "copy"
+    assert byName["DJI_0002.MP4"].asset.destinationPath.name == "DJI_0002 (2).MP4"
 
 
 def testPlanningDoesNotMutateSourceOrCreateDestinations(tmp_path: Path):
