@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -97,6 +98,11 @@ class CameraImporter:
                 cardId=cardId,
             )
 
+        copyOperations = [
+            operation for operation in plan.operations if operation.outcome == "copy"
+        ]
+        _destinationSpaceValidate(copyOperations)
+
         snapshotId = None
         if cardId is not None:
             snapshotId = cameraSnapshotMatch(
@@ -106,9 +112,6 @@ class CameraImporter:
                 assignIdentity=True,
             )
 
-        copyOperations = [
-            operation for operation in plan.operations if operation.outcome == "copy"
-        ]
         totalBytes = sum(
             operation.asset.sourcePath.stat().st_size for operation in copyOperations
         )
@@ -369,7 +372,9 @@ def cameraImportSummary(result: CameraImportResult) -> str:
 
     lines.extend(["", "Result"])
     if not result.confirmed:
-        lines.append(f"  Dry-run — {plannedCopies} file{'s' if plannedCopies != 1 else ''} would be copied")
+        lines.append(
+            f"  Dry-run — {plannedCopies} file{'s' if plannedCopies != 1 else ''} would be copied"
+        )
     elif result.failed:
         lines.append(
             f"  WARNING: import incomplete — {result.copied} copied, {result.failed} failed"
@@ -432,6 +437,62 @@ def cameraImportHistorySummary(
     return "\n".join(lines) + "\n"
 
 
+def _destinationSpaceValidate(operations: list[ImportOperation]) -> None:
+    """Refuse a confirmed import when a destination filesystem lacks free space."""
+
+    filesystems: dict[int, dict[str, object]] = {}
+    for operation in operations:
+        required = operation.asset.sourcePath.stat().st_size
+        anchor = _existingPath(operation.asset.destinationPath.parent)
+        try:
+            device = anchor.stat().st_dev
+            free = shutil.disk_usage(anchor).free
+        except OSError as error:
+            raise RuntimeError(
+                f"cannot determine free space for destination {anchor}: {error}"
+            ) from error
+        details = filesystems.setdefault(
+            device,
+            {"anchor": anchor, "required": 0, "free": free},
+        )
+        details["required"] = int(details["required"]) + required
+        details["free"] = min(int(details["free"]), free)
+
+    for details in filesystems.values():
+        required = int(details["required"])
+        free = int(details["free"])
+        if required <= free:
+            continue
+        anchor = Path(details["anchor"])
+        raise RuntimeError(
+            "insufficient destination disk space; "
+            f"need {_bytesDisplay(required)}, free {_bytesDisplay(free)} at {anchor}; "
+            "import not started"
+        )
+
+
+def _existingPath(path: Path) -> Path:
+    """Return the nearest existing ancestor of *path*."""
+
+    current = Path(path)
+    while not current.exists() and current.parent != current:
+        current = current.parent
+    return current
+
+
+def _bytesDisplay(value: int) -> str:
+    """Return a compact binary byte count."""
+
+    amount = float(max(value, 0))
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if amount < 1024.0 or unit == "TiB":
+            if unit == "B":
+                return f"{int(amount)} {unit}"
+            return f"{amount:.1f} {unit}"
+        amount /= 1024.0
+    return f"{amount:.1f} TiB"
+
+
 def _manifestFailureGroups(path: Path) -> list[tuple[str, int, tuple[str, ...]]]:
     """Group failed manifest assets by error text with representative filenames."""
 
@@ -452,10 +513,7 @@ def _manifestFailureGroups(path: Path) -> list[tuple[str, int, tuple[str, ...]]]
         grouped.setdefault(error, []).append(relative)
 
     ordered = sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0]))
-    return [
-        (error, len(paths), tuple(paths[:3]))
-        for error, paths in ordered
-    ]
+    return [(error, len(paths), tuple(paths[:3])) for error, paths in ordered]
 
 
 def _pathDisplay(path: Path) -> str:
