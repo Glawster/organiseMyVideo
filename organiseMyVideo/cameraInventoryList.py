@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,27 +10,32 @@ from typing import Optional
 
 from .cameraInventory import CameraInventory, CardInventoryRecord, _cardVolumeSummary
 from .cardLocation import cardLocationGet
-from .constants import CAMERA_INVENTORY_DATABASE
+from .constants import CAMERA_INVENTORY_DATABASE, applicationStateDirectory
 
 
 @dataclass(frozen=True)
 class CardInventoryListEntry:
-    """One known card with its latest inventory and current location."""
+    """One known card with its latest inventory and current lifecycle evidence."""
 
     cardId: int
     inventory: Optional[CardInventoryRecord]
     location: Optional[str]
     snapshotCount: int
+    archived: bool
 
 
 def cameraInventoryList(
     *,
     databasePath: Optional[Path] = None,
     cardId: Optional[int] = None,
+    manifestDirectory: Optional[Path] = None,
 ) -> tuple[CardInventoryListEntry, ...]:
     """Return known cards, optionally restricted to one numeric card ID."""
 
     path = Path(databasePath) if databasePath else CAMERA_INVENTORY_DATABASE
+    manifests = Path(
+        manifestDirectory or applicationStateDirectory() / "cameraImports"
+    )
     service = CameraInventory(dryRun=True, databasePath=path)
     ids = sorted(service._cardIdsStored())
     if cardId is not None:
@@ -43,6 +49,7 @@ def cameraInventoryList(
             inventory=service.inventoryShow(value),
             location=cardLocationGet(value, databasePath=path),
             snapshotCount=_snapshotCount(path, value),
+            archived=_latestSnapshotArchived(path, manifests, value),
         )
         for value in ids
     )
@@ -62,9 +69,9 @@ def cameraInventoryListSummary(entries: tuple[CardInventoryListEntry, ...]) -> s
             if record is not None and record.cardRatedGigabytes
             else "-"
         )
-        kind = ",".join(record.cameraKinds) if record is not None and record.cameraKinds else "-"
+        mediaType = record.volumeKind if record is not None and record.volumeKind else "-"
         camera = "-"
-        if record is not None:
+        if record is not None and _status(entry) != "missing":
             camera = " ".join(
                 part for part in (record.manufacturer, record.cameraModel) if part
             ) or "-"
@@ -73,8 +80,8 @@ def cameraInventoryListSummary(entries: tuple[CardInventoryListEntry, ...]) -> s
             (
                 f"{entry.cardId:03d}",
                 _status(entry),
+                mediaType,
                 size,
-                kind,
                 camera,
                 entry.location or "-",
                 latest,
@@ -84,8 +91,8 @@ def cameraInventoryListSummary(entries: tuple[CardInventoryListEntry, ...]) -> s
     headers = (
         "Card",
         "Status",
+        "Type",
         "Size",
-        "Kind",
         "Camera",
         "Location",
         "Last inventory",
@@ -111,6 +118,7 @@ def cameraInventoryFullSummary(entry: CardInventoryListEntry) -> str:
         f"  Status:           {_status(entry)}\n"
         f"  Location:         {entry.location or 'unknown'}\n"
         f"  Snapshots:        {entry.snapshotCount}\n"
+        f"  Latest archived:  {'yes' if entry.archived else 'no'}\n"
     )
     if entry.inventory is None:
         return header + "  Inventory:        none\n"
@@ -129,13 +137,80 @@ def _status(entry: CardInventoryListEntry) -> str:
     location = (entry.location or "").strip().lower()
     if location == "missing":
         return "missing"
-    if location in {"archive", "archived"}:
-        return "archived"
-    if location:
+    if location and location not in {"archive", "archived"}:
         return "in use"
-    if entry.inventory is not None and entry.inventory.capacity.contentBytes == 0:
+
+    record = entry.inventory
+    if record is None or record.capacity.contentBytes <= 0:
         return "empty"
-    return "available"
+    if entry.archived:
+        return "available"
+    return "to archive"
+
+
+def _latestSnapshotArchived(
+    databasePath: Path,
+    manifestDirectory: Path,
+    cardId: int,
+) -> bool:
+    """Return whether the latest inventory snapshot was imported successfully."""
+
+    snapshotId = _latestSnapshotId(databasePath, cardId)
+    if snapshotId is None or not manifestDirectory.is_dir():
+        return False
+
+    for path in manifestDirectory.glob("camera-import-*.json"):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict) or payload.get("snapshotId") != snapshotId:
+            continue
+        assets = payload.get("assets")
+        if not isinstance(assets, list):
+            continue
+        if all(
+            isinstance(asset, dict)
+            and asset.get("outcome") in {"copied", "alreadyPresent"}
+            for asset in assets
+        ):
+            return True
+    return False
+
+
+def _latestSnapshotId(databasePath: Path, cardId: int) -> Optional[str]:
+    if not databasePath.is_file():
+        return None
+    try:
+        connection = sqlite3.connect(f"file:{databasePath}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return None
+    try:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        if not {"cardInventory", "cardInventorySnapshotIdentity"}.issubset(tables):
+            return None
+        row = connection.execute(
+            """
+            SELECT identity.snapshotId
+            FROM cardInventory AS inventory
+            LEFT JOIN cardInventorySnapshotIdentity AS identity
+              ON identity.inventoryId = inventory.inventoryId
+            WHERE inventory.cardId = ?
+            ORDER BY inventory.inventoryId DESC
+            LIMIT 1
+            """,
+            (cardId,),
+        ).fetchone()
+        return None if row is None or row[0] is None else str(row[0])
+    except sqlite3.Error:
+        return None
+    finally:
+        connection.close()
 
 
 def _snapshotCount(databasePath: Path, cardId: int) -> int:
