@@ -83,7 +83,7 @@ def testCameraImportDryRunResolvesCardIdentity(tmp_path: Path):
 
     assert cameraCardIdResolve(source) == 1
     assert result.cardId == 1
-    assert "Card:              001" in cameraImportSummary(result)
+    assert "Card 001" in cameraImportSummary(result)
     assert result.manifestPath is None
 
 
