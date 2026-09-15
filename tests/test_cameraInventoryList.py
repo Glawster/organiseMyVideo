@@ -13,11 +13,12 @@ from organiseMyVideo.cameraInventoryList import (
 from organiseMyVideo.cardLocation import cardLocationSet
 
 
-def _inventoryCreate(tmpPath: Path, cardId: int) -> Path:
+def _inventoryCreate(tmpPath: Path, cardId: int, *, withContent: bool = True) -> Path:
     databasePath = tmpPath / "state" / "mediaCatalogue.sqlite"
     card = tmpPath / f"card-{cardId}"
     (card / "DCIM").mkdir(parents=True)
-    (card / "DCIM" / "note.txt").write_text("inventory fixture", encoding="utf-8")
+    if withContent:
+        (card / "DCIM" / "note.txt").write_text("inventory fixture", encoding="utf-8")
     service = CameraInventory(dryRun=False, databasePath=databasePath)
     record = service.inventoryScan(card, cardId)
     service.inventoryPersist(record)
@@ -42,6 +43,17 @@ def testListIncludesInventoriedAndLocationOnlyCards(tmp_path: Path):
     assert "available" in summary
     assert "007" in summary
     assert "missing" in summary
+
+
+def testEmptyStatusForUnlocatedCardWithNoContent(tmp_path: Path):
+    databasePath = _inventoryCreate(tmp_path, 6, withContent=False)
+
+    summary = cameraInventoryListSummary(
+        cameraInventoryList(databasePath=databasePath)
+    )
+
+    assert "006" in summary
+    assert "empty" in summary
 
 
 def testInUseStatusForKnownCardWithLocation(tmp_path: Path):
