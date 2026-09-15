@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Entry point with camera-import history dispatch layered over the established CLI."""
+"""Entry point with camera-card lifecycle and import-history dispatch."""
 
 from __future__ import annotations
 
@@ -22,108 +22,55 @@ logging = _legacy.logging
 
 
 def __getattr__(name: str):
-    """Delegate established CLI helpers to the preserved implementation."""
-
     return getattr(_legacy, name)
 
 
 def _cameraImportParserBuild() -> argparse.ArgumentParser:
-    """Return the camera-import parser including history and identity options."""
-
     parser = argparse.ArgumentParser(
         prog="organiseMyVideo camera import",
-        description="plan, import, or list supported camera media imports",
+        description="plan/import camera media or inspect recorded imports",
     )
     parser.add_argument(
-        "-s",
-        "--source",
-        dest="importSource",
-        metavar="SOURCE",
-        help="mounted card or copied card directory; required unless --list is used",
+        "-s", "--source", dest="importSource", metavar="SOURCE",
+        help="mounted card or copied card directory for a new import",
     )
     parser.add_argument(
-        "--list",
-        dest="listHistory",
-        action="store_true",
-        help="list previous confirmed camera imports",
+        "--list", dest="listHistory", action="store_true",
+        help="list all previous confirmed camera imports",
     )
     parser.add_argument(
-        "--full",
-        action="store_true",
-        help="with --list --card, show the files recorded by each import",
+        "--full", action="store_true", help=argparse.SUPPRESS,
     )
     parser.add_argument(
-        "--card",
-        type=int,
-        help=(
-            "expected numbered card ID for an import; with --list, show imports "
-            "for this card only"
-        ),
+        "--card", type=int,
+        help="without SOURCE show this card's full import manifest; with SOURCE assert card identity",
     )
+    parser.add_argument("--gopro-destination")
+    parser.add_argument("--drone-destination")
+    parser.add_argument("--dashcam-destination")
+    parser.add_argument("--manifest-directory")
+    parser.add_argument("--include-gopro-companions", action="store_true")
     parser.add_argument(
-        "--gopro-destination",
-        help="override the configured GoPro archive destination",
-    )
-    parser.add_argument(
-        "--drone-destination",
-        help="override the configured Drone archive destination",
-    )
-    parser.add_argument(
-        "--dashcam-destination",
-        help="override the configured Dashcam archive destination",
-    )
-    parser.add_argument(
-        "--manifest-directory",
-        help="override the camera-import manifest directory",
-    )
-    parser.add_argument(
-        "--include-gopro-companions",
-        action="store_true",
-        help="retain GoPro LRV and THM helper files",
-    )
-    parser.add_argument(
-        "-y",
-        "--confirm",
-        "--y",
-        dest="confirm",
-        action="store_true",
+        "-y", "--confirm", "--y", dest="confirm", action="store_true",
         help="confirm execution — actually make changes (default is dry-run)",
     )
-    parser.add_argument("--debug", action="store_true", help="enable debug-level logging")
-    parser.add_argument("--quiet", action="store_true", help="show errors only")
+    parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--quiet", action="store_true")
     return parser
 
 
 def _cameraInventoryListParserBuild() -> argparse.ArgumentParser:
-    """Return the parser for read-only camera-card register views."""
-
     parser = argparse.ArgumentParser(
         prog="organiseMyVideo camera inventory",
         description="list registered camera cards",
     )
-    parser.add_argument(
-        "--list",
-        dest="listInventory",
-        action="store_true",
-        required=True,
-        help="list registered camera cards",
-    )
-    parser.add_argument(
-        "--full",
-        action="store_true",
-        help="show full details for the selected --card",
-    )
-    parser.add_argument(
-        "--card",
-        type=int,
-        help="restrict the register to one numbered card",
-    )
+    parser.add_argument("--list", dest="listInventory", action="store_true", required=True)
+    parser.add_argument("--card", type=int, help=argparse.SUPPRESS)
+    parser.add_argument("--full", action="store_true", help=argparse.SUPPRESS)
     return parser
 
 
 def _cameraInventoryListRun(arguments: Sequence[str]) -> int:
-    """Render the read-only camera-card register."""
-
     from .cameraInventoryList import (
         cameraInventoryFullSummary,
         cameraInventoryList,
@@ -134,52 +81,57 @@ def _cameraInventoryListRun(arguments: Sequence[str]) -> int:
     args = parser.parse_args(list(arguments))
     if args.card is not None and args.card < 1:
         parser.error("--card must be a positive integer")
-    if args.full and args.card is None:
-        parser.error("--full requires --card")
 
     entries = cameraInventoryList(
         databasePath=constants.CAMERA_INVENTORY_DATABASE,
         cardId=args.card,
     )
-    if args.full:
+    if args.card is not None:
         if not entries:
             print(f"CAMERA CARD {args.card:03d}\n\nNo card registered.\n", end="")
             return 1
         print(cameraInventoryFullSummary(entries[0]), end="")
         return 0
-
     print(cameraInventoryListSummary(entries), end="")
     return 0
 
 
-def _cameraInventoryFormatParserBuild() -> argparse.ArgumentParser:
-    """Return the parser for the safe destructive card-format workflow."""
+def _cameraInventoryCardRun(arguments: Sequence[str]) -> int:
+    """Show all known details for one numbered card."""
 
+    from .cameraInventoryList import cameraInventoryFullSummary, cameraInventoryList
+
+    parser = argparse.ArgumentParser(
+        prog="organiseMyVideo camera inventory",
+        description="show all known details for one numbered card",
+    )
+    parser.add_argument("--card", type=int, required=True)
+    parser.add_argument("--full", action="store_true", help=argparse.SUPPRESS)
+    args = parser.parse_args(list(arguments))
+    if args.card < 1:
+        parser.error("--card must be a positive integer")
+    entries = cameraInventoryList(
+        databasePath=constants.CAMERA_INVENTORY_DATABASE,
+        cardId=args.card,
+    )
+    if not entries:
+        print(f"CAMERA CARD {args.card:03d}\n\nNo card registered.\n", end="")
+        return 1
+    print(cameraInventoryFullSummary(entries[0]), end="")
+    return 0
+
+
+def _cameraInventoryFormatParserBuild() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="organiseMyVideo camera inventory",
         description="format an archived numbered card and record a fresh empty inventory",
     )
-    parser.add_argument(
-        "--format",
-        dest="formatTarget",
-        metavar="CARD",
-        required=True,
-        help="numbered card to format, for example card18",
-    )
-    parser.add_argument(
-        "-y",
-        "--confirm",
-        "--y",
-        dest="confirm",
-        action="store_true",
-        help="confirm destructive formatting; default is dry-run",
-    )
+    parser.add_argument("--format", dest="formatTarget", metavar="CARD", required=True)
+    parser.add_argument("-y", "--confirm", "--y", dest="confirm", action="store_true")
     return parser
 
 
 def _cameraInventoryFormatRun(arguments: Sequence[str]) -> int:
-    """Plan or execute safe formatting of one archived numbered card."""
-
     from .cameraFormat import cameraFormatRun, cameraFormatSummary
 
     parser = _cameraInventoryFormatParserBuild()
@@ -197,103 +149,70 @@ def _cameraInventoryFormatRun(arguments: Sequence[str]) -> int:
 
 
 def _cameraInventoryLocationParserBuild() -> argparse.ArgumentParser:
-    """Return the parser for card-location metadata commands."""
-
     parser = argparse.ArgumentParser(
         prog="organiseMyVideo camera inventory",
         description="show or update the physical location of a numbered card",
     )
     parser.add_argument("--card", type=int, required=True)
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument(
-        "--location",
-        action="store_true",
-        help="show the currently stored physical location",
-    )
-    group.add_argument(
-        "--set-location",
-        metavar="LOCATION",
-        help="set the current physical location, for example 'Car JSZ5017'",
-    )
-    parser.add_argument(
-        "-y",
-        "--confirm",
-        "--y",
-        dest="confirm",
-        action="store_true",
-        help="confirm the location update; default is dry-run",
-    )
+    group.add_argument("--location", action="store_true")
+    group.add_argument("--set-location", metavar="LOCATION")
+    parser.add_argument("-y", "--confirm", "--y", dest="confirm", action="store_true")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--quiet", action="store_true")
     return parser
 
 
 def _cameraInventoryLocationRun(arguments: Sequence[str]) -> int:
-    """Show or update persistent location metadata for one card."""
-
     from .cardLocation import cardLocationGet, cardLocationSet, cardLocationSummary
 
     parser = _cameraInventoryLocationParserBuild()
     args = parser.parse_args(list(arguments))
     if args.card < 1:
         parser.error("--card must be a positive integer")
-
     if args.location:
         print(cardLocationSummary(args.card, cardLocationGet(args.card)), end="")
         return 0
-
-    location = cardLocationSet(
-        args.card,
-        args.set_location,
-        dryRun=not args.confirm,
-    )
+    location = cardLocationSet(args.card, args.set_location, dryRun=not args.confirm)
     print(cardLocationSummary(args.card, location), end="")
     print(f"  Persisted:        {'yes' if args.confirm else 'no (dry-run)'}")
     return 0
 
 
 def _cameraImportHistoryRun(arguments: Sequence[str]) -> int:
-    """List recorded camera-import manifests, optionally for one card."""
+    """Show all imports or the full per-file manifest history for one card."""
 
     parser = _cameraImportParserBuild()
     args = parser.parse_args(list(arguments))
-    if not args.listHistory:
-        parser.error("--list is required for camera import history")
     if args.card is not None and args.card < 1:
         parser.error("--card must be a positive integer")
-    if args.full and args.card is None:
-        parser.error("--full requires --card")
     if args.importSource is not None:
-        parser.error("--list identifies a card with --card, not -s/--source")
+        parser.error("history queries do not accept -s/--source")
     if args.confirm:
-        parser.error("--confirm is not valid with --list")
+        parser.error("--confirm is not valid for import history")
     if args.include_gopro_companions:
-        parser.error("--include-gopro-companions is not valid with --list")
+        parser.error("--include-gopro-companions is not valid for import history")
     if args.gopro_destination or args.drone_destination or args.dashcam_destination:
-        parser.error("archive destination overrides are not valid with --list")
+        parser.error("archive destination overrides are not valid for import history")
+    if not args.listHistory and args.card is None:
+        parser.error("use --list for all imports or --card ID for one card")
 
     manifestDirectory = Path(
-        args.manifest_directory
-        or constants.applicationStateDirectory() / "cameraImports"
+        args.manifest_directory or constants.applicationStateDirectory() / "cameraImports"
     )
     records = cameraImportHistory(manifestDirectory, cardId=args.card)
-    if args.full:
+    if args.card is not None:
         print(cameraImportHistoryFullSummary(records, cardId=args.card), end="")
         return 0
-    print(cameraImportHistorySummary(records, cardId=args.card), end="")
+    print(cameraImportHistorySummary(records), end="")
     return 0
 
 
-def _cameraImportArgumentsValidate(
-    parser: argparse.ArgumentParser,
-    args: argparse.Namespace,
-) -> None:
-    """Validate non-history camera-import arguments handled by this entry point."""
-
+def _cameraImportArgumentsValidate(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     if args.full:
-        parser.error("--full is only valid with --list --card")
+        parser.error("--full is no longer required; use --card ID")
     if args.importSource is None:
-        parser.error("-s/--source is required unless --list is used")
+        parser.error("-s/--source is required for a new import")
     source = Path(args.importSource).expanduser()
     if not source.is_dir():
         parser.error(f"source directory does not exist: {source}")
@@ -302,8 +221,6 @@ def _cameraImportArgumentsValidate(
 
 
 def _cameraImportLegacyArguments(arguments: Sequence[str]) -> list[str]:
-    """Remove entry-point-only ``--card`` before delegating to the legacy parser."""
-
     cleaned: list[str] = []
     values = list(arguments)
     index = 0
@@ -321,21 +238,15 @@ def _cameraImportLegacyArguments(arguments: Sequence[str]) -> list[str]:
 
 
 def _byteDisplay(value: int) -> str:
-    """Return a compact binary byte count for progress output."""
-
     amount = float(max(value, 0))
     for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
         if amount < 1024.0 or unit == "TiB":
-            if unit == "B":
-                return f"{int(amount)} {unit}"
-            return f"{amount:.1f} {unit}"
+            return f"{int(amount)} {unit}" if unit == "B" else f"{amount:.1f} {unit}"
         amount /= 1024.0
     return f"{amount:.1f} TiB"
 
 
 def _cameraImportProgressRenderer() -> Callable[[int, int, str], None]:
-    """Return a TTY renderer for aggregate camera-import byte progress."""
-
     finished = False
 
     def _render(copiedBytes: int, totalBytes: int, filename: str) -> None:
@@ -345,12 +256,9 @@ def _cameraImportProgressRenderer() -> Callable[[int, int, str], None]:
         isTty = getattr(sys.stderr, "isatty", None)
         if not callable(isTty) or not isTty():
             return
-
         copiedBytes = max(0, min(copiedBytes, totalBytes))
         percent = int((copiedBytes * 100) / totalBytes)
-        progressText = (
-            f" {percent:3d}%  {_byteDisplay(copiedBytes)} / {_byteDisplay(totalBytes)}"
-        )
+        progressText = f" {percent:3d}%  {_byteDisplay(copiedBytes)} / {_byteDisplay(totalBytes)}"
         suffix = f"  {filename}" if filename else ""
         columns = shutil.get_terminal_size(fallback=(100, 24)).columns
         barWidth = max(10, min(40, columns - len(progressText) - len(suffix) - 14))
@@ -370,15 +278,11 @@ def _cameraImportProgressRenderer() -> Callable[[int, int, str], None]:
 
 
 def _legacyGlobalsSync() -> None:
-    """Propagate patchable compatibility globals into the preserved CLI module."""
-
     _legacy.getLogger = getLogger
     _legacy.APP_CONFIG_FILE = APP_CONFIG_FILE
 
 
 def _getSummaryReportPath(sourcePath: str, mode: str) -> Path:
-    """Return the summary path using this module's patchable application state."""
-
     _legacyGlobalsSync()
     return _legacy._getSummaryReportPath(sourcePath, mode)
 
@@ -388,8 +292,6 @@ def _cameraImportRunPatch(
     *,
     progressCallback: Optional[Callable[[int, int, str], None]] = None,
 ):
-    """Return a cameraImportRun wrapper carrying CLI identity/progress context."""
-
     from . import cameraImport as cameraImportModule
 
     originalRun = cameraImportModule.cameraImportRun
@@ -411,13 +313,7 @@ def _cameraImportRunPatch(
     return cameraImportModule, originalRun, _run
 
 
-def _cameraImportPlainSummaryRun(
-    arguments: Sequence[str],
-    *,
-    expectedCardId: Optional[int] = None,
-) -> int:
-    """Delegate camera import while rendering its summary without an ASCII box."""
-
+def _cameraImportPlainSummaryRun(arguments: Sequence[str], *, expectedCardId: Optional[int] = None) -> int:
     cameraImportModule, originalRun, patchedRun = _cameraImportRunPatch(expectedCardId)
     originalDrawBox = _legacy.drawBox
     cameraImportModule.cameraImportRun = patchedRun
@@ -430,17 +326,10 @@ def _cameraImportPlainSummaryRun(
         _legacy.drawBox = originalDrawBox
 
 
-def _cameraImportConfirmedRun(
-    arguments: Sequence[str],
-    *,
-    expectedCardId: Optional[int] = None,
-) -> int:
-    """Delegate confirmed camera import with progress and a plain final summary."""
-
+def _cameraImportConfirmedRun(arguments: Sequence[str], *, expectedCardId: Optional[int] = None) -> int:
     progressCallback = _cameraImportProgressRenderer()
     cameraImportModule, originalRun, patchedRun = _cameraImportRunPatch(
-        expectedCardId,
-        progressCallback=progressCallback,
+        expectedCardId, progressCallback=progressCallback
     )
     originalDrawBox = _legacy.drawBox
     cameraImportModule.cameraImportRun = patchedRun
@@ -453,9 +342,24 @@ def _cameraImportConfirmedRun(
         _legacy.drawBox = originalDrawBox
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
-    """Run the command-line application and return a process status."""
+def _inventoryCardQuery(arguments: Sequence[str]) -> bool:
+    """Return True only for the pure read-only ``--card ID`` detail form."""
 
+    values = list(arguments)
+    if "--card" not in values and not any(value.startswith("--card=") for value in values):
+        return False
+    actionOptions = {
+        "-s", "--source", "--brand", "--reassign", "--location", "--set-location",
+        "--format", "--list", "-y", "--confirm", "--y", "--auto", "--clean",
+        "--refresh", "--rescan",
+    }
+    return not any(
+        value in actionOptions or any(value.startswith(option + "=") for option in actionOptions if option.startswith("--"))
+        for value in values
+    )
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
 
     if len(arguments) >= 2 and arguments[:2] == ["camera", "inventory"]:
@@ -466,27 +370,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return _cameraInventoryListRun(inventoryArguments)
         if "--location" in inventoryArguments or "--set-location" in inventoryArguments:
             return _cameraInventoryLocationRun(inventoryArguments)
+        if _inventoryCardQuery(inventoryArguments):
+            return _cameraInventoryCardRun(inventoryArguments)
 
     if len(arguments) >= 2 and arguments[:2] == ["camera", "import"]:
         importArguments = arguments[2:]
         parser = _cameraImportParserBuild()
         if "--help" in importArguments or "-h" in importArguments:
             parser.parse_args(importArguments)
-        if "--list" in importArguments:
-            return _cameraImportHistoryRun(importArguments)
-
         parsed = parser.parse_args(importArguments)
+        if parsed.listHistory or (parsed.card is not None and parsed.importSource is None):
+            return _cameraImportHistoryRun(importArguments)
         _cameraImportArgumentsValidate(parser, parsed)
         legacyArguments = _cameraImportLegacyArguments(arguments)
         if parsed.confirm:
-            return _cameraImportConfirmedRun(
-                legacyArguments,
-                expectedCardId=parsed.card,
-            )
-        return _cameraImportPlainSummaryRun(
-            legacyArguments,
-            expectedCardId=parsed.card,
-        )
+            return _cameraImportConfirmedRun(legacyArguments, expectedCardId=parsed.card)
+        return _cameraImportPlainSummaryRun(legacyArguments, expectedCardId=parsed.card)
 
     _legacyGlobalsSync()
     return _legacy.main(arguments)
