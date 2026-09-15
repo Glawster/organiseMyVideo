@@ -58,7 +58,9 @@ def testCameraImportHistoryFullSummaryShowsPerFileDestinations(tmp_path: Path):
         failed=1,
     )
     summary = cameraImportHistoryFullSummary((record,), cardId=4)
-    assert "CAMERA IMPORT HISTORY — CARD 004 — FULL" in summary
+    assert "CAMERA IMPORT HISTORY — CARD 004" in summary
+    assert "2026/09/15 12:34" in summary
+    assert "— FULL" not in summary
     copiedLine = next(line for line in summary.splitlines() if "A.MP4" in line)
     presentLine = next(line for line in summary.splitlines() if "B.MP4" in line)
     failedLine = next(line for line in summary.splitlines() if "C.MP4" in line)
@@ -69,7 +71,7 @@ def testCameraImportHistoryFullSummaryShowsPerFileDestinations(tmp_path: Path):
     assert "1 failed file" in summary
 
 
-def testCameraImportCardCliShowsFullManifestWithoutListOrFull(
+def testCameraImportCardCliShowsManifestWithoutListOrFull(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys,
@@ -82,7 +84,8 @@ def testCameraImportCardCliShowsFullManifestWithoutListOrFull(
     result = applicationMain.main(["camera", "import", "--card", "4"])
     assert result == 0
     output = capsys.readouterr().out
-    assert "CAMERA IMPORT HISTORY — CARD 004 — FULL" in output
+    assert "CAMERA IMPORT HISTORY — CARD 004" in output
+    assert "— FULL" not in output
     assert "A.MP4" in output
     assert "B.MP4" in output
 
@@ -98,4 +101,4 @@ def testCameraImportListStillShowsAllImportSummaries(
     assert applicationMain.main(["camera", "import", "--list"]) == 0
     output = capsys.readouterr().out
     assert "CAMERA IMPORT HISTORY" in output
-    assert "CARD 004 — FULL" not in output
+    assert "CARD 004" not in output.splitlines()[0]
