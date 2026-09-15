@@ -32,6 +32,8 @@ _MONTH_NAMES = (
     "Dec",
 )
 _INCREMENT_SUFFIX = re.compile(r"^(?P<base>.*) \((?P<number>\d+)\)$")
+_TRANSCEND_MODEL_DIRECTORY = re.compile(r"^DPB?\d{2,4}[A-Z]*$", re.IGNORECASE)
+_TRANSCEND_PROXY_DIRECTORIES = {"TEMP", "E_TEMP"}
 
 
 @dataclass(frozen=True)
@@ -98,6 +100,10 @@ class CameraImportPlanner:
             if item.fileKind == "video"
         }
         for item in detection.files:
+            if _transcendProxyPath(item):
+                excluded.append(item.relativePath)
+                continue
+
             if item.cameraKind == "gopro" and item.fileKind in {"preview", "thumbnail"}:
                 if not self.includeGoproCompanions:
                     excluded.append(item.relativePath)
@@ -152,6 +158,17 @@ class CameraImportPlanner:
             / f"{captureAt.day:02d}"
             / item.path.name
         )
+
+
+def _transcendProxyPath(item: CameraDetectedFile) -> bool:
+    """Return True for low-resolution Transcend TEMP/E_TEMP proxy recordings."""
+
+    if item.cameraKind != "dashcam":
+        return False
+    parts = Path(item.relativePath).parts
+    hasModelRoot = any(_TRANSCEND_MODEL_DIRECTORY.fullmatch(part) for part in parts)
+    hasProxyDirectory = any(part.upper() in _TRANSCEND_PROXY_DIRECTORIES for part in parts)
+    return hasModelRoot and hasProxyDirectory
 
 
 def _captureRead(item: CameraDetectedFile) -> tuple[Optional[datetime], str]:
