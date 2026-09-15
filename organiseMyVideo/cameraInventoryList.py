@@ -133,6 +133,8 @@ def _status(entry: CardInventoryListEntry) -> str:
         return "archived"
     if location:
         return "in use"
+    if entry.inventory is not None and entry.inventory.capacity.contentBytes == 0:
+        return "empty"
     return "available"
 
 
