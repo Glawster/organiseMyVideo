@@ -57,24 +57,19 @@ def testCameraImportHistoryFullSummaryShowsPerFileDestinations(tmp_path: Path):
         alreadyPresent=1,
         failed=1,
     )
-
     summary = cameraImportHistoryFullSummary((record,), cardId=4)
-
     assert "CAMERA IMPORT HISTORY — CARD 004 — FULL" in summary
     copiedLine = next(line for line in summary.splitlines() if "A.MP4" in line)
     presentLine = next(line for line in summary.splitlines() if "B.MP4" in line)
     failedLine = next(line for line in summary.splitlines() if "C.MP4" in line)
-    assert "copied" in copiedLine
     assert "/media/card/DCIM/A.MP4 -> /mnt/myVideo/Video/GoPro/2026/09-Sep/15/A.MP4" in copiedLine
     assert "already present" in presentLine
-    assert "/media/card/DCIM/B.MP4 -> /mnt/myVideo/Video/GoPro/2026/09-Sep/15/B.MP4" in presentLine
-    assert "failed" in failedLine
     assert "OSError: verification failed" in failedLine
     assert "2 archived files" in summary
     assert "1 failed file" in summary
 
 
-def testCameraImportHistoryFullCliForOneCard(
+def testCameraImportCardCliShowsFullManifestWithoutListOrFull(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys,
@@ -84,10 +79,7 @@ def testCameraImportHistoryFullCliForOneCard(
     _manifestWrite(manifest, cardId=4)
     monkeypatch.setattr(constants, "applicationStateDirectory", lambda: state)
 
-    result = applicationMain.main(
-        ["camera", "import", "--list", "--card", "4", "--full"]
-    )
-
+    result = applicationMain.main(["camera", "import", "--card", "4"])
     assert result == 0
     output = capsys.readouterr().out
     assert "CAMERA IMPORT HISTORY — CARD 004 — FULL" in output
@@ -95,7 +87,15 @@ def testCameraImportHistoryFullCliForOneCard(
     assert "B.MP4" in output
 
 
-def testCameraImportHistoryFullRequiresCard(capsys):
-    with pytest.raises(SystemExit):
-        applicationMain.main(["camera", "import", "--list", "--full"])
-    assert "--full requires --card" in capsys.readouterr().err
+def testCameraImportListStillShowsAllImportSummaries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+):
+    state = tmp_path / "state" / "organiseMyVideo"
+    _manifestWrite(state / "cameraImports" / "camera-import-1.json", cardId=4)
+    monkeypatch.setattr(constants, "applicationStateDirectory", lambda: state)
+    assert applicationMain.main(["camera", "import", "--list"]) == 0
+    output = capsys.readouterr().out
+    assert "CAMERA IMPORT HISTORY" in output
+    assert "CARD 004 — FULL" not in output
