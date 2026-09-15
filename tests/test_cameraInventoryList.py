@@ -37,9 +37,24 @@ def testListIncludesInventoriedAndLocationOnlyCards(tmp_path: Path):
     assert entries[1].location == "missing"
 
     summary = cameraInventoryListSummary(entries)
+    assert "Status" in summary
     assert "003" in summary
+    assert "inventoried" in summary
     assert "007" in summary
     assert "missing" in summary
+
+
+def testRegisteredStatusForLocationOnlyKnownCard(tmp_path: Path):
+    databasePath = tmp_path / "state" / "mediaCatalogue.sqlite"
+    cardLocationSet(8, "Desk drawer", databasePath=databasePath, dryRun=False)
+
+    summary = cameraInventoryListSummary(
+        cameraInventoryList(databasePath=databasePath)
+    )
+
+    assert "008" in summary
+    assert "registered" in summary
+    assert "Desk drawer" in summary
 
 
 def testFullListShowsLatestInventoryAndSnapshotCount(tmp_path: Path):
@@ -50,6 +65,7 @@ def testFullListShowsLatestInventoryAndSnapshotCount(tmp_path: Path):
     summary = cameraInventoryFullSummary(entry)
 
     assert "CAMERA CARD 004" in summary
+    assert "Status:           inventoried" in summary
     assert "Location:         Car JSZ5017" in summary
     assert "Snapshots:        1" in summary
     assert "Last inventoried:" in summary
@@ -67,6 +83,7 @@ def testInventoryListCliSupportsFullCardView(
 
     assert applicationMain.main(["camera", "inventory", "--list"]) == 0
     compact = capsys.readouterr().out
+    assert "Status" in compact
     assert "009" in compact
     assert "missing" in compact
 
@@ -75,5 +92,6 @@ def testInventoryListCliSupportsFullCardView(
     ) == 0
     full = capsys.readouterr().out
     assert "CAMERA CARD 009" in full
+    assert "Status:           missing" in full
     assert "Location:         missing" in full
     assert "Inventory:        none" in full
