@@ -43,7 +43,7 @@ def _manifestWrite(path: Path, *, cardId: int = 4) -> None:
     )
 
 
-def testCameraImportHistoryFullSummaryShowsPerFileDestinations(tmp_path: Path):
+def testCameraImportHistoryFullSummaryUsesCommonRootsAndAlignedRows(tmp_path: Path):
     manifest = tmp_path / "camera-import-1.json"
     _manifestWrite(manifest)
     record = CameraImportHistoryRecord(
@@ -59,12 +59,19 @@ def testCameraImportHistoryFullSummaryShowsPerFileDestinations(tmp_path: Path):
     )
     summary = cameraImportHistoryFullSummary((record,), cardId=4)
     assert "CAMERA IMPORT HISTORY — CARD 004" in summary
-    assert "2026/09/15 12:34" in summary
-    assert "— FULL" not in summary
-    copiedLine = next(line for line in summary.splitlines() if "A.MP4" in line)
-    presentLine = next(line for line in summary.splitlines() if "B.MP4" in line)
-    failedLine = next(line for line in summary.splitlines() if "C.MP4" in line)
-    assert "/media/card/DCIM/A.MP4 -> /mnt/myVideo/Video/GoPro/2026/09-Sep/15/A.MP4" in copiedLine
+    assert "IMPORT 2026/09/15 12:34" in summary
+    assert "Source root:   /media/card" in summary
+    assert "Archive root:  /mnt/myVideo/Video/GoPro/2026/09-Sep/15" in summary
+    assert "Result:        1 copied, 1 already present, 1 failed" in summary
+    assert "Result" in summary and "Source" in summary and "Archive" in summary
+
+    copiedLine = next(line for line in summary.splitlines() if "DCIM/A.MP4" in line)
+    presentLine = next(line for line in summary.splitlines() if "DCIM/B.MP4" in line)
+    failedLine = next(line for line in summary.splitlines() if "DCIM/C.MP4" in line)
+    assert "/media/card/" not in copiedLine
+    assert "/mnt/myVideo/" not in copiedLine
+    assert "DCIM/A.MP4" in copiedLine
+    assert "A.MP4" in copiedLine
     assert "already present" in presentLine
     assert "OSError: verification failed" in failedLine
     assert "2 archived files" in summary
@@ -85,9 +92,10 @@ def testCameraImportCardCliShowsManifestWithoutListOrFull(
     assert result == 0
     output = capsys.readouterr().out
     assert "CAMERA IMPORT HISTORY — CARD 004" in output
-    assert "— FULL" not in output
-    assert "A.MP4" in output
-    assert "B.MP4" in output
+    assert "Source root:" in output
+    assert "Archive root:" in output
+    assert "DCIM/A.MP4" in output
+    assert "DCIM/B.MP4" in output
 
 
 def testCameraImportListStillShowsAllImportSummaries(
