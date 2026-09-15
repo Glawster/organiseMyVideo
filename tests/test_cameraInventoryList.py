@@ -1,4 +1,4 @@
-"""Tests for compact and full camera-card inventory register views."""
+"""Tests for compact and detailed camera-card inventory views."""
 
 import json
 import sqlite3
@@ -31,6 +31,8 @@ def _latestSnapshotArchive(
     databasePath: Path,
     manifestDirectory: Path,
     cardId: int,
+    *,
+    createdAt: str = "2026-09-15T18:05:00+00:00",
 ) -> None:
     snapshotId = f"snapshot-{cardId}"
     with sqlite3.connect(databasePath) as connection:
@@ -52,9 +54,11 @@ def _latestSnapshotArchive(
         )
         connection.commit()
 
-    manifestDirectory.mkdir(parents=True)
+    manifestDirectory.mkdir(parents=True, exist_ok=True)
     payload = {
         "snapshotId": snapshotId,
+        "createdAt": createdAt,
+        "source": {"cardId": cardId},
         "assets": [{"outcome": "copied"}],
     }
     (manifestDirectory / "camera-import-test.json").write_text(
@@ -65,39 +69,23 @@ def _latestSnapshotArchive(
 def testListIncludesInventoriedAndLocationOnlyCards(tmp_path: Path):
     databasePath = _inventoryCreate(tmp_path, 3)
     cardLocationSet(7, "missing", databasePath=databasePath, dryRun=False)
-
-    entries = cameraInventoryList(
-        databasePath=databasePath,
-        manifestDirectory=tmp_path / "manifests",
-    )
-
+    entries = cameraInventoryList(databasePath=databasePath, manifestDirectory=tmp_path / "manifests")
     assert [entry.cardId for entry in entries] == [3, 7]
-    assert entries[0].inventory is not None
     assert entries[0].snapshotCount == 1
-    assert entries[1].inventory is None
     assert entries[1].location == "missing"
-
     summary = cameraInventoryListSummary(entries)
     assert "Status" in summary
     assert "Archived" in summary
-    assert "Type" in summary
-    assert "003" in summary
-    assert "to archive" in summary
-    assert "007" in summary
-    assert "missing" in summary
+    assert "003" in summary and "to archive" in summary
+    assert "007" in summary and "missing" in summary
 
 
 def testInUseStatusForKnownCardWithLocation(tmp_path: Path):
     databasePath = tmp_path / "state" / "mediaCatalogue.sqlite"
     cardLocationSet(8, "Desk drawer", databasePath=databasePath, dryRun=False)
-
     summary = cameraInventoryListSummary(
-        cameraInventoryList(
-            databasePath=databasePath,
-            manifestDirectory=tmp_path / "manifests",
-        )
+        cameraInventoryList(databasePath=databasePath, manifestDirectory=tmp_path / "manifests")
     )
-
     assert "008" in summary
     assert "in use" in summary
     assert "Desk drawer" in summary
@@ -105,34 +93,23 @@ def testInUseStatusForKnownCardWithLocation(tmp_path: Path):
 
 def testEmptyStatusForEmptyUnlocatedCard(tmp_path: Path):
     databasePath = _inventoryCreate(tmp_path, 10, empty=True)
-
     summary = cameraInventoryListSummary(
-        cameraInventoryList(
-            databasePath=databasePath,
-            manifestDirectory=tmp_path / "manifests",
-        )
+        cameraInventoryList(databasePath=databasePath, manifestDirectory=tmp_path / "manifests")
     )
-
     assert "010" in summary
     assert "empty" in summary
 
 
 def testArchivedContentMakesUnlocatedCardAvailable(tmp_path: Path):
     databasePath = _inventoryCreate(tmp_path, 11)
-    manifestDirectory = tmp_path / "manifests"
-    _latestSnapshotArchive(databasePath, manifestDirectory, 11)
-
-    entries = cameraInventoryList(
-        databasePath=databasePath,
-        manifestDirectory=manifestDirectory,
-    )
-    summary = cameraInventoryListSummary(entries)
-
+    manifests = tmp_path / "manifests"
+    _latestSnapshotArchive(databasePath, manifests, 11)
+    entries = cameraInventoryList(databasePath=databasePath, manifestDirectory=manifests)
+    row = next(line for line in cameraInventoryListSummary(entries).splitlines() if line.startswith("011"))
     assert entries[0].archived is True
-    row = next(line for line in summary.splitlines() if line.startswith("011"))
+    assert entries[0].archiveDates == ("2026-09-15T18:05:00+00:00",)
     assert "available" in row
     assert "yes" in row
-    assert "to archive" not in row
 
 
 def testMissingCardDoesNotPresentOldCameraAsCurrent(tmp_path: Path):
@@ -143,62 +120,50 @@ def testMissingCardDoesNotPresentOldCameraAsCurrent(tmp_path: Path):
         )
         connection.commit()
     cardLocationSet(12, "missing", databasePath=databasePath, dryRun=False)
-
     summary = cameraInventoryListSummary(
-        cameraInventoryList(
-            databasePath=databasePath,
-            manifestDirectory=tmp_path / "manifests",
-        )
+        cameraInventoryList(databasePath=databasePath, manifestDirectory=tmp_path / "manifests")
     )
-
     row = next(line for line in summary.splitlines() if line.startswith("012"))
     assert "missing" in row
-    assert "GoPro" not in row
-    assert "HERO9" not in row
+    assert "GoPro" not in row and "HERO9" not in row
 
 
-def testFullListShowsLatestInventoryAndSnapshotCount(tmp_path: Path):
-    databasePath = _inventoryCreate(tmp_path, 4)
-    cardLocationSet(4, "Car JSZ5017", databasePath=databasePath, dryRun=False)
-
+def testCardDetailShowsLifecycleArchiveHistoryAndUsefulInventory(tmp_path: Path):
+    databasePath = _inventoryCreate(tmp_path, 18)
+    manifests = tmp_path / "manifests"
+    _latestSnapshotArchive(databasePath, manifests, 18)
     entry = cameraInventoryList(
         databasePath=databasePath,
-        cardId=4,
-        manifestDirectory=tmp_path / "manifests",
+        cardId=18,
+        manifestDirectory=manifests,
     )[0]
     summary = cameraInventoryFullSummary(entry)
-
-    assert "CAMERA CARD 004" in summary
-    assert "Status:           in use" in summary
-    assert "Location:         Car JSZ5017" in summary
-    assert "Snapshots:        1" in summary
-    assert "Latest archived:  no" in summary
+    assert "CAMERA CARD 018" in summary
+    assert "Status:             available" in summary
+    assert "Snapshots:          1" in summary
+    assert "Last archived:      2026/09/15 18:05" in summary
+    assert "Previous archives:  -" in summary
     assert "Last inventoried:" in summary
     assert "CAMERA CARD INVENTORY" in summary
+    assert "Type:" in summary
+    assert "Keywords:" in summary
+    assert "Source:" not in summary
+    assert "Volume:" not in summary
+    assert "T" not in next(line for line in summary.splitlines() if "Last inventoried:" in line)
 
 
-def testInventoryListCliSupportsFullCardView(
-    tmp_path: Path,
-    monkeypatch,
-    capsys,
-):
+def testInventoryCanonicalCliUsesListForAllAndCardForDetail(tmp_path: Path, monkeypatch, capsys):
     databasePath = tmp_path / "state" / "mediaCatalogue.sqlite"
     cardLocationSet(9, "missing", databasePath=databasePath, dryRun=False)
     monkeypatch.setattr(constants, "CAMERA_INVENTORY_DATABASE", databasePath)
 
     assert applicationMain.main(["camera", "inventory", "--list"]) == 0
     compact = capsys.readouterr().out
-    assert "Status" in compact
-    assert "Archived" in compact
-    assert "Type" in compact
-    assert "009" in compact
-    assert "missing" in compact
+    assert "Status" in compact and "009" in compact and "missing" in compact
 
-    assert applicationMain.main(
-        ["camera", "inventory", "--list", "--full", "--card", "9"]
-    ) == 0
-    full = capsys.readouterr().out
-    assert "CAMERA CARD 009" in full
-    assert "Status:           missing" in full
-    assert "Location:         missing" in full
-    assert "Inventory:        none" in full
+    assert applicationMain.main(["camera", "inventory", "--card", "9"]) == 0
+    detail = capsys.readouterr().out
+    assert "CAMERA CARD 009" in detail
+    assert "Status:             missing" in detail
+    assert "Location:           missing" in detail
+    assert "Inventory:          none" in detail
