@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import re
 import struct
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from organiseMediaStudio.metadata.captureDate import captureDateFromFilename
-
-# MP4/QuickTime creation times count seconds from 1904-01-01 UTC.
-_MP4_EPOCH = datetime(1904, 1, 1, tzinfo=timezone.utc)
+from organiseMediaStudio.video.errors import VideoProcessingError
+from organiseMediaStudio.video.probe import videoProbe
 
 _JPEG_SUFFIXES = {".jpg", ".jpeg", ".thm"}
 _MP4_SUFFIXES = {".mp4", ".mov"}
@@ -109,16 +108,13 @@ def metadataJpegCaptureRead(path: Path) -> Optional[datetime]:
 
 
 def metadataMp4CaptureRead(path: Path) -> Optional[datetime]:
-    """Return the movie-header creation time from an MP4 or QuickTime file."""
+    """Return embedded video creation time through organiseMediaStudio."""
 
     try:
-        with path.open("rb") as handle:
-            creation = _mp4MvhdCreationRead(handle)
-    except OSError:
+        result = videoProbe(path)
+    except VideoProcessingError:
         return None
-    if not creation:
-        return None
-    return _MP4_EPOCH + timedelta(seconds=creation)
+    return result.creationAt
 
 
 ## datetime
@@ -241,74 +237,3 @@ def _exifValueDecode(
     if typeCode == _TYPE_SHORT and count == 1:
         return struct.unpack(endian + "H", payload[:2])[0]
     return payload
-
-
-## mp4
-
-
-def _mp4BoxIterate(handle, limit: Optional[int] = None):
-    """Yield ``(boxType, payloadStart, payloadSize)`` until *limit* or EOF."""
-
-    while True:
-        start = handle.tell()
-        if limit is not None and start >= limit:
-            return
-        header = handle.read(8)
-        if len(header) < 8:
-            return
-        size = struct.unpack(">I", header[:4])[0]
-        boxType = header[4:8]
-        headerSize = 8
-        if size == 1:
-            large = handle.read(8)
-            if len(large) < 8:
-                return
-            size = struct.unpack(">Q", large)[0]
-            headerSize = 16
-        elif size == 0:
-            current = handle.tell()
-            handle.seek(0, 2)
-            end = handle.tell()
-            handle.seek(current)
-            size = end - start
-        if size < headerSize:
-            return
-        payloadStart = handle.tell()
-        payloadSize = size - headerSize
-        payloadEnd = payloadStart + payloadSize
-        if limit is not None and payloadEnd > limit:
-            return
-        yield boxType, payloadStart, payloadSize
-        handle.seek(payloadEnd)
-
-
-def _mp4MvhdCreationRead(handle) -> Optional[int]:
-    """Return a non-zero mvhd creation timestamp, or ``None``."""
-
-    for boxType, payloadStart, payloadSize in _mp4BoxIterate(handle):
-        if boxType != b"moov":
-            continue
-        handle.seek(payloadStart)
-        for innerType, innerStart, innerSize in _mp4BoxIterate(
-            handle, payloadStart + payloadSize
-        ):
-            if innerType != b"mvhd" or innerSize < 12:
-                continue
-            handle.seek(innerStart)
-            versionFlags = handle.read(4)
-            if len(versionFlags) < 4:
-                return None
-            version = versionFlags[0]
-            if version == 1:
-                raw = handle.read(8)
-                if len(raw) < 8:
-                    return None
-                creation = struct.unpack(">Q", raw)[0]
-            else:
-                raw = handle.read(4)
-                if len(raw) < 4:
-                    return None
-                creation = struct.unpack(">I", raw)[0]
-            return creation or None
-        return None
-    return None
