@@ -173,7 +173,7 @@ def testConfirmedCameraImportFailureLeavesNoFinalOrTemporaryFile(
     assert "verification failed" in manifest["assets"][0]["error"]
 
 
-def testConfirmedCameraImportRejectsPlanWithConflict(tmp_path: Path):
+def testConfirmedCameraImportIncrementsDifferentExistingDestination(tmp_path: Path):
     source, media = cameraSourceCreate(tmp_path)
     destination = (
         tmp_path
@@ -187,9 +187,15 @@ def testConfirmedCameraImportRejectsPlanWithConflict(tmp_path: Path):
     destination.parent.mkdir(parents=True)
     destination.write_bytes(b"different")
 
-    with pytest.raises(RuntimeError, match="destination conflicts"):
-        importerCreate(tmp_path, dryRun=False).importMedia(source)
+    result = importerCreate(tmp_path, dryRun=False).importMedia(source)
 
+    incremented = destination.with_name("GH010111 (2).MP4")
+    assert result.copied == 1
+    assert result.failed == 0
     assert media.read_bytes() == b"camera-original"
     assert destination.read_bytes() == b"different"
-    assert not (tmp_path / "state").exists()
+    assert incremented.read_bytes() == b"camera-original"
+    assert result.manifestPath is not None
+    manifest = json.loads(result.manifestPath.read_text(encoding="utf-8"))
+    assert manifest["assets"][0]["destinationPath"] == str(incremented)
+    assert manifest["assets"][0]["outcome"] == "copied"
