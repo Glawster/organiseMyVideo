@@ -45,10 +45,16 @@ scan can omit `--card` and read the ID from the volume. The file contains the
 same summary shown in the console, including free space. The last form prints
 the latest stored snapshot for that card ID.
 
-`--card` is required on the first scan of an unlabelled card. Dry-run remains
-the default. `--confirm` is the only way to persist a snapshot, write the
-card ID file, or call the vision API. A later `--card` that disagrees with
-the on-card file is refused unless `--reassign` is also given:
+On the first scan of an unlabelled card, omitting `--card` does not assign an ID
+automatically. Instead the application reads the existing inventory catalogue
+without modifying it, reports the currently used IDs, and suggests the lowest
+unused positive integer. For example, if cards `1`, `2`, `4`, and `5` already
+exist, the suggested ID is `3` and the command tells the operator to re-run
+with `--card 3`. An empty catalogue suggests card `1`.
+
+Dry-run remains the default. `--confirm` is the only way to persist a snapshot,
+write the card ID file, or call the vision API. A later `--card` that disagrees
+with the on-card file is refused unless `--reassign` is also given:
 
 ```bash
 $ python -m organiseMyVideo camera inventory /media/andy/7000-8000 --card 5 --reassign
@@ -134,8 +140,9 @@ Ignored clutter matches the camera-import rules: `._*` files, `_gsdata_`,
 Tests use temporary directories and synthetic JPEG, MP4, `.THM`, DJI, and
 ignored-file fixtures. They cover dry-run immutability, confirmed snapshots,
 repeat card IDs, capture-time precedence, vision injection, missing API keys,
-invalid card IDs, show-without-source, positional and `-s/--source` source
-forms, and execution through `python -m organiseMyVideo camera inventory`.
+invalid card IDs, first-scan card-ID suggestions, show-without-source,
+positional and `-s/--source` source forms, and execution through
+`python -m organiseMyVideo camera inventory`.
 
 ## Source and permission errors
 
