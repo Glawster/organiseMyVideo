@@ -27,7 +27,7 @@ def __getattr__(name: str):
 
 
 def _cameraImportParserBuild() -> argparse.ArgumentParser:
-    """Return the camera-import parser including history options."""
+    """Return the camera-import parser including history and identity options."""
 
     parser = argparse.ArgumentParser(
         prog="organiseMyVideo camera import",
@@ -49,7 +49,10 @@ def _cameraImportParserBuild() -> argparse.ArgumentParser:
     parser.add_argument(
         "--card",
         type=int,
-        help="with --list, show imports for this numbered card only",
+        help=(
+            "expected numbered card ID for an import; with --list, show imports "
+            "for this card only"
+        ),
     )
     parser.add_argument(
         "--gopro-destination",
@@ -168,6 +171,40 @@ def _cameraImportHistoryRun(arguments: Sequence[str]) -> int:
     return 0
 
 
+def _cameraImportArgumentsValidate(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+) -> None:
+    """Validate non-history camera-import arguments handled by this entry point."""
+
+    if args.importSource is None:
+        parser.error("-s/--source is required unless --list is used")
+    source = Path(args.importSource).expanduser()
+    if not source.is_dir():
+        parser.error(f"source directory does not exist: {source}")
+    if args.card is not None and args.card < 1:
+        parser.error("--card must be a positive integer")
+
+
+def _cameraImportLegacyArguments(arguments: Sequence[str]) -> list[str]:
+    """Remove entry-point-only ``--card`` before delegating to the legacy parser."""
+
+    cleaned: list[str] = []
+    values = list(arguments)
+    index = 0
+    while index < len(values):
+        value = values[index]
+        if value == "--card":
+            index += 2
+            continue
+        if value.startswith("--card="):
+            index += 1
+            continue
+        cleaned.append(value)
+        index += 1
+    return cleaned
+
+
 def _byteDisplay(value: int) -> str:
     """Return a compact binary byte count for progress output."""
 
@@ -231,32 +268,67 @@ def _getSummaryReportPath(sourcePath: str, mode: str) -> Path:
     return _legacy._getSummaryReportPath(sourcePath, mode)
 
 
-def _cameraImportPlainSummaryRun(arguments: Sequence[str]) -> int:
+def _cameraImportRunPatch(
+    expectedCardId: Optional[int],
+    *,
+    progressCallback: Optional[Callable[[int, int, str], None]] = None,
+):
+    """Return a cameraImportRun wrapper carrying CLI identity/progress context."""
+
+    from . import cameraImport as cameraImportModule
+
+    originalRun = cameraImportModule.cameraImportRun
+
+    def _run(**kwargs):
+        if expectedCardId is not None:
+            source = Path(kwargs["source"])
+            actualCardId = cameraImportModule.cameraCardIdResolve(source)
+            if actualCardId is None:
+                raise RuntimeError(
+                    f"camera source has no numbered card label; register card {expectedCardId} first with: "
+                    f"organiseMyVideo camera inventory -s {source} --card {expectedCardId} --confirm"
+                )
+            kwargs["expectedCardId"] = expectedCardId
+        if progressCallback is not None:
+            kwargs["progressCallback"] = progressCallback
+        return originalRun(**kwargs)
+
+    return cameraImportModule, originalRun, _run
+
+
+def _cameraImportPlainSummaryRun(
+    arguments: Sequence[str],
+    *,
+    expectedCardId: Optional[int] = None,
+) -> int:
     """Delegate camera import while rendering its summary without an ASCII box."""
 
+    cameraImportModule, originalRun, patchedRun = _cameraImportRunPatch(expectedCardId)
     originalDrawBox = _legacy.drawBox
+    cameraImportModule.cameraImportRun = patchedRun
     _legacy.drawBox = lambda text: print(text, end="" if text.endswith("\n") else "\n")
     try:
         _legacyGlobalsSync()
         return _legacy.main(arguments)
     finally:
+        cameraImportModule.cameraImportRun = originalRun
         _legacy.drawBox = originalDrawBox
 
 
-def _cameraImportConfirmedRun(arguments: Sequence[str]) -> int:
+def _cameraImportConfirmedRun(
+    arguments: Sequence[str],
+    *,
+    expectedCardId: Optional[int] = None,
+) -> int:
     """Delegate confirmed camera import with progress and a plain final summary."""
 
-    from . import cameraImport as cameraImportModule
-
-    originalRun = cameraImportModule.cameraImportRun
-    originalDrawBox = _legacy.drawBox
     progressCallback = _cameraImportProgressRenderer()
-
-    def _runWithProgress(**kwargs):
-        kwargs["progressCallback"] = progressCallback
-        return originalRun(**kwargs)
-
-    cameraImportModule.cameraImportRun = _runWithProgress
+    cameraImportModule, originalRun, patchedRun = _cameraImportRunPatch(
+        expectedCardId,
+        progressCallback=progressCallback,
+    )
+    originalDrawBox = _legacy.drawBox
+    cameraImportModule.cameraImportRun = patchedRun
     _legacy.drawBox = lambda text: print(text, end="" if text.endswith("\n") else "\n")
     try:
         _legacyGlobalsSync()
@@ -278,13 +350,24 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if len(arguments) >= 2 and arguments[:2] == ["camera", "import"]:
         importArguments = arguments[2:]
+        parser = _cameraImportParserBuild()
         if "--help" in importArguments or "-h" in importArguments:
-            _cameraImportParserBuild().parse_args(importArguments)
+            parser.parse_args(importArguments)
         if "--list" in importArguments:
             return _cameraImportHistoryRun(importArguments)
-        if any(option in importArguments for option in ("-y", "--y", "--confirm")):
-            return _cameraImportConfirmedRun(arguments)
-        return _cameraImportPlainSummaryRun(arguments)
+
+        parsed = parser.parse_args(importArguments)
+        _cameraImportArgumentsValidate(parser, parsed)
+        legacyArguments = _cameraImportLegacyArguments(arguments)
+        if parsed.confirm:
+            return _cameraImportConfirmedRun(
+                legacyArguments,
+                expectedCardId=parsed.card,
+            )
+        return _cameraImportPlainSummaryRun(
+            legacyArguments,
+            expectedCardId=parsed.card,
+        )
 
     _legacyGlobalsSync()
     return _legacy.main(arguments)
