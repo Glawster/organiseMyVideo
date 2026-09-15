@@ -71,5 +71,7 @@ def testGenericDashcamTempDirectoryIsNotExcludedWithoutTranscendModelRoot(tmp_pa
 
     plan = _planner(tmp_path).importPlan(card)
 
-    assert [operation.asset.relativePath for operation in plan.operations] == [filename]
+    assert [operation.asset.relativePath for operation in plan.operations] == [
+        f"TEMP/{filename}"
+    ]
     assert plan.excludedPaths == ()
