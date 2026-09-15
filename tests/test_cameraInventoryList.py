@@ -39,12 +39,12 @@ def testListIncludesInventoriedAndLocationOnlyCards(tmp_path: Path):
     summary = cameraInventoryListSummary(entries)
     assert "Status" in summary
     assert "003" in summary
-    assert "inventoried" in summary
+    assert "available" in summary
     assert "007" in summary
     assert "missing" in summary
 
 
-def testRegisteredStatusForLocationOnlyKnownCard(tmp_path: Path):
+def testInUseStatusForKnownCardWithLocation(tmp_path: Path):
     databasePath = tmp_path / "state" / "mediaCatalogue.sqlite"
     cardLocationSet(8, "Desk drawer", databasePath=databasePath, dryRun=False)
 
@@ -53,8 +53,20 @@ def testRegisteredStatusForLocationOnlyKnownCard(tmp_path: Path):
     )
 
     assert "008" in summary
-    assert "registered" in summary
+    assert "in use" in summary
     assert "Desk drawer" in summary
+
+
+def testArchivedStatusUsesArchiveLocation(tmp_path: Path):
+    databasePath = tmp_path / "state" / "mediaCatalogue.sqlite"
+    cardLocationSet(10, "archived", databasePath=databasePath, dryRun=False)
+
+    summary = cameraInventoryListSummary(
+        cameraInventoryList(databasePath=databasePath)
+    )
+
+    assert "010" in summary
+    assert "archived" in summary
 
 
 def testFullListShowsLatestInventoryAndSnapshotCount(tmp_path: Path):
@@ -65,7 +77,7 @@ def testFullListShowsLatestInventoryAndSnapshotCount(tmp_path: Path):
     summary = cameraInventoryFullSummary(entry)
 
     assert "CAMERA CARD 004" in summary
-    assert "Status:           inventoried" in summary
+    assert "Status:           in use" in summary
     assert "Location:         Car JSZ5017" in summary
     assert "Snapshots:        1" in summary
     assert "Last inventoried:" in summary
