@@ -74,11 +74,15 @@ The compact register includes:
 
 - `Card` — durable numeric card ID.
 - `Status` — current derived lifecycle state.
+- `Archived` — whether the latest inventoried content has been successfully archived/imported.
 - `Type` — physical media type, for example `sd` or `usb`.
 - `Size` — marketed capacity where known.
 - `Camera` — latest known camera identity where it is meaningful to display it.
 - `Location` — current stored physical/use location.
 - `Last inventory` — most recent stored inventory snapshot time.
+
+A card can therefore show `Status` `available` and `Archived` `yes` at the same time:
+its content has been archived and the physical card is now free for reuse.
 
 For a card marked `missing`, the compact list does not present the previous camera
 association as though it were current. The full view still retains the historical
@@ -98,7 +102,8 @@ history.
 | `available` | No active location is set and the latest inventoried content has already been successfully archived/imported. The card is available for reuse. |
 
 `available` does not mean that the card has never contained files. It means its latest
-known content has already been dealt with and the medium may be reused.
+known content has already been dealt with and the medium may be reused. The separate
+`Archived` column makes that historical state visible in the compact list.
 
 ## 4. Set or inspect a card location
 
@@ -193,10 +198,17 @@ Use the full history view for one numbered card:
 organiseMyVideo camera import --list --card 4 --full
 ```
 
-The full view reads the recorded import manifests and shows each import followed by
-its per-file audit. For every asset it displays the archive destination, original
-source path, and result such as `copied`, `already present`, or `failed`. Failed
-records also display their recorded error.
+The full view reads the recorded import manifests and shows one logical line per
+asset in the form:
+
+```text
+copied          /source/file.MP4 -> /archive/file.MP4
+already present /source/file.MP4 -> /archive/file.MP4
+failed          /source/file.MP4 -> /archive/file.MP4 | error: ...
+```
+
+A very long path may still wrap visually in the terminal, but each asset is emitted
+as a single output line.
 
 `copied` and `already present` both count as successfully archived content:
 
