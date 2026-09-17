@@ -20,16 +20,25 @@ New scripts and documentation should use the object/action hierarchy:
 
 ```bash
 organiseMyVideo media organise [SOURCE]
+organiseMyVideo media organise [-s SOURCE]
 organiseMyVideo media organise --merge
 organiseMyVideo media clean [SOURCE]
+organiseMyVideo media clean [-s SOURCE]
 organiseMyVideo library rescan [SOURCE] [--target both|movies|tv]
+organiseMyVideo library rescan [-s SOURCE] [--target both|movies|tv]
 organiseMyVideo torrent maintain [SOURCE] [--clean-names]
+organiseMyVideo torrent maintain [-s SOURCE] [--clean-names]
 organiseMyVideo grok --import-firefox
 organiseMyVideo grok --reset
 organiseMyVideo grok --scan
-organiseMyVideo camera inventory SOURCE --card ID
+organiseMyVideo camera inventory [SOURCE] --card ID
+organiseMyVideo camera inventory [-s SOURCE] --card ID
 organiseMyVideo camera inventory --card ID
 ```
+
+Every canonical action that accepts one filesystem source accepts either the
+positional `SOURCE` form or `-s SOURCE` / `--source SOURCE`. The two forms are
+aliases for the same value. Existing positional commands remain valid.
 
 Every command level supports `--help`. A source supplied to a canonical command
 must exist and be a directory before domain services are constructed.
@@ -47,6 +56,11 @@ The executable supports:
 Shared behavioral options may be placed before the command hierarchy or after
 the final action. `--debug` enables the DEBUG logging level.
 
+The top-level `-s/--source` remains part of the legacy compatibility interface.
+Canonical commands own their own `-s/--source` alias so a command such as
+`organiseMyVideo camera inventory -s /media/card` is valid and does not depend
+on where the option appears relative to the command hierarchy.
+
 ## Grok actions
 
 The `grok` command requires exactly one mutually exclusive action:
@@ -61,18 +75,20 @@ behaviour where applicable.
 ## Camera inventory
 
 The `camera inventory` action catalogues a mounted SD card or copied card
-directory against an operator-assigned positive integer card ID. GoPro, DJI,
-and dash-cam layouts are recognised. Dry-run prints date range, sold card
-size (32, 64, 128, or 256 GB), free space, and file counts. `--confirm`
-writes a SQLite snapshot in the shared media catalogue, writes
-`organiseMyVideo.NNN` onto the card, and describes sampled `.THM` thumbnails
-(or JPEGs) through xAI. After that file exists, `--card` may be omitted. To
-change the ID, pass `--card NEW --reassign --confirm`. The UI should show card
-size and remaining space from `catalogueCardsList()` rather than USB-reader
-brand strings. USB thumb drives will use the same numbered list
+directory against an operator-assigned positive integer card ID. The source may
+be supplied positionally or with `-s/--source`. GoPro, DJI, and dash-cam layouts
+are recognised. Dry-run prints date range, sold card size (32, 64, 128, or 256
+GB), free space, and file counts. `--confirm` writes a SQLite snapshot in the
+shared media catalogue, writes `organiseMyVideo.NNN` onto the card, and
+describes sampled `.THM` thumbnails (or JPEGs) through xAI. After that file
+exists, `--card` may be omitted. To change the ID, pass
+`--card NEW --reassign --confirm`. The UI should show card size and remaining
+space from `catalogueCardsList()` rather than USB-reader brand strings. USB
+thumb drives will use the same numbered list
 ([REQ-015](../project/requirements/features/015-usbVolumeInventory.md)).
 `--brand` remains optional when the operator wants to store a make by hand.
-Omitting `SOURCE` shows the latest stored snapshot for that card ID. See [Camera card inventory](cameraInventory.md) and
+Omitting `SOURCE` shows the latest stored snapshot for that card ID. See
+[Camera card inventory](cameraInventory.md) and
 [Media catalogue](mediaCatalogue.md).
 
 `media organise --merge` consolidates duplicate TV and movie folders that

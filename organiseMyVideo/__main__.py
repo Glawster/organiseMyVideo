@@ -1,153 +1,81 @@
 #!/usr/bin/env python3
-"""Entry point: ``python -m organiseMyVideo``."""
+"""Entry point with camera-import history dispatch layered over the established CLI."""
+
+from __future__ import annotations
 
 import argparse
-import json
-import logging
-import os
-from datetime import datetime
-from importlib.metadata import PackageNotFoundError, version
+import shutil
+import sys
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Callable, Optional, Sequence
 
-from organiseMyProjects.logUtils import drawBox, getLogger, setApplication  # type: ignore
+from . import constants
+from . import mainLegacy as _legacy
+from .cameraImport import cameraImportHistory, cameraImportHistorySummary
+from .cameraInventoryList import cameraInventoryList, cameraInventoryListSummary
 
-from .constants import APP_CONFIG_FILE
-from .filesystemOperations import FilesystemOperations
-
-thisApplication = Path(__file__).parent.name
-setApplication(thisApplication)
-logger = getLogger(includeConsole=False)
-
-try:
-    APP_VERSION = version("organiseMyVideo")
-except PackageNotFoundError:
-    APP_VERSION = "0.5.0"
-
-
-def _getAppConfigPath() -> Path:
-    """Return the persistent application config file path."""
-    return APP_CONFIG_FILE
+# Keep the established CLI API visible to tests and callers while the camera
+# import history syntax is layered on top of it.
+APP_VERSION = _legacy.APP_VERSION
+APP_CONFIG_FILE = _legacy.APP_CONFIG_FILE
+buildParser = _legacy.buildParser
+getLogger = _legacy.getLogger
+logging = _legacy.logging
 
 
-def _loadAppConfig(configPath: Path) -> dict:
-    """Return config data from *configPath*, or an empty dict when unavailable."""
-    if not configPath.exists():
-        return {}
-    try:
-        loaded = json.loads(configPath.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:
-        logger.warning("could not read app config %s: %s", configPath, error)
-        return {}
-    return loaded if isinstance(loaded, dict) else {}
+def __getattr__(name: str):
+    """Delegate established CLI helpers to the preserved implementation."""
+
+    return getattr(_legacy, name)
 
 
-def _saveAppConfig(configPath: Path, config: dict) -> None:
-    """Write *config* JSON data to *configPath*."""
-    FilesystemOperations(dryRun=False).writeText(
-        configPath,
-        json.dumps(config, indent=2, sort_keys=True),
-        encoding="utf-8",
-        stateKind="application-state",
+def _cameraImportParserBuild() -> argparse.ArgumentParser:
+    """Return the camera-import parser including history options."""
+
+    parser = argparse.ArgumentParser(
+        prog="organiseMyVideo camera import",
+        description="plan, import, or list supported camera media imports",
     )
-
-
-def _persistTvdbApiKey(key: str, configPath: Path) -> Optional[str]:
-    """Persist a cleaned TVDB API key and return it, or ``None`` when blank."""
-    cleaned = key.strip()
-    if not cleaned:
-        return None
-    config = _loadAppConfig(configPath)
-    config["tvdb_api_key"] = cleaned
-    _saveAppConfig(configPath, config)
-    os.environ["ORGANISEMYVIDEO_TVDB_API_KEY"] = cleaned
-    logger.value("saved TVDB API key config", configPath)
-    return cleaned
-
-
-def _loadTvdbApiKeyFromConfig(configPath: Path) -> None:
-    """Load a saved TVDB API key into the environment when one is not set."""
-    if os.environ.get("ORGANISEMYVIDEO_TVDB_API_KEY"):
-        return
-    config = _loadAppConfig(configPath)
-    configured = config.get("tvdb_api_key")
-    if isinstance(configured, str) and configured.strip():
-        os.environ["ORGANISEMYVIDEO_TVDB_API_KEY"] = configured.strip()
-
-
-def _promptForTvdbApiKey(configPath: Path) -> Optional[str]:
-    """Prompt the user for a TVDB API key and persist it when provided."""
-    try:
-        entered = input(
-            "TVDB API key required for TVDB lookup. Enter key (blank to skip): "
-        )
-    except EOFError:
-        return None
-    return _persistTvdbApiKey(entered, configPath)
-
-
-def _runGrokGalleryCommand(args, gallery, sessionFile: Path) -> None:
-    """Run the selected Grok session or gallery operation."""
-    if args.reset_grok:
-        logger.doing("resetting grok session files")
-        resetStats = gallery.resetGrokConfig()
-        deletedList = (
-            "\n".join(f"  {path}" for path in resetStats["deleted"]) or "  (none)"
-        )
-        notFoundList = (
-            "\n".join(f"  {path}" for path in resetStats["notFound"]) or "  (none)"
-        )
-        summary = f"""RESET GROK SUMMARY
-Deleted:
-{deletedList}
-Not found:
-{notFoundList}
-"""
-        drawBox(summary)
-        return
-    if args.import_firefox_session:
-        logger.doing("importing grok firefox session")
-        ok = gallery.importFirefoxSession()
-        if ok:
-            summary = (
-                f"FIREFOX SESSION IMPORTED\n"
-                f"  Session file: {sessionFile}\n\n"
-                f"Run 'organiseMyVideo grok --scan --confirm' to download media."
-            )
-        else:
-            summary = (
-                "FIREFOX SESSION IMPORT FAILED\n\n"
-                "Make sure you are logged into grok.com in Firefox,\n"
-                "then run 'organiseMyVideo grok --import-firefox' again."
-            )
-        drawBox(summary)
-        return
-    logger.doing("downloading generated grok.com imagine media")
-    grokStats = gallery.downloadGeneratedMedia()
-    summary = f"""GROK SUMMARY
-Generated assets: {grokStats['assetsFound']}
-Files handled:    {grokStats['downloaded']}
-Already present:  {grokStats['skipped']}
-Errors:           {grokStats['errors']}
-Session file:     {sessionFile}
-  (use 'organiseMyVideo grok --reset --confirm' to force re-login)
-"""
-    drawBox(summary)
-
-
-def _getSummaryReportPath(sourcePath: str, mode: str) -> Path:
-    """Return the summary-report path for auto/rescan runs."""
-    del sourcePath, mode
-    return APP_CONFIG_FILE.parent / f"summary.{datetime.now().strftime('%Y%m%d')}.txt"
-
-
-def _buildSharedFlags(suppressDefaults: bool = False) -> argparse.ArgumentParser:
-    """Return flags shared by the organiser and grok subcommands."""
-    shared = argparse.ArgumentParser(
-        add_help=False,
-        argument_default=(argparse.SUPPRESS if suppressDefaults else None),
+    parser.add_argument(
+        "-s",
+        "--source",
+        dest="importSource",
+        metavar="SOURCE",
+        help="mounted card or copied card directory; required unless --list is used",
     )
-    shared.add_argument(
+    parser.add_argument(
+        "--list",
+        dest="listHistory",
+        action="store_true",
+        help="list previous confirmed camera imports",
+    )
+    parser.add_argument(
+        "--card",
+        type=int,
+        help="with --list, show imports for this numbered card only",
+    )
+    parser.add_argument(
+        "--gopro-destination",
+        help="override the configured GoPro archive destination",
+    )
+    parser.add_argument(
+        "--drone-destination",
+        help="override the configured Drone archive destination",
+    )
+    parser.add_argument(
+        "--dashcam-destination",
+        help="override the configured Dashcam archive destination",
+    )
+    parser.add_argument(
+        "--manifest-directory",
+        help="override the camera-import manifest directory",
+    )
+    parser.add_argument(
+        "--include-gopro-companions",
+        action="store_true",
+        help="retain GoPro LRV and THM helper files",
+    )
+    parser.add_argument(
         "-y",
         "--confirm",
         "--y",
@@ -155,571 +83,218 @@ def _buildSharedFlags(suppressDefaults: bool = False) -> argparse.ArgumentParser
         action="store_true",
         help="confirm execution — actually make changes (default is dry-run)",
     )
-    shared.add_argument(
-        "--debug",
-        action="store_true",
-        help="enable debug-level logging",
-    )
-    shared.add_argument("--quiet", action="store_true", help="show errors only")
-    return shared
+    parser.add_argument("--debug", action="store_true", help="enable debug-level logging")
+    parser.add_argument("--quiet", action="store_true", help="show errors only")
+    return parser
 
 
-def buildParser() -> argparse.ArgumentParser:
-    """Return the public CLI parser, including the grok subcommand."""
+def _cameraInventoryListParserBuild() -> argparse.ArgumentParser:
+    """Return camera-inventory help including the list option."""
+
     parser = argparse.ArgumentParser(
-        description="Organize video files into movies and TV show directories",
-        parents=[_buildSharedFlags()],
+        prog="organiseMyVideo camera inventory",
+        description="catalogue a numbered camera card or list inventoried cards",
     )
     parser.add_argument(
-        "--version", action="version", version=f"%(prog)s {APP_VERSION}"
+        "SOURCE",
+        nargs="?",
+        help="mounted card or copied card directory",
     )
     parser.add_argument(
         "-s",
         "--source",
-        default="/mnt/video2/toFile",
-        help="Source directory containing files to organize (default: /mnt/video2/toFile)",
-    )
-    parser.add_argument(
-        "--auto",
-        action="store_true",
-        help="run without prompts and append a dated text summary in the application directory",
-    )
-    parser.add_argument(
-        "--clean",
-        action="store_true",
-        help="remove empty sub-folders from source directory (folders with only sample content are treated as empty)",
-    )
-    parser.add_argument(
-        "--refresh",
-        dest="refresh_metadata_library",
-        action="store_true",
-        help="rebuild the saved metadata library from storage before processing",
-    )
-    parser.add_argument(
-        "--rescan",
-        action="store_true",
-        help="scan existing movie and TV libraries for metadata and naming fixes",
-    )
-    parser.add_argument(
-        "--movie",
-        action="store_true",
-        help="with --rescan, limit repairs to movies",
-    )
-    parser.add_argument(
-        "--video",
-        action="store_true",
-        help="with --rescan, limit repairs to TV/video episodes",
-    )
-    parser.add_argument(
-        "--torrent",
-        action="store_true",
-        help="scan the torrent download directory for .torrent files and delete those already in the library (dry-run by default; use --confirm to delete)",
-    )
-    parser.add_argument(
-        "--key",
-        help="TVDB API key to save to ~/.config/organiseMyVideo/config.json",
-    )
-    parser.set_defaults(
-        curses=True,
-        grok=False,
-        import_firefox_session=False,
-        reset_grok=False,
-    )
-    subparsers = parser.add_subparsers(dest="command")
-    mediaParser = subparsers.add_parser("media", help="organise or clean staged media")
-    mediaSub = mediaParser.add_subparsers(dest="mediaAction", required=True)
-    mediaOrganise = mediaSub.add_parser(
-        "organise", parents=[_buildSharedFlags(True)], help="organise staged media"
-    )
-    mediaOrganise.add_argument("source", nargs="?", default="/mnt/video2/toFile")
-    mediaOrganise.add_argument("--auto", action="store_true")
-    mediaOrganise.add_argument(
-        "--refresh", dest="refresh_metadata_library", action="store_true"
-    )
-    mediaOrganise.add_argument(
-        "--merge",
-        action="store_true",
-        help="merge provider-identified duplicate TV and movie folders into the most complete existing folder",
-    )
-    mediaClean = mediaSub.add_parser(
-        "clean",
-        parents=[_buildSharedFlags(True)],
-        help="clean staged media names and folders",
-    )
-    mediaClean.add_argument("source", nargs="?", default="/mnt/video2/toFile")
-
-    libraryParser = subparsers.add_parser("library", help="maintain media libraries")
-    librarySub = libraryParser.add_subparsers(dest="libraryAction", required=True)
-    libraryRescan = librarySub.add_parser(
-        "rescan", parents=[_buildSharedFlags(True)], help="rescan movie and TV metadata"
-    )
-    libraryRescan.add_argument("source", nargs="?", default="/mnt/video2/toFile")
-    libraryRescan.add_argument(
-        "--target", choices=("both", "movies", "tv"), default="both"
-    )
-
-    torrentParser = subparsers.add_parser("torrent", help="maintain torrent downloads")
-    torrentSub = torrentParser.add_subparsers(dest="torrentAction", required=True)
-    torrentMaintain = torrentSub.add_parser(
-        "maintain",
-        parents=[_buildSharedFlags(True)],
-        help="remove obsolete torrent files",
-    )
-    torrentMaintain.add_argument("source", nargs="?", default="/mnt/video2/toFile")
-    torrentMaintain.add_argument("--clean-names", action="store_true")
-
-    cameraParser = subparsers.add_parser(
-        "camera",
-        help="inventory camera SD cards or import camera media",
-    )
-    cameraSub = cameraParser.add_subparsers(dest="cameraAction", required=True)
-    cameraInventory = cameraSub.add_parser(
-        "inventory",
-        parents=[_buildSharedFlags(True)],
-        help="catalogue a numbered camera SD card",
-    )
-    cameraInventory.add_argument(
-        "inventorySource",
-        nargs="?",
+        dest="inventorySourceOption",
         metavar="SOURCE",
-        help="mounted card or copied card directory",
+        help="mounted card or copied card directory; alternative to positional SOURCE",
     )
-    cameraInventory.add_argument(
+    parser.add_argument(
         "--card",
         type=int,
-        help="numeric ID assigned to this SD card (required on first scan)",
+        help="numeric ID assigned to this card (required on first scan)",
     )
-    cameraInventory.add_argument(
+    parser.add_argument(
         "--reassign",
         action="store_true",
         help="allow --card to replace an existing on-card ID (requires --confirm)",
     )
-    cameraInventory.add_argument(
+    parser.add_argument(
         "--brand",
-        help="SD card brand to store on the card, for example SanDisk",
+        help="card brand to store on the card, for example SanDisk or Transcend",
     )
-    grokParser = subparsers.add_parser(
-        "grok",
-        parents=[_buildSharedFlags(True)],
-        help="import a Firefox session, reset it, or scan Grok Imagine media",
-    )
-    grokActions = grokParser.add_mutually_exclusive_group(required=True)
-    grokActions.add_argument(
-        "--import-firefox",
-        dest="import_firefox_session",
+    parser.add_argument(
+        "--list",
+        dest="listInventory",
         action="store_true",
-        help="import the grok.com session from Firefox",
+        help="list the latest snapshot for every numbered card",
     )
-    grokActions.add_argument(
-        "--reset",
-        dest="reset_grok",
+    parser.add_argument(
+        "-y",
+        "--confirm",
+        "--y",
+        dest="confirm",
         action="store_true",
-        help="quarantine the saved grok.com session files",
+        help="confirm execution — actually make changes (default is dry-run)",
     )
-    grokActions.add_argument(
-        "--scan",
-        dest="grok",
-        action="store_true",
-        help="scan and download this account's generated Imagine media",
-    )
+    parser.add_argument("--debug", action="store_true", help="enable debug-level logging")
+    parser.add_argument("--quiet", action="store_true", help="show errors only")
     return parser
 
 
-def _normalizeArguments(args: argparse.Namespace) -> argparse.Namespace:
-    """Map canonical commands onto the established workflow argument shape."""
-    command = getattr(args, "command", None)
-    if command == "media":
-        args.clean = args.mediaAction == "clean"
-    elif command == "library":
-        args.rescan = True
-        args.movie = args.target == "movies"
-        args.video = args.target == "tv"
-    elif command == "torrent":
-        args.torrent = True
-        args.clean = bool(args.clean_names)
-    return args
+def _cameraInventoryListRun(arguments: Sequence[str]) -> int:
+    """List the latest camera-card inventory state."""
+
+    parser = _cameraInventoryListParserBuild()
+    args = parser.parse_args(list(arguments))
+    if not args.listInventory:
+        parser.error("--list is required for camera inventory listing")
+    if args.SOURCE is not None or args.inventorySourceOption is not None:
+        parser.error("--list does not use a source path")
+    if args.card is not None:
+        parser.error("--card is not valid with camera inventory --list")
+    if args.reassign or args.brand or args.confirm:
+        parser.error("--reassign, --brand, and --confirm are not valid with --list")
+    manifestDirectory = constants.applicationStateDirectory() / "cameraImports"
+    records = cameraInventoryList(
+        constants.CAMERA_INVENTORY_DATABASE,
+        manifestDirectory=manifestDirectory,
+    )
+    isTty = getattr(sys.stdout, "isatty", None)
+    useColour = bool(callable(isTty) and isTty())
+    print(cameraInventoryListSummary(records, useColour=useColour), end="")
+    return 0
 
 
-def _validateArguments(
-    parser: argparse.ArgumentParser, args: argparse.Namespace
-) -> None:
-    """Reject conflicting modes and invalid canonical source paths."""
-    legacyModes = sum(
-        bool(value)
-        for value in (
-            args.rescan,
-            args.torrent,
-            args.grok,
-            args.import_firefox_session,
-            args.reset_grok,
+def _cameraImportHistoryRun(arguments: Sequence[str]) -> int:
+    """List recorded camera-import manifests, optionally for one card."""
+
+    parser = _cameraImportParserBuild()
+    args = parser.parse_args(list(arguments))
+    if not args.listHistory:
+        parser.error("--list is required for camera import history")
+    if args.card is not None and args.card < 1:
+        parser.error("--card must be a positive integer")
+    if args.importSource is not None:
+        parser.error("--list identifies a card with --card, not -s/--source")
+    if args.confirm:
+        parser.error("--confirm is not valid with --list")
+    if args.include_gopro_companions:
+        parser.error("--include-gopro-companions is not valid with --list")
+    if args.gopro_destination or args.drone_destination or args.dashcam_destination:
+        parser.error("archive destination overrides are not valid with --list")
+
+    manifestDirectory = Path(
+        args.manifest_directory
+        or constants.applicationStateDirectory() / "cameraImports"
+    )
+    records = cameraImportHistory(manifestDirectory, cardId=args.card)
+    print(cameraImportHistorySummary(records, cardId=args.card), end="")
+    return 0
+
+
+def _byteDisplay(value: int) -> str:
+    """Return a compact binary byte count for progress output."""
+
+    amount = float(max(value, 0))
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if amount < 1024.0 or unit == "TiB":
+            if unit == "B":
+                return f"{int(amount)} {unit}"
+            return f"{amount:.1f} {unit}"
+        amount /= 1024.0
+    return f"{amount:.1f} TiB"
+
+
+def _cameraImportProgressRenderer() -> Callable[[int, int, str], None]:
+    """Return a TTY renderer for aggregate camera-import byte progress."""
+
+    finished = False
+
+    def _render(copiedBytes: int, totalBytes: int, filename: str) -> None:
+        nonlocal finished
+        if finished or totalBytes <= 0:
+            return
+        isTty = getattr(sys.stderr, "isatty", None)
+        if not callable(isTty) or not isTty():
+            return
+
+        copiedBytes = max(0, min(copiedBytes, totalBytes))
+        percent = int((copiedBytes * 100) / totalBytes)
+        progressText = (
+            f" {percent:3d}%  {_byteDisplay(copiedBytes)} / {_byteDisplay(totalBytes)}"
         )
-    )
-    if legacyModes > 1:
-        parser.error("select only one workflow mode")
-    if (
-        args.command
-        and legacyModes
-        and args.command
-        not in {
-            "library",
-            "torrent",
-            "grok",
-        }
-    ):
-        parser.error("do not combine a canonical command with a legacy mode flag")
-    if args.command == "camera":
-        if getattr(args, "cameraAction", None) == "inventory":
-            cardId = getattr(args, "card", None)
-            inventorySource = getattr(args, "inventorySource", None)
-            if cardId is not None and cardId < 1:
-                parser.error("--card must be a positive integer")
-            if getattr(args, "reassign", False):
-                if not inventorySource:
-                    parser.error("--reassign requires SOURCE")
-                if cardId is None or cardId < 1:
-                    parser.error("--reassign requires --card with the new ID")
-            if not inventorySource and (cardId is None or cardId < 1):
-                parser.error("--card is required when SOURCE is omitted")
-            if inventorySource:
-                sourcePath = Path(inventorySource).expanduser()
-                if not sourcePath.is_dir():
-                    parser.error(f"source directory does not exist: {sourcePath}")
-                args.inventorySource = str(sourcePath)
-        return
-    if args.command in {"media", "library", "torrent"}:
-        sourcePath = Path(args.source).expanduser()
-        if not sourcePath.is_dir():
-            parser.error(f"source directory does not exist: {sourcePath}")
-        args.source = str(sourcePath)
+        suffix = f"  {filename}" if filename else ""
+        columns = shutil.get_terminal_size(fallback=(100, 24)).columns
+        barWidth = max(10, min(40, columns - len(progressText) - len(suffix) - 14))
+        filled = int((copiedBytes * barWidth) / totalBytes)
+        bar = "#" * filled + "-" * (barWidth - filled)
+        line = f"Importing [{bar}]{progressText}{suffix}"
+        if len(line) >= columns:
+            line = line[: max(1, columns - 1)]
+        sys.stderr.write("\r" + line)
+        sys.stderr.flush()
+        if copiedBytes >= totalBytes:
+            sys.stderr.write("\n")
+            sys.stderr.flush()
+            finished = True
+
+    return _render
 
 
-def _loggingLevel(args: argparse.Namespace) -> int:
-    """Return the requested process logging level."""
-    if args.quiet:
-        return logging.ERROR
-    if args.debug:
-        return logging.DEBUG
-    return logging.INFO
+def _legacyGlobalsSync() -> None:
+    """Propagate patchable compatibility globals into the preserved CLI module."""
+
+    _legacy.getLogger = getLogger
+    _legacy.APP_CONFIG_FILE = APP_CONFIG_FILE
 
 
-def _configureLogging(args: argparse.Namespace, dryRun: bool) -> None:
-    """Configure the established application logger for CLI execution."""
-    global logger
-    logger = getLogger(
-        includeConsole=True,
-        dryRun=dryRun,
-        level=_loggingLevel(args),
-    )
+def _getSummaryReportPath(sourcePath: str, mode: str) -> Path:
+    """Return the summary path using this module's patchable application state."""
+
+    _legacyGlobalsSync()
+    return _legacy._getSummaryReportPath(sourcePath, mode)
 
 
-def _selectedMode(args: argparse.Namespace) -> str:
-    """Return the normalized organiser workflow mode."""
-    if args.torrent:
-        return "torrent"
-    if args.rescan:
-        return "rescan"
-    if args.clean:
-        return "clean"
-    if getattr(args, "merge", False):
-        return "merge"
-    return "process"
+def _cameraImportConfirmedRun(arguments: Sequence[str]) -> int:
+    """Delegate confirmed camera import while injecting terminal progress."""
 
+    from . import cameraImport as cameraImportModule
 
-def _runCameraWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
-    """Run camera-card inventory through the Python application service."""
+    originalRun = cameraImportModule.cameraImportRun
+    progressCallback = _cameraImportProgressRenderer()
 
-    from . import constants
-    from .cameraInventory import cameraInventoryRun, cameraInventorySummary
+    def _runWithProgress(**kwargs):
+        kwargs["progressCallback"] = progressCallback
+        return originalRun(**kwargs)
 
-    logger.value("mode", "camera-inventory")
-    source = getattr(args, "inventorySource", None)
-    sourcePath = Path(source) if source else None
+    cameraImportModule.cameraImportRun = _runWithProgress
     try:
-        record = cameraInventoryRun(
-            cardId=args.card,
-            source=sourcePath,
-            dryRun=dryRun,
-            databasePath=constants.CAMERA_INVENTORY_DATABASE,
-            reassign=bool(getattr(args, "reassign", False)),
-            brand=getattr(args, "brand", None),
-        )
-    except PermissionError as error:
-        logger.error(
-            f"camera inventory permission denied: {error.filename or sourcePath}; "
-            "select the card mount itself and check its write permissions"
-        )
-        return 1
-    except (OSError, RuntimeError, ValueError) as error:
-        logger.error("%s", error)
-        return 1
-    persisted = True if sourcePath is None else not dryRun
-    drawBox(
-        cameraInventorySummary(
-            record,
-            persisted=persisted,
-            databasePath=constants.CAMERA_INVENTORY_DATABASE,
-        )
-    )
-    return 0
-
-
-def _runGalleryWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
-    """Run a normalized legacy-gallery action."""
-    from .grokGallery import GROK_SESSION_FILE, GrokGallery
-
-    gallery = GrokGallery(dryRun=dryRun)
-    logger.value("mode", "grok-gallery")
-    try:
-        _runGrokGalleryCommand(args, gallery, GROK_SESSION_FILE)
-    except RuntimeError as error:
-        logger.error("%s", error)
-        return 1
-    return 0
-
-
-def _mergeSummary(stats, *, label: str) -> str:
-    """Return the terminal summary for one library merge run."""
-
-    return f"""{label} MERGE SUMMARY
-Groups found:        {stats.groupsFound}
-Groups merged:       {stats.groupsMerged}
-Identity conflicts:  {stats.identityConflicts}
-Files moved:         {stats.filesMoved}
-Directories moved:   {stats.directoriesMoved}
-Directories removed: {stats.directoriesRemoved}
-Duplicates kept:     {stats.duplicates}
-Conflicts kept:      {stats.conflicts}
-Errors:              {stats.errors}
-"""
-
-
-def _seasonSummary(stats, *, label: str) -> str:
-    """Return the terminal summary for TV library-folder normalisation."""
-
-    return f"""{label} SUMMARY
-Folders renamed:     {stats.renamed}
-Files moved:         {stats.filesMoved}
-Directories removed: {stats.directoriesRemoved}
-Duplicates kept:     {stats.duplicates}
-Conflicts kept:      {stats.conflicts}
-Errors:              {stats.errors}
-"""
-
-
-def _normaliseSeasonFolders(organizer, dryRun: bool, *, refreshCatalogue: bool):
-    """Canonicalise TV show and season folder names and optionally refresh TV paths."""
-
-    from .mediaCatalogue import MediaCatalogue
-    from .seasonFolders import SeasonFolderStats, normaliseTvSeasonFolders
-    from .showFolders import normaliseMovieFolderNames, normaliseTvShowFolderNames
-
-    storageLocations = organizer.scanStorageLocations()
-    if not isinstance(storageLocations, (tuple, list)) or len(storageLocations) != 2:
-        # A malformed discovery result cannot be used safely. This is principally
-        # useful for lightweight mocked organizers, while keeping production
-        # behaviour explicit rather than attempting to infer locations.
-        logger.debug("skipping TV folder normalisation: storage locations unavailable")
-        return SeasonFolderStats()
-
-    movieDirs, videoDirs = storageLocations
-    filesystem = FilesystemOperations(dryRun=dryRun)
-    showStats = normaliseTvShowFolderNames(
-        videoDirs,
-        filesystem=filesystem,
-        dryRun=dryRun,
-    )
-    drawBox(_seasonSummary(showStats, label="TV SHOW FOLDER"))
-    movieFolderStats = normaliseMovieFolderNames(
-        movieDirs,
-        filesystem=filesystem,
-        dryRun=dryRun,
-    )
-    drawBox(_seasonSummary(movieFolderStats, label="MOVIE FOLDER"))
-    seasonStats = normaliseTvSeasonFolders(
-        videoDirs,
-        filesystem=filesystem,
-        dryRun=dryRun,
-    )
-    drawBox(_seasonSummary(seasonStats, label="SEASON FOLDER"))
-    changed = showStats.changed or movieFolderStats.changed or seasonStats.changed
-    if not dryRun and refreshCatalogue and changed:
-        logger.doing("refreshing media catalogue after folder normalisation")
-        MediaCatalogue().catalogueReplaceFromStorage(
-            movieDirs,
-            videoDirs,
-            replaceMovies=True,
-            replaceTv=True,
-        )
-    combined = SeasonFolderStats(
-        renamed=showStats.renamed + movieFolderStats.renamed + seasonStats.renamed,
-        filesMoved=showStats.filesMoved
-        + movieFolderStats.filesMoved
-        + seasonStats.filesMoved,
-        directoriesRemoved=showStats.directoriesRemoved
-        + movieFolderStats.directoriesRemoved
-        + seasonStats.directoriesRemoved,
-        duplicates=showStats.duplicates
-        + movieFolderStats.duplicates
-        + seasonStats.duplicates,
-        conflicts=showStats.conflicts
-        + movieFolderStats.conflicts
-        + seasonStats.conflicts,
-        errors=showStats.errors + movieFolderStats.errors + seasonStats.errors,
-    )
-    return combined
-
-
-def _runOrganizerWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
-    """Construct the domain organizer and dispatch one normalized workflow."""
-    configPath = _getAppConfigPath()
-    if args.key is not None:
-        if not _persistTvdbApiKey(args.key, configPath):
-            logger.warning("blank TVDB API key provided; not saving")
-    else:
-        _loadTvdbApiKeyFromConfig(configPath)
-
-    selectedMode = _selectedMode(args)
-    logger.value("source directory", args.source)
-    logger.value("mode", selectedMode)
-    logger.doing("initializing video organizer")
-    from . import VideoOrganizer
-
-    organizer = VideoOrganizer(
-        sourceDir=args.source,
-        dryRun=dryRun,
-        refreshMetadataLibrary=args.refresh_metadata_library,
-        useCurses=True,
-    )
-    organizer.tvdbApiKeyPrompt = (
-        (lambda: _promptForTvdbApiKey(configPath))
-        if selectedMode == "process" and not args.auto
-        else None
-    )
-    if args.auto or selectedMode == "rescan":
-        organizer.summaryReportPath = _getSummaryReportPath(args.source, selectedMode)
-        organizer.summaryReportMode = selectedMode
-    logger.done("video organizer initialized")
-
-    if args.torrent:
-        logger.doing("running torrent maintenance")
-        torrentDir = organizer.sourceDir.parent / "Downloads"
-        nameStats = {"renamed": 0, "skipped": 0, "errors": 0}
-        if args.clean:
-            nameStats = organizer.cleanTorrentNames(torrentDir=torrentDir)
-        removeStats = organizer.removeTorrentsInLibrary(torrentDir=torrentDir)
-        drawBox(
-            f"""TORRENT SUMMARY
-Torrents deleted: {removeStats['deleted']}
-Torrents kept:    {removeStats['skipped']}
-Delete errors:    {removeStats['errors']}
-Names renamed:    {nameStats['renamed']}
-Names skipped:    {nameStats['skipped']}
-Rename errors:    {nameStats['errors']}
-"""
-        )
-    elif args.clean:
-        logger.doing("running clean mode")
-        nameStats = organizer.cleanNames()
-        cleanStats = organizer.cleanEmptyFolders()
-        drawBox(
-            f"""CLEAN SUMMARY
-Names renamed:   {nameStats['renamed']}
-Name errors:     {nameStats['errors']}
-Folders removed: {cleanStats['removed']}
-Folders kept:    {cleanStats['skipped']}
-Folder errors:   {cleanStats['errors']}
-"""
-        )
-        logger.doing("normalising TV show and season folders")
-        folderStats = _normaliseSeasonFolders(
-            organizer,
-            dryRun,
-            refreshCatalogue=True,
-        )
-        if folderStats.errors:
-            return 1
-    elif args.rescan:
-        target = (
-            "movies"
-            if args.movie and not args.video
-            else "tv" if args.video and not args.movie else "both"
-        )
-        logger.doing(f"running rescan mode ({target})")
-        organizer.resetLibraryMetadata(target=target)
-    elif getattr(args, "merge", False):
-        from .mediaCatalogue import MediaCatalogue
-        from .mediaMerge import mergeDuplicateMovies, mergeDuplicateTvShows
-
-        logger.doing("normalising TV show and season folders before merge")
-        seasonStats = _normaliseSeasonFolders(
-            organizer,
-            dryRun,
-            refreshCatalogue=True,
-        )
-        logger.doing("running TV library merge mode")
-        catalogue = MediaCatalogue()
-        filesystem = FilesystemOperations(dryRun=dryRun)
-        tvStats = mergeDuplicateTvShows(
-            catalogue=catalogue,
-            filesystem=filesystem,
-            dryRun=dryRun,
-        )
-        drawBox(_mergeSummary(tvStats, label="TV"))
-        logger.doing("running movie library merge mode")
-        movieStats = mergeDuplicateMovies(
-            catalogue=catalogue,
-            filesystem=filesystem,
-            dryRun=dryRun,
-        )
-        drawBox(_mergeSummary(movieStats, label="MOVIE"))
-        if not dryRun and (tvStats.groupsMerged or movieStats.groupsMerged):
-            logger.doing("refreshing media catalogue after merge")
-            movieDirs, videoDirs = organizer.scanStorageLocations()
-            catalogue.catalogueReplaceFromStorage(
-                movieDirs,
-                videoDirs,
-                replaceMovies=True,
-                replaceTv=True,
-            )
-        return 1 if tvStats.errors or movieStats.errors or seasonStats.errors else 0
-    else:
-        logger.doing("running file organisation mode")
-        organizer.processFiles(interactive=not args.auto)
-        logger.doing("normalising TV show and season folders")
-        seasonStats = _normaliseSeasonFolders(
-            organizer,
-            dryRun,
-            refreshCatalogue=True,
-        )
-        if seasonStats.errors:
-            return 1
-    return 0
+        _legacyGlobalsSync()
+        return _legacy.main(arguments)
+    finally:
+        cameraImportModule.cameraImportRun = originalRun
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     """Run the command-line application and return a process status."""
-    parser = buildParser()
-    args = _normalizeArguments(parser.parse_args(argv))
-    _validateArguments(parser, args)
 
-    dryRun = not args.confirm
-    _configureLogging(args, dryRun)
-    logger.doing("organiseMyVideo starting")
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if len(arguments) >= 2 and arguments[:2] == ["camera", "inventory"]:
+        inventoryArguments = arguments[2:]
+        if "--help" in inventoryArguments or "-h" in inventoryArguments:
+            _cameraInventoryListParserBuild().parse_args(inventoryArguments)
+        if "--list" in inventoryArguments:
+            return _cameraInventoryListRun(inventoryArguments)
+    if len(arguments) >= 2 and arguments[:2] == ["camera", "import"]:
+        importArguments = arguments[2:]
+        if "--help" in importArguments or "-h" in importArguments:
+            _cameraImportParserBuild().parse_args(importArguments)
+        if "--list" in importArguments:
+            return _cameraImportHistoryRun(importArguments)
+        if any(option in importArguments for option in ("-y", "--y", "--confirm")):
+            return _cameraImportConfirmedRun(arguments)
 
-    if dryRun:
-        logger.info("entering dry-run mode, use --confirm to execute")
-    else:
-        logger.info("confirm mode, changes will be made")
-
-    command = getattr(args, "command", None)
-    if command == "grok":
-        status = _runGalleryWorkflow(args, dryRun)
-    elif command == "camera":
-        status = _runCameraWorkflow(args, dryRun)
-    else:
-        status = _runOrganizerWorkflow(args, dryRun)
-    logger.done("organiseMyVideo complete")
-    return status
+    _legacyGlobalsSync()
+    return _legacy.main(arguments)
 
 
 if __name__ == "__main__":

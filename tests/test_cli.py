@@ -145,12 +145,90 @@ def testGrokResetDispatchesToGalleryService():
     gallery.resetGrokConfig.assert_called_once_with()
 
 
-def testCameraHelpListsInventoryAction(capsys):
+def testCameraHelpListsInventoryAndImportActions(capsys):
     with pytest.raises(SystemExit) as helpExit:
         applicationMain.main(["camera", "--help"])
 
     assert helpExit.value.code == 0
-    assert "inventory" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "inventory" in output
+    assert "import" in output
+
+
+def testCameraImportRequiresSourceOption():
+    parser = applicationMain.buildParser()
+
+    with pytest.raises(SystemExit) as error:
+        parser.parse_args(["camera", "import"])
+
+    assert error.value.code == 2
+
+
+def testCameraImportRejectsPositionalSource(tmp_path: Path):
+    parser = applicationMain.buildParser()
+
+    with pytest.raises(SystemExit) as error:
+        parser.parse_args(["camera", "import", str(tmp_path)])
+
+    assert error.value.code == 2
+
+
+def testCameraImportMissingSourceFailsBeforeService(tmp_path: Path):
+    missing = tmp_path / "missing"
+
+    with patch("organiseMyVideo.cameraImport.cameraImportRun") as importRun:
+        with pytest.raises(SystemExit) as error:
+            applicationMain.main(["camera", "import", "-s", str(missing)])
+
+    assert error.value.code == 2
+    importRun.assert_not_called()
+
+
+def testCameraImportDispatchesThroughApplicationService(tmp_path: Path):
+    source = tmp_path / "card"
+    source.mkdir()
+    gopro = tmp_path / "GoPro"
+    drone = tmp_path / "Drone"
+    dashcam = tmp_path / "Dashcam"
+    manifests = tmp_path / "manifests"
+    result = MagicMock()
+    result.failed = 0
+
+    with patch(
+        "organiseMyVideo.cameraImport.cameraImportRun", return_value=result
+    ) as importRun:
+        with patch(
+            "organiseMyVideo.cameraImport.cameraImportSummary",
+            return_value="CAMERA IMPORT SUMMARY",
+        ):
+            status = applicationMain.main(
+                [
+                    "camera",
+                    "import",
+                    "-s",
+                    str(source),
+                    "--gopro-destination",
+                    str(gopro),
+                    "--drone-destination",
+                    str(drone),
+                    "--dashcam-destination",
+                    str(dashcam),
+                    "--manifest-directory",
+                    str(manifests),
+                    "--include-gopro-companions",
+                ]
+            )
+
+    assert status == 0
+    importRun.assert_called_once_with(
+        source=source,
+        goproDestination=gopro,
+        droneDestination=drone,
+        dashcamDestination=dashcam,
+        manifestDirectory=manifests,
+        dryRun=True,
+        includeGoproCompanions=True,
+    )
 
 
 def testCameraInventoryReassignRequiresCardAndSource(tmp_path: Path):
