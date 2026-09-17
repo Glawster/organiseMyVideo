@@ -1,6 +1,6 @@
 # Requirements
 
-Next available number: 023
+Next available number: 027
 
 Requirements created after adoption of the managed process are recorded here.
 Historical behaviour is not assigned invented retrospective requirements.
@@ -27,8 +27,12 @@ Historical behaviour is not assigned invented retrospective requirements.
 | 018 | [TV show folder leading articles](features/018-tvShowFolderArticles.md) | Store ``The Show`` folders as ``Show, The`` and repair existing library folders. | Completed | [Prompt](prompt/018-tvShowFolderArticles.md) | Not required |
 | 019 | [Catalogue metadata resolution](features/019-catalogueMetadataResolution.md) | Resolve the best already-known movie, series and episode metadata offline while preserving durable provider IDs. | In progress | [Prompt](prompt/019-catalogueMetadataResolution.md) | [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
 | 020 | [Removable media discovery and lifecycle](features/020-removableMediaDiscovery.md) | Search numbered SD/USB volumes, recommend suitable cards, and derive safe-to-recycle status from inventory and verified import evidence. | ToDo | [Prompt](prompt/020-removableMediaDiscovery.md) | [ADR-008](../adr/008-sqliteMediaCatalogue.md), [ADR-009](../adr/009-numberedRemovableVolumes.md) |
-| 021 | [Shared media processing platform](features/021-sharedMediaProcessing.md) | Use `organiseMediaStudio` as the shared headless image/video processing platform for `organiseMyVideo` and `organiseMyPhotos`. | ToDo | [Prompt](prompt/021-sharedMediaProcessing.md) | [ADR-010](../adr/010-sharedMediaProcessingBoundary.md) |
-| 022 | [SLR card import](features/022-slrCardImport.md) | Import mixed SLR cards by routing CR3/JPEG photos to the photo `By Date` archive and MP4 clips to the video `By Date` archive. | ToDo | [Prompt](prompt/022-slrCardImport.md) | [ADR-003](../adr/003-filesystemSafetyBoundary.md), [ADR-006](../adr/006-cameraImportArchitecture.md), [ADR-007](../adr/007-cameraInventoryPersistence.md) |
+| 021 | [Shared media processing platform](features/021-sharedMediaProcessing.md) | Use `organiseMediaStudio` as the shared headless image/video processing platform for `organiseMyVideo` and `organiseMyPhotos`. | In progress | [Prompt](prompt/021-sharedMediaProcessing.md) | [ADR-010](../adr/010-sharedMediaProcessingBoundary.md) |
+| 022 | [Removable media format and recycle](features/022-removableMediaFormat.md) | Safely format only archived numbered media, recreate its identity, and persist a fresh empty snapshot. | In progress | Not required | [ADR-003](../adr/003-filesystemSafetyBoundary.md), [ADR-009](../adr/009-numberedRemovableVolumes.md) |
+| 023 | [Camera capture-time correction](features/023-cameraCaptureTimeCorrection.md) | Correct known camera-clock errors while preserving original timestamp evidence and elapsed-time relationships. | Planned | Not required | [ADR-006](../adr/006-cameraImportArchitecture.md) |
+| 024 | [Media keywords and tagging](features/024-mediaKeywords.md) | Add descriptive keywords to media without changing date-based filesystem organisation. | Planned | Not required | [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
+| 025 | [Camera archive normalisation](features/025-cameraArchiveNormalisation.md) | Normalise legacy GoPro, Drone, and Dashcam archive layouts into the canonical numeric date hierarchy. | Planned | Not required | [ADR-003](../adr/003-filesystemSafetyBoundary.md), [ADR-006](../adr/006-cameraImportArchitecture.md) |
+| 026 | [SLR card import](features/026-slrCardImport.md) | Import mixed SLR photo/video cards by media type beneath `By Date/YYYY/MM/DD`. | ToDo | [Prompt](prompt/026-slrCardImport.md) | [ADR-003](../adr/003-filesystemSafetyBoundary.md), [ADR-006](../adr/006-cameraImportArchitecture.md), [ADR-007](../adr/007-cameraInventoryPersistence.md) |
 
 ## Prompt index
 
@@ -54,5 +58,5 @@ Historical behaviour is not assigned invented retrospective requirements.
 - [019-catalogueMetadataResolution](prompt/019-catalogueMetadataResolution.md)
 - [020-removableMediaDiscovery](prompt/020-removableMediaDiscovery.md)
 - [021-sharedMediaProcessing](prompt/021-sharedMediaProcessing.md)
-- [022-slrCardImport](prompt/022-slrCardImport.md)
+- [026-slrCardImport](prompt/026-slrCardImport.md)
 <!-- OMP-PROMPT-INDEX-END -->

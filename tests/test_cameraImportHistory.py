@@ -1,4 +1,4 @@
-"""Card identity and manifest-history coverage for camera import."""
+"""Card identity and manifest-history coverage for camera archive/import services."""
 
 import json
 import os
@@ -36,7 +36,7 @@ def cameraTreeBuild(tmp_path: Path, cardId: int = 1) -> tuple[Path, Path]:
 
 
 def importRun(tmp_path: Path, source: Path, *, dryRun: bool):
-    """Run the camera import service against temporary archive roots."""
+    """Run the internal camera-import service against temporary archive roots."""
 
     return cameraImportRun(
         source=source,
@@ -83,7 +83,7 @@ def testCameraImportDryRunResolvesCardIdentity(tmp_path: Path):
 
     assert cameraCardIdResolve(source) == 1
     assert result.cardId == 1
-    assert "Card:              001" in cameraImportSummary(result)
+    assert "Card 001" in cameraImportSummary(result)
     assert result.manifestPath is None
 
 
@@ -148,7 +148,7 @@ def testCameraImportHistoryListsAndFiltersByCard(tmp_path: Path):
     assert "/media/card-two" not in summary
 
 
-def testCameraImportHistoryCliSupportsAllAndCardFilter(
+def testCameraHistoryCliShowsOnlyRequestedCard(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys,
@@ -173,25 +173,18 @@ def testCameraImportHistoryCliSupportsAllAndCardFilter(
     )
     monkeypatch.setattr(constants, "applicationStateDirectory", lambda: state)
 
-    assert applicationMain.main(["camera", "import", "--list"]) == 0
-    allOutput = capsys.readouterr().out
-    assert "card-one" in allOutput
-    assert "card-two" in allOutput
-
-    assert applicationMain.main(
-        ["camera", "import", "--card", "1", "--list"]
-    ) == 0
-    cardOutput = capsys.readouterr().out
-    assert "CARD 001" in cardOutput
-    assert "card-one" in cardOutput
-    assert "card-two" not in cardOutput
+    assert applicationMain.main(["camera", "history", "--card", "1"]) == 0
+    output = capsys.readouterr().out
+    assert "CARD 001" in output
+    assert "card-one" in output
+    assert "card-two" not in output
 
 
-def testCameraImportHistoryHelpShowsListAndCard(capsys):
+def testCameraHistoryHelpShowsCard(capsys):
     with pytest.raises(SystemExit) as helpExit:
-        applicationMain.main(["camera", "import", "--help"])
+        applicationMain.main(["camera", "history", "--help"])
 
     assert helpExit.value.code == 0
     output = capsys.readouterr().out
-    assert "--list" in output
     assert "--card" in output
+    assert "--list" not in output

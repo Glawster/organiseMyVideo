@@ -14,7 +14,6 @@ import organiseMyVideo.__main__ as applicationMain
         (["media", "clean"], "source"),
         (["library", "rescan"], "source"),
         (["torrent", "maintain"], "source"),
-        (["camera", "inventory", "--card", "12"], "inventorySource"),
     ],
 )
 @pytest.mark.parametrize("option", ["-s", "--source"])
@@ -31,13 +30,14 @@ def testCanonicalSourceAliasesMatchPositional(prefix, dest, option, tmp_path: Pa
     assert getattr(optional, dest) == getattr(positional, dest)
 
 
-def testCameraInventorySourceAliasRunsThroughValidation(tmp_path: Path):
+@pytest.mark.parametrize("option", ["-s", "--source"])
+def testCameraScanSourceOptionRunsThroughValidation(tmp_path: Path, option: str):
     from cameraFixtures import cardTreeBuild
 
     card = cardTreeBuild(tmp_path / "card")
 
     status = applicationMain.main(
-        ["camera", "inventory", "-s", str(card), "--card", "12"]
+        ["camera", "scan", option, str(card), "--card", "12"]
     )
 
     assert status == 0

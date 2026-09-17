@@ -88,9 +88,9 @@ The agreed behaviour and development sequence are maintained in
 - Accept a card root, DCIM directory, or supported camera media directory.
 - Detect mixed GoPro, DJI, and dash-cam camera content.
 - Preserve original MP4 and JPG filenames.
-- Store GoPro originals under `GoPro/YYYY/MM/DD/`.
-- Store DJI originals under `Drone/YYYY/MM/DD/`.
-- Store dash-cam originals under `Dashcam/YYYY/MM/DD/`.
+- Store GoPro originals under `GoPro/YYYY/MM-MMM/DD/`.
+- Store DJI originals under `Drone/YYYY/MM-MMM/DD/`.
+- Store dash-cam originals under `Dashcam/YYYY/MM-MMM/DD/`.
 - Preserve same-stem DJI SRT files beside their MP4.
 - Exclude GoPro LRV and THM helper files by default and support an explicit
   option to retain them.
@@ -99,12 +99,7 @@ The agreed behaviour and development sequence are maintained in
 - Copy and verify media without modifying the source card.
 - Produce an auditable JSON import manifest.
 - Plan and perform conflict-free migration of supported existing archive media
-  into `YYYY/MM/DD`, including companion files.
-- For both video and photo migration, use a two-digit numeric month directory
-  only; do not include the month name in the folder (for example,
-  `2015/01/04`, not `2015/01-Jan/04`).
-- When migration creates a new destination file, report the result as
-  `copied  <destination-path>`.
+  into `YYYY/MM-MMM/DD`, including companion files.
 - Produce a migration manifest containing old and new paths and sufficient
   evidence to construct a checked rollback plan.
 - Keep dry-run as the default and require `--confirm` for archive changes.
@@ -132,10 +127,10 @@ The agreed behaviour and development sequence are maintained in
    capture date is read using Python code without invoking external programs;
    when it is unavailable, the documented fallback is reported.
 4. Given GoPro content, when a plan is built, then MP4 and JPG originals target
-   the matching `GoPro/YYYY/MM/DD/` directory while LRV and THM files are
+   the matching `GoPro/YYYY/MM-MMM/DD/` directory while LRV and THM files are
    excluded unless explicitly requested.
 5. Given DJI content, when a plan is built, then MP4 and JPG originals target
-   the matching `Drone/YYYY/MM/DD/` directory and a same-stem SRT targets the
+   the matching `Drone/YYYY/MM-MMM/DD/` directory and a same-stem SRT targets the
    same directory.
 6. Given an identical destination file, when planning runs, then it is reported
    as already present; given the same destination name with different content,
@@ -180,7 +175,7 @@ The agreed behaviour and development sequence are maintained in
     card is not considered fully archived/safe to recycle.
 19. Given existing supported media in a GoPro `YYYY-MM-DD` directory or the
     flat Drone root, when migration planning runs, then each asset targets the
-    metadata-derived `YYYY/MM/DD` directory and no file is changed.
+    metadata-derived `YYYY/MM-MMM/DD` directory and no file is changed.
 20. Given a legacy asset has an ambiguous date, unrelated type, or destination
     conflict, when migration runs, then that asset remains in place and is
     reported for manual review.
@@ -206,9 +201,6 @@ The agreed behaviour and development sequence are maintained in
     resolvable, then the terminal summary shows the zero-padded numbered card;
     an unidentified dry-run shows `unknown` rather than inferring identity from
     the mount path.
-28. Given a video or photo migration creates a new destination file, when the
-    migration result is displayed, then the action is reported as
-    `copied  <destination-path>`.
 
 ## Dependencies and decisions
 
@@ -277,6 +269,3 @@ The agreed behaviour and development sequence are maintained in
   `camera import --card ID --list` history filtering.
 - 2026-09-13: changed camera archive month folders to `MM-MMM`, so new imports
   target `YYYY/MM-MMM/DD` (for example `2026/09-Sep/13`).
-- 2026-09-17: changed video and photo migration month folders to numeric `MM`
-  only, restoring the canonical `YYYY/MM/DD` hierarchy; migration output for a
-  newly produced destination file is reported as `copied`.

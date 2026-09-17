@@ -46,13 +46,11 @@ Add durable card/import identity propagation:
 
 Keep dry-run as the default. Preserve the source card, original filenames, and
 DJI SRT companions. Store new GoPro, DJI, and dash-cam imports beneath their
-respective `YYYY/MM/DD` directories, using a two-digit numeric month only (for
-example `2026/09/13`). Apply the same `YYYY/MM/DD` hierarchy to video and photo
-migration. Exclude LRV and THM files unless explicitly requested. Migrate
-supported existing archive media only through the separate dry-run-first action,
-preserve companions, verify moves, leave ambiguous files in place, and write a
-rollback-capable migration manifest. When migration creates a destination file,
-report it as `copied  <destination-path>`.
+respective `YYYY/MM-MMM/DD` directories, for example `2026/09-Sep/13`. Exclude
+LRV and THM files unless explicitly requested. Migrate supported existing
+archive media only through the separate dry-run-first action, preserve
+companions, verify moves, leave ambiguous files in place, and write a
+rollback-capable migration manifest.
 
 Use temporary paths and synthetic fixtures in tests; never depend on the real
 removable drive or `/mnt/myVideo`. Add tests for on-card card-ID discovery,

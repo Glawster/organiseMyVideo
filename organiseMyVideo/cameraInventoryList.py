@@ -1,197 +1,393 @@
-"""List the latest camera-card inventory snapshots with operator status cues."""
+"""Read-only listing views for the numbered camera-card inventory."""
 
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
+import sys
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from .mediaCatalogue import catalogueSchemaApply
+from .cameraInventory import CameraInventory, CardInventoryRecord
+from .cardLocation import cardLocationGet
+from .constants import CAMERA_INVENTORY_DATABASE, applicationStateDirectory
 
-ANSI_GREEN = "\033[32m"
-ANSI_RED = "\033[31m"
-ANSI_RESET = "\033[0m"
+_KEYWORD_STOPWORDS = {
+    "about", "after", "along", "also", "appears", "around", "been", "being",
+    "camera", "card", "content", "during", "footage", "from", "have", "into",
+    "looks", "mixed", "mostly", "notable", "one", "scene", "shows", "some",
+    "that", "the", "their", "there", "these", "this", "through", "video", "with",
+}
+_CAMERA_MEDIA_KINDS = {"video", "photo"}
 
 
 @dataclass(frozen=True)
-class CameraInventoryListRecord:
-    """Latest inventory state for one numbered card."""
+class CardInventoryListEntry:
+    """One known card with its latest inventory and current lifecycle evidence."""
 
     cardId: int
-    inventoriedAt: str
-    cardBrand: Optional[str]
-    cardRatedGigabytes: Optional[int]
-    freeBytes: Optional[int]
-    contentBytes: int
-    volumeKind: str
-    snapshotId: Optional[str]
+    inventory: Optional[CardInventoryRecord]
+    location: Optional[str]
+    snapshotCount: int
     archived: bool
-
-    @property
-    def status(self) -> str:
-        """Return the operator-facing card state."""
-
-        if self.contentBytes == 0:
-            return "EMPTY"
-        if self.archived:
-            return "ARCHIVED"
-        return "ACTIVE"
+    archiveDates: tuple[str, ...] = ()
 
 
 def cameraInventoryList(
-    databasePath: Path,
     *,
+    databasePath: Optional[Path] = None,
+    cardId: Optional[int] = None,
     manifestDirectory: Optional[Path] = None,
-) -> tuple[CameraInventoryListRecord, ...]:
-    """Return the latest snapshot for every card, including archive state."""
+) -> tuple[CardInventoryListEntry, ...]:
+    """Return known cards, optionally restricted to one numeric card ID."""
 
-    databasePath = Path(databasePath)
-    if not databasePath.is_file():
-        return ()
-
-    successfulSnapshots = _successfulSnapshotIds(manifestDirectory)
-    with sqlite3.connect(databasePath) as connection:
-        connection.row_factory = sqlite3.Row
-        catalogueSchemaApply(connection)
-        snapshotTable = connection.execute(
-            """
-            SELECT 1
-            FROM sqlite_master
-            WHERE type = 'table' AND name = 'cardInventorySnapshotIdentity'
-            """
-        ).fetchone()
-        snapshotJoin = ""
-        snapshotColumn = "NULL AS snapshotId"
-        if snapshotTable is not None:
-            snapshotJoin = (
-                "LEFT JOIN cardInventorySnapshotIdentity identity "
-                "ON identity.inventoryId = c.inventoryId"
-            )
-            snapshotColumn = "identity.snapshotId AS snapshotId"
-        rows = connection.execute(
-            f"""
-            SELECT c.cardId, c.inventoriedAt, c.cardBrand,
-                   c.cardRatedGigabytes, c.freeBytes, c.contentBytes,
-                   c.volumeKind, {snapshotColumn}
-            FROM cardInventory c
-            INNER JOIN (
-                SELECT cardId, MAX(inventoryId) AS inventoryId
-                FROM cardInventory
-                GROUP BY cardId
-            ) latest ON c.inventoryId = latest.inventoryId
-            {snapshotJoin}
-            ORDER BY c.cardId
-            """
-        ).fetchall()
+    path = Path(databasePath) if databasePath else CAMERA_INVENTORY_DATABASE
+    manifests = Path(manifestDirectory or applicationStateDirectory() / "cameraImports")
+    service = CameraInventory(dryRun=True, databasePath=path)
+    ids = sorted(service._cardIdsStored())
+    if cardId is not None:
+        if isinstance(cardId, bool) or not isinstance(cardId, int) or cardId < 1:
+            raise ValueError("card ID must be a positive integer")
+        ids = [value for value in ids if value == cardId]
 
     return tuple(
-        CameraInventoryListRecord(
-            cardId=int(row["cardId"]),
-            inventoriedAt=str(row["inventoriedAt"]),
-            cardBrand=row["cardBrand"],
-            cardRatedGigabytes=row["cardRatedGigabytes"],
-            freeBytes=row["freeBytes"],
-            contentBytes=int(row["contentBytes"] or 0),
-            volumeKind=str(row["volumeKind"] or "sd"),
-            snapshotId=row["snapshotId"],
-            archived=(
-                row["snapshotId"] is not None
-                and str(row["snapshotId"]) in successfulSnapshots
-            ),
+        CardInventoryListEntry(
+            cardId=value,
+            inventory=service.inventoryShow(value),
+            location=cardLocationGet(value, databasePath=path),
+            snapshotCount=_snapshotCount(path, value),
+            archived=_latestSnapshotArchived(path, manifests, value),
+            archiveDates=_archiveDates(manifests, value),
         )
-        for row in rows
+        for value in ids
     )
 
 
 def cameraInventoryListSummary(
-    records: tuple[CameraInventoryListRecord, ...],
+    entries: tuple[CardInventoryListEntry, ...],
     *,
-    useColour: bool = False,
+    useColour: Optional[bool] = None,
 ) -> str:
-    """Return a compact list with green empty and red archived rows."""
+    """Return a compact one-row-per-card inventory register."""
 
-    if not records:
-        return "CAMERA CARD INVENTORY\nNo inventoried cards.\n"
+    if not entries:
+        return "CAMERA CARD INVENTORY\n\nNo cards registered.\n"
 
-    lines = [
-        "CAMERA CARD INVENTORY",
-        "Card  Status     Brand          Size    Free       Content    Type",
-    ]
-    for record in records:
-        brand = record.cardBrand or "unknown"
+    if useColour is None:
+        isTty = getattr(sys.stdout, "isatty", None)
+        useColour = bool(callable(isTty) and isTty())
+
+    rows: list[tuple[str, str, str, str, str, str, str, str]] = []
+    for entry in entries:
+        record = entry.inventory
+        status = _status(entry)
         size = (
             f"{record.cardRatedGigabytes} GB"
-            if record.cardRatedGigabytes is not None
-            else "unknown"
+            if record is not None and record.cardRatedGigabytes
+            else "-"
         )
-        line = (
-            f"{record.cardId:03d}   {record.status:<10} "
-            f"{brand[:14]:<14} {size:<7} "
-            f"{_bytesFormat(record.freeBytes):<10} "
-            f"{_bytesFormat(record.contentBytes):<10} "
-            f"{record.volumeKind}"
+        mediaType = record.volumeKind if record is not None and record.volumeKind else "-"
+        camera = "-"
+        if record is not None and status != "missing":
+            camera = " ".join(
+                part for part in (record.manufacturer, record.cameraModel) if part
+            ) or "-"
+        latest = _dateTimeDisplay(record.inventoriedAt) if record is not None else "-"
+        rows.append(
+            (
+                f"{entry.cardId:03d}",
+                status,
+                "yes" if entry.archived else "no",
+                mediaType,
+                size,
+                camera,
+                entry.location or "-",
+                latest,
+            )
         )
-        lines.append(_statusColour(line, record.status, useColour=useColour))
-    lines.append("")
-    lines.append(f"{len(records)} card{'s' if len(records) != 1 else ''}")
-    return "\n".join(lines) + "\n"
+
+    headers = (
+        "Card",
+        "Status",
+        "Archived",
+        "Type",
+        "Size",
+        "Camera",
+        "Location",
+        "Last inventory",
+    )
+    widths = [
+        max(len(headers[index]), *(len(row[index]) for row in rows))
+        for index in range(len(headers))
+    ]
+
+    def line(values: tuple[str, ...]) -> str:
+        return "  ".join(value.ljust(widths[index]) for index, value in enumerate(values)).rstrip()
+
+    def rowLine(row: tuple[str, ...]) -> str:
+        text = line(row)
+        if not useColour:
+            return text
+        if row[1] == "empty":
+            return f"\033[32m{text}\033[0m"
+        if row[1] == "to archive":
+            return f"\033[31m{text}\033[0m"
+        return text
+
+    separator = tuple("-" * width for width in widths)
+    body = "\n".join(rowLine(row) for row in rows)
+    return f"CAMERA CARD INVENTORY\n\n{line(headers)}\n{line(separator)}\n{body}\n"
 
 
-def _successfulSnapshotIds(manifestDirectory: Optional[Path]) -> set[str]:
-    """Return snapshot IDs from confirmed imports with no failed assets."""
+def cameraInventoryFullSummary(entry: CardInventoryListEntry) -> str:
+    """Return all useful current and historical details for one known card."""
 
-    if manifestDirectory is None:
-        return set()
-    directory = Path(manifestDirectory)
-    if not directory.is_dir():
-        return set()
+    archiveDates = tuple(_dateTimeDisplay(value) for value in entry.archiveDates)
+    lastArchived = archiveDates[0] if archiveDates else "-"
+    previousArchives = ", ".join(archiveDates[1:]) if len(archiveDates) > 1 else "-"
+    header = (
+        f"CAMERA CARD {entry.cardId:03d}\n"
+        f"  Status:             {_status(entry)}\n"
+        f"  Location:           {entry.location or 'unknown'}\n"
+        f"  Snapshots:          {entry.snapshotCount}\n"
+        f"  Last archived:      {lastArchived}\n"
+        f"  Previous archives:  {previousArchives}\n"
+    )
+    if entry.inventory is None:
+        return header + "  Last inventoried:   -\n\n  Inventory:          none\n"
 
-    snapshotIds: set[str] = set()
-    for path in directory.glob("camera-import-*.json"):
+    record = entry.inventory
+    counts = record.fileCounts
+    camera = " ".join(
+        part for part in (record.manufacturer, record.cameraModel) if part
+    ) or "unknown"
+    dateRange = _dateRangeDisplay(record)
+    keywords = _keywordsDisplay(record)
+    otherFiles = _otherFiles(record)
+    otherSummary = str(len(otherFiles)) if otherFiles else "0"
+    return (
+        header
+        + f"  Last inventoried:   {_dateTimeDisplay(record.inventoriedAt)}\n\n"
+        + "CAMERA CARD INVENTORY\n"
+        + f"  Card ID:            {record.cardId}\n"
+        + f"  Brand:              {record.cardBrand or 'unknown'}\n"
+        + f"  Type:               {record.volumeKind or 'unknown'}\n"
+        + f"  Card size:          {f'{record.cardRatedGigabytes} GB' if record.cardRatedGigabytes else _bytesDisplay(record.capacity.totalBytes)}\n"
+        + f"  Free space:         {_bytesDisplay(record.capacity.freeBytes)}\n"
+        + f"  Content size:       {_bytesDisplay(record.capacity.contentBytes)}\n"
+        + f"  Volume size:        {_bytesDisplay(record.capacity.totalBytes)}\n"
+        + f"  Date range:         {dateRange}\n"
+        + f"  Camera:             {camera}\n"
+        + f"  Videos:             {counts.get('video', 0)}\n"
+        + f"  Photos:             {counts.get('photo', 0)}\n"
+        + f"  Thumbnails:         {counts.get('thumbnail', 0)}\n"
+        + f"  Other files:        {otherSummary}\n"
+        + f"  Content:            {record.contentSummary or '-'}\n"
+        + f"  Keywords:           {keywords}\n"
+    )
+
+
+def _cameraMediaPresent(record: CardInventoryRecord) -> bool:
+    """Return whether the snapshot contains primary camera media requiring archive protection."""
+
+    return any(record.fileCounts.get(kind, 0) > 0 for kind in _CAMERA_MEDIA_KINDS)
+
+
+def _otherFiles(record: CardInventoryRecord) -> tuple[str, ...]:
+    """Return recorded filesystem content that is not primary camera media."""
+
+    return tuple(
+        item.relativePath
+        for item in record.files
+        if item.kind not in _CAMERA_MEDIA_KINDS
+    )
+
+
+def _status(entry: CardInventoryListEntry) -> str:
+    location = (entry.location or "").strip().lower()
+    if location == "missing":
+        return "missing"
+    if location and location not in {"archive", "archived"}:
+        return "in use"
+    record = entry.inventory
+    if record is None:
+        return "available"
+
+    hasCameraMedia = _cameraMediaPresent(record)
+    hasOtherFiles = bool(_otherFiles(record))
+    if hasCameraMedia and not entry.archived:
+        return "to archive"
+    if hasOtherFiles:
+        return "review"
+    if hasCameraMedia and entry.archived:
+        return "available"
+    return "empty"
+
+
+def _archiveDates(manifestDirectory: Path, cardId: int) -> tuple[str, ...]:
+    """Return successful archive timestamps for a card, newest first."""
+
+    if not manifestDirectory.is_dir():
+        return ()
+    found: list[str] = []
+    for path in manifestDirectory.glob("camera-import-*.json"):
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             continue
         if not isinstance(payload, dict):
             continue
-        snapshotId = payload.get("snapshotId")
+        source = payload.get("source")
+        if not isinstance(source, dict) or source.get("cardId") != cardId:
+            continue
         assets = payload.get("assets")
-        if not isinstance(snapshotId, str) or not snapshotId.strip():
+        if not isinstance(assets, list) or not assets:
             continue
-        if not isinstance(assets, list):
+        if not all(
+            isinstance(asset, dict)
+            and asset.get("outcome") in {"copied", "alreadyPresent"}
+            for asset in assets
+        ):
             continue
-        outcomes = [
-            asset.get("outcome") for asset in assets if isinstance(asset, dict)
-        ]
-        if outcomes and "failed" not in outcomes:
-            snapshotIds.add(snapshotId)
-    return snapshotIds
+        createdAt = payload.get("createdAt")
+        if isinstance(createdAt, str) and createdAt:
+            found.append(createdAt)
+    return tuple(sorted(set(found), reverse=True))
 
 
-def _statusColour(line: str, status: str, *, useColour: bool) -> str:
-    """Colour one complete row according to card status."""
+def _latestSnapshotArchived(databasePath: Path, manifestDirectory: Path, cardId: int) -> bool:
+    snapshotId = _latestSnapshotId(databasePath, cardId)
+    if snapshotId is None or not manifestDirectory.is_dir():
+        return False
+    for path in manifestDirectory.glob("camera-import-*.json"):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict) or payload.get("snapshotId") != snapshotId:
+            continue
+        assets = payload.get("assets")
+        if not isinstance(assets, list) or not assets:
+            continue
+        if all(
+            isinstance(asset, dict)
+            and asset.get("outcome") in {"copied", "alreadyPresent"}
+            for asset in assets
+        ):
+            return True
+    return False
 
-    if not useColour:
-        return line
-    if status == "EMPTY":
-        return f"{ANSI_GREEN}{line}{ANSI_RESET}"
-    if status == "ARCHIVED":
-        return f"{ANSI_RED}{line}{ANSI_RESET}"
-    return line
+
+def _latestSnapshotId(databasePath: Path, cardId: int) -> Optional[str]:
+    if not databasePath.is_file():
+        return None
+    try:
+        connection = sqlite3.connect(f"file:{databasePath}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return None
+    try:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        if not {"cardInventory", "cardInventorySnapshotIdentity"}.issubset(tables):
+            return None
+        row = connection.execute(
+            """
+            SELECT identity.snapshotId
+            FROM cardInventory AS inventory
+            LEFT JOIN cardInventorySnapshotIdentity AS identity
+              ON identity.inventoryId = inventory.inventoryId
+            WHERE inventory.cardId = ?
+            ORDER BY inventory.inventoryId DESC
+            LIMIT 1
+            """,
+            (cardId,),
+        ).fetchone()
+        return None if row is None or row[0] is None else str(row[0])
+    except sqlite3.Error:
+        return None
+    finally:
+        connection.close()
 
 
-def _bytesFormat(value: Optional[int]) -> str:
-    """Return a short binary byte count for the list display."""
+def _snapshotCount(databasePath: Path, cardId: int) -> int:
+    if not databasePath.is_file():
+        return 0
+    try:
+        connection = sqlite3.connect(f"file:{databasePath}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return 0
+    try:
+        table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='cardInventory'"
+        ).fetchone()
+        if table is None:
+            return 0
+        row = connection.execute(
+            "SELECT COUNT(*) FROM cardInventory WHERE cardId = ?",
+            (cardId,),
+        ).fetchone()
+        return int(row[0]) if row else 0
+    except sqlite3.Error:
+        return 0
+    finally:
+        connection.close()
 
+
+def _dateTimeDisplay(value: str) -> str:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return value or "-"
+    return parsed.strftime("%Y/%m/%d %H:%M")
+
+
+def _dateDisplay(value: Optional[str]) -> str:
+    if not value:
+        return "-"
+    return value[:10].replace("-", "/")
+
+
+def _dateRangeDisplay(record: CardInventoryRecord) -> str:
+    if not record.dateStart and not record.dateEnd:
+        return "unknown"
+    start = _dateDisplay(record.dateStart)
+    end = _dateDisplay(record.dateEnd)
+    source = f" ({record.dateSource})" if record.dateSource else ""
+    return f"{start} to {end}{source}"
+
+
+def _bytesDisplay(value: Optional[int]) -> str:
     if value is None:
         return "unknown"
     amount = float(max(value, 0))
-    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
-        if amount < 1024.0 or unit == "TiB":
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if amount < 1024.0 or unit == "TB":
             if unit == "B":
-                return f"{int(amount)} {unit}"
+                return f"{int(amount)} B"
             return f"{amount:.1f} {unit}"
         amount /= 1024.0
-    return f"{amount:.1f} TiB"
+    return f"{amount:.1f} TB"
+
+
+def _keywordsDisplay(record: CardInventoryRecord) -> str:
+    """Return concise keywords derived from persisted content-analysis text."""
+
+    summary = (record.contentSummary or "").strip()
+    if not summary or summary.lower() in {"no-thumbnails", "unavailable", "unknown"}:
+        return "-"
+    keywords: list[str] = []
+    for token in re.findall(r"[A-Za-z][A-Za-z'-]{2,}", summary.lower()):
+        word = token.strip("'-")
+        if word in _KEYWORD_STOPWORDS or word in keywords:
+            continue
+        keywords.append(word)
+        if len(keywords) == 8:
+            break
+    return ", ".join(keywords) if keywords else "-"

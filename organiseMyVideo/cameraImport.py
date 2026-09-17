@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -78,6 +79,7 @@ class CameraImporter:
         """Plan or execute one camera-media import."""
 
         plan = self.planner.importPlan(source)
+        _plannedDestinationCollisionsRaise(plan)
         conflicts = [item for item in plan.operations if item.outcome == "conflict"]
         if conflicts:
             destinations = ", ".join(str(item.asset.destinationPath) for item in conflicts)
@@ -109,6 +111,7 @@ class CameraImporter:
         copyOperations = [
             operation for operation in plan.operations if operation.outcome == "copy"
         ]
+        _destinationSpaceValidate(copyOperations)
         totalBytes = sum(
             operation.asset.sourcePath.stat().st_size for operation in copyOperations
         )
@@ -146,7 +149,7 @@ class CameraImporter:
                     self._recordBuild(
                         operation,
                         outcome="failed",
-                        error=str(error),
+                        error=_errorDisplay(error),
                     )
                 )
             else:
@@ -338,27 +341,70 @@ def cameraImportHistory(
 
 
 def cameraImportSummary(result: CameraImportResult) -> str:
-    """Return a concise CLI-neutral summary for one camera import result."""
+    """Return a compact operational summary for one camera import result."""
 
     plannedCopies = sum(
         1 for operation in result.plan.operations if operation.outcome == "copy"
     )
-    manifest = str(result.manifestPath) if result.manifestPath is not None else "(none)"
     card = _cardDisplay(result.cardId)
-    snapshot = result.snapshotId or "unmatched"
-    return f"""CAMERA IMPORT SUMMARY
-Card:              {card}
-Snapshot:          {snapshot}
-Source:            {result.plan.sourcePath}
-Mode:              {'confirmed' if result.confirmed else 'dry-run'}
-Planned copies:    {plannedCopies}
-Copied:            {result.copied}
-Already present:   {result.alreadyPresent}
-Failed:            {result.failed}
-Excluded:          {len(result.plan.excludedPaths)}
-Unknown:           {len(result.plan.unknownPaths)}
-Manifest:          {manifest}
-"""
+    mode = "CONFIRMED" if result.confirmed else "DRY-RUN"
+    lines = [
+        "",
+        "CAMERA IMPORT COMPLETE" if result.confirmed else "CAMERA IMPORT PLAN",
+        "",
+        f"Card {card}   {_pathDisplay(result.plan.sourcePath)}",
+        f"Mode        {mode}",
+        "",
+        "Files",
+        f"  Planned             {plannedCopies}",
+        f"  Copied              {result.copied}",
+    ]
+    if result.alreadyPresent:
+        lines.append(f"  Already present     {result.alreadyPresent}")
+    if result.failed:
+        lines.append(f"  Failed              {result.failed}")
+    excluded = len(result.plan.excludedPaths)
+    unknown = len(result.plan.unknownPaths)
+    if excluded:
+        lines.append(f"  Excluded            {excluded}")
+    if unknown:
+        lines.append(f"  Unknown             {unknown}")
+
+    lines.extend(["", "Result"])
+    if not result.confirmed:
+        lines.append(
+            f"  Dry-run — {plannedCopies} file{'s' if plannedCopies != 1 else ''} would be copied"
+        )
+    elif result.failed:
+        lines.append(
+            f"  WARNING: import incomplete — {result.copied} copied, {result.failed} failed"
+        )
+    else:
+        lines.append(
+            f"  OK: import complete — {result.copied} file{'s' if result.copied != 1 else ''} copied successfully"
+        )
+
+    if result.failed and result.manifestPath is not None:
+        failures = _manifestFailureGroups(result.manifestPath)
+        if failures:
+            lines.extend(["", "Failure reasons"])
+            for error, count, examples in failures:
+                lines.append(f"  {count} × {error}")
+                for example in examples:
+                    lines.append(f"      {example}")
+            lines.append("  See the manifest for the complete failed-file list.")
+
+    if result.manifestPath is not None:
+        lines.extend(
+            [
+                "",
+                "Manifest",
+                f"  {_pathDisplay(result.manifestPath.parent)}/",
+                f"  {result.manifestPath.name}",
+            ]
+        )
+    lines.append("")
+    return "\n".join(lines)
 
 
 def cameraImportHistorySummary(
@@ -389,6 +435,124 @@ def cameraImportHistorySummary(
     lines.append("")
     lines.append(f"{len(records)} import{'s' if len(records) != 1 else ''}")
     return "\n".join(lines) + "\n"
+
+
+def _plannedDestinationCollisionsRaise(plan: ImportPlan) -> None:
+    """Reject multiple planned copies targeting the same final archive path."""
+
+    byDestination: dict[Path, list[ImportOperation]] = {}
+    for operation in plan.operations:
+        if operation.outcome != "copy":
+            continue
+        byDestination.setdefault(operation.asset.destinationPath, []).append(operation)
+
+    collisions = [
+        (destination, operations)
+        for destination, operations in byDestination.items()
+        if len(operations) > 1
+    ]
+    if not collisions:
+        return
+
+    lines = ["camera import has planned destination collisions:"]
+    for destination, operations in collisions[:10]:
+        lines.append(f"  {destination}")
+        for operation in operations:
+            lines.append(f"    <- {operation.asset.relativePath}")
+    if len(collisions) > 10:
+        lines.append(f"  ...and {len(collisions) - 10} more collision(s)")
+    raise RuntimeError("\n".join(lines))
+
+
+def _destinationSpaceValidate(copyOperations: list[ImportOperation]) -> None:
+    """Reject confirmed imports that cannot fit on their destination filesystems."""
+
+    requiredByDevice: dict[int, int] = {}
+    samplePathByDevice: dict[int, Path] = {}
+    for operation in copyOperations:
+        destination = operation.asset.destinationPath
+        existing = destination.parent
+        while not existing.exists() and existing.parent != existing:
+            existing = existing.parent
+        stats = os.stat(existing)
+        device = stats.st_dev
+        requiredByDevice[device] = (
+            requiredByDevice.get(device, 0) + operation.asset.sourcePath.stat().st_size
+        )
+        samplePathByDevice.setdefault(device, existing)
+
+    failures: list[str] = []
+    for device, required in requiredByDevice.items():
+        path = samplePathByDevice[device]
+        free = shutil.disk_usage(path).free
+        if required > free:
+            failures.append(
+                f"need {_byteDisplay(required)}, free {_byteDisplay(free)} at {path}"
+            )
+    if failures:
+        raise RuntimeError(
+            "insufficient destination disk space; " + "; ".join(failures) + "; import not started"
+        )
+
+
+def _manifestFailureGroups(path: Path) -> list[tuple[str, int, tuple[str, ...]]]:
+    """Group failed manifest assets by error text with representative filenames."""
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return []
+    assets = payload.get("assets") if isinstance(payload, dict) else None
+    if not isinstance(assets, list):
+        return []
+
+    grouped: dict[str, list[str]] = {}
+    for item in assets:
+        if not isinstance(item, dict) or item.get("outcome") != "failed":
+            continue
+        error = str(item.get("error") or "unspecified error").strip()
+        relative = str(item.get("relativePath") or item.get("sourcePath") or "unknown")
+        grouped.setdefault(error, []).append(relative)
+
+    ordered = sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0]))
+    return [(error, len(paths), tuple(paths[:3])) for error, paths in ordered]
+
+
+def _errorDisplay(error: Exception) -> str:
+    """Return an actionable exception description for manifests and summaries."""
+
+    message = str(error).strip()
+    name = type(error).__name__
+    if isinstance(error, OSError) and error.errno is not None:
+        detail = error.strerror or message or "operating system error"
+        return f"{name} [{error.errno}]: {detail}"
+    if message:
+        return f"{name}: {message}"
+    return name
+
+
+def _byteDisplay(value: int) -> str:
+    """Return a compact binary byte count."""
+
+    amount = float(max(value, 0))
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if amount < 1024.0 or unit == "TiB":
+            if unit == "B":
+                return f"{int(amount)} {unit}"
+            return f"{amount:.1f} {unit}"
+        amount /= 1024.0
+    return f"{amount:.1f} TiB"
+
+
+def _pathDisplay(path: Path) -> str:
+    """Return a terminal-friendly path using ``~`` for the user's home."""
+
+    resolved = Path(path).expanduser()
+    try:
+        relative = resolved.relative_to(Path.home())
+    except ValueError:
+        return str(resolved)
+    return "~" if not relative.parts else f"~/{relative.as_posix()}"
 
 
 def _cardLabelIdRead(path: Path, filenameId: int) -> Optional[int]:
