@@ -13,7 +13,7 @@ behaviour is extended by
 `organiseMyVideo` catalogues a mounted camera SD card or copied card directory
 against an operator-assigned numeric card ID. Each confirmed run stores a snapshot:
 date range, sold size, free space, file counts, camera identity and content analysis.
-GoPro, DJI, dash-cam and numbered USB media use the shared removable-media catalogue.
+GoPro, DJI, dash-cam, Canon SLR, and numbered USB media use the shared removable-media catalogue.
 
 Inventory never imports archive files. Confirmed inventory writes a durable identity
 such as `organiseMyVideo.018` at the card root and appends a SQLite snapshot. Camera
@@ -149,6 +149,8 @@ Each snapshot includes:
 - camera kind and manufacturer/model metadata when detectable;
 - derived sold capacity (32, 64, 128, or 256 GB where recognisable);
 - counts of video, photo, thumbnail, preview, sidecar and other files;
+- CR3, JPEG, and MP4 counts on SLR cards, without treating Canon control files
+  such as `CANONMSC/*.CTG` or `comstate.to3` as media;
 - content summary from sampled thumbnails/JPEGs where available;
 - vision-analysis status;
 - per-file snapshot rows for audit and later matching.
@@ -183,6 +185,12 @@ or, when `XDG_STATE_HOME` is unset:
 Tables, columns and indexes use camelCase identifiers.
 
 ## Dash-cam handling
+
+Canon-style SLR cards such as `DCIM/100CANON` are inventoried as `slr` without
+classifying the whole card as only photos or only video. CR3 and JPEG stills
+count as photographs; SLR MP4 clips count as video. Capture dates prefer
+embedded CR3/JPEG/MP4 metadata, then filesystem mtime, and the chosen
+provenance is shown with the date range.
 
 Dash-cam capture times are read from embedded metadata where available, then from
 recognised dated filenames and finally from filesystem mtime. Transcend DrivePro 250

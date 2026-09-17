@@ -77,8 +77,9 @@ behaviour where applicable.
 The `camera inventory` action catalogues a mounted SD card or copied card
 directory against an operator-assigned positive integer card ID. The source may
 be supplied positionally or with `-s/--source`. GoPro, DJI, and dash-cam layouts
-are recognised. Dry-run prints date range, sold card size (32, 64, 128, or 256
-GB), free space, and file counts. `--confirm` writes a SQLite snapshot in the
+are recognised, as are Canon-style SLR `DCIM/100CANON` trees. Dry-run prints
+date range, sold card size (32, 64, 128, or 256 GB), free space, and file
+counts. `--confirm` writes a SQLite snapshot in the
 shared media catalogue, writes `organiseMyVideo.NNN` onto the card, and
 describes sampled `.THM` thumbnails (or JPEGs) through xAI. After that file
 exists, `--card` may be omitted. To change the ID, pass

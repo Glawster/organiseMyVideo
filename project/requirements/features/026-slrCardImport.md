@@ -2,7 +2,7 @@
 
 ## Status
 
-ToDo
+Completed
 
 ## Outcome
 
@@ -94,12 +94,19 @@ The photo and video roots are independent configured archive roots. Routing is d
 
 ## Traceability
 
-- Implementation: pending
-- Tests: pending
-- Documentation: `documentation/cameraImport.md`
+- Implementation: `organiseMyVideo/cameraDetect.py`,
+  `organiseMyVideo/cameraMetadata.py`, `organiseMyVideo/cameraPlan.py`,
+  `organiseMyVideo/cameraImport.py`, `organiseMyVideo/cameraInventory.py`,
+  `organiseMyVideo/cameraInventoryList.py`, `organiseMyVideo/mainLegacy.py`,
+  `organiseMyVideo/__main__.py`
+- Tests: `tests/test_cameraSlrImport.py`, `tests/test_cameraMetadata.py`,
+  `tests/cameraFixtures.py`
+- Documentation: `documentation/cameraImport.md`,
+  `documentation/cameraInventory.md`, `documentation/commandLineInterface.md`
 - Pull request: pending
 - Agent runs: None
 
 ## Change history
 
 - 2026-09-17: created — add mixed SLR card support with Canon CR3/JPEG photographs routed to `photo root/By Date/YYYY/MM/DD` and SLR MP4 clips routed to `video root/By Date/YYYY/MM/DD`.
+- 2026-09-17: completed — detect Canon-style `DCIM/100CANON` cards, route CR3/JPEG stills to the photo root and MP4 clips to the video root under numeric `By Date/YYYY/MM/DD`, preserve pairs/filenames/conflicts/identity, and report CR3/JPEG/MP4 counts with capture-date provenance.

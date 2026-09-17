@@ -32,7 +32,7 @@ Historical behaviour is not assigned invented retrospective requirements.
 | 023 | [Camera capture-time correction](features/023-cameraCaptureTimeCorrection.md) | Correct known camera-clock errors while preserving original timestamp evidence and elapsed-time relationships. | Planned | Not required | [ADR-006](../adr/006-cameraImportArchitecture.md) |
 | 024 | [Media keywords and tagging](features/024-mediaKeywords.md) | Add descriptive keywords to media without changing date-based filesystem organisation. | Planned | Not required | [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
 | 025 | [Camera archive normalisation](features/025-cameraArchiveNormalisation.md) | Normalise legacy GoPro, Drone, and Dashcam archive layouts into the canonical numeric date hierarchy. | Planned | Not required | [ADR-003](../adr/003-filesystemSafetyBoundary.md), [ADR-006](../adr/006-cameraImportArchitecture.md) |
-| 026 | [SLR card import](features/026-slrCardImport.md) | Import mixed SLR photo/video cards by media type beneath `By Date/YYYY/MM/DD`. | ToDo | [Prompt](prompt/026-slrCardImport.md) | [ADR-003](../adr/003-filesystemSafetyBoundary.md), [ADR-006](../adr/006-cameraImportArchitecture.md), [ADR-007](../adr/007-cameraInventoryPersistence.md) |
+| 026 | [SLR card import](features/026-slrCardImport.md) | Import mixed SLR photo/video cards by media type beneath `By Date/YYYY/MM/DD`. | Completed | [Prompt](prompt/026-slrCardImport.md) | [ADR-003](../adr/003-filesystemSafetyBoundary.md), [ADR-006](../adr/006-cameraImportArchitecture.md), [ADR-007](../adr/007-cameraInventoryPersistence.md) |
 
 ## Prompt index
 

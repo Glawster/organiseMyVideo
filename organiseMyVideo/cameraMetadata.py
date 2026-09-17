@@ -14,6 +14,10 @@ from organiseMediaStudio.video.probe import videoProbe
 
 _JPEG_SUFFIXES = {".jpg", ".jpeg", ".thm"}
 _MP4_SUFFIXES = {".mp4", ".mov"}
+_CR3_SUFFIXES = {".cr3"}
+_CMT_MARKERS = (b"CMT1", b"CMT2", b"CMT3")
+_TIFF_HEADERS = (b"II*\x00", b"MM\x00*")
+_BMFF_CONTAINER_TYPES = {b"moov", b"trak", b"mdia", b"minf", b"stbl", b"udta"}
 _DASHCAM_DATE_YYMD_HMS = re.compile(r"^(\d{6})_(\d{6})_")
 _DASHCAM_DATE_Y_MD_HMS = re.compile(r"^(\d{4})_(\d{4})_(\d{6})")
 _DASHCAM_DATE_Y_M_D_HMS = re.compile(r"^(\d{4})_(\d{2})_(\d{2})_(\d{6})")
@@ -39,6 +43,8 @@ def metadataCaptureRead(path: Path) -> Optional[datetime]:
         captured = metadataJpegCaptureRead(path)
     elif suffix in _MP4_SUFFIXES:
         captured = metadataMp4CaptureRead(path)
+    elif suffix in _CR3_SUFFIXES:
+        captured = metadataCr3CaptureRead(path)
     if captured is not None:
         return captured
     return metadataFilenameCaptureRead(path)
@@ -71,6 +77,22 @@ def metadataFilenameCaptureRead(path: Path) -> Optional[datetime]:
     if match:
         parts = match.groups()
         return _datetimeFromParts("".join(parts[:3]), "".join(parts[3:]))
+    return None
+
+
+def metadataCr3CaptureRead(path: Path) -> Optional[datetime]:
+    """Return EXIF capture time embedded in a Canon CR3 ISO-BMFF file."""
+
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    if len(data) < 8:
+        return None
+    for payload in _bmffPayloads(data):
+        captured = _cr3PayloadDatetimeRead(payload)
+        if captured is not None:
+            return captured
     return None
 
 
@@ -115,6 +137,51 @@ def metadataMp4CaptureRead(path: Path) -> Optional[datetime]:
     except VideoProcessingError:
         return None
     return result.creationAt
+
+
+## cr3
+
+
+def _bmffPayloads(data: bytes, offset: int = 0, end: Optional[int] = None):
+    """Yield ISO-BMFF box payloads, descending into movie-metadata containers."""
+
+    if end is None:
+        end = len(data)
+    while offset + 8 <= end:
+        size = struct.unpack(">I", data[offset : offset + 4])[0]
+        boxType = data[offset + 4 : offset + 8]
+        headerSize = 8
+        if size == 1:
+            if offset + 16 > end:
+                break
+            size = struct.unpack(">Q", data[offset + 8 : offset + 16])[0]
+            headerSize = 16
+        elif size == 0:
+            size = end - offset
+        if size < headerSize or offset + size > end:
+            break
+        payloadStart = offset + headerSize
+        payloadEnd = offset + size
+        yield data[payloadStart:payloadEnd]
+        if boxType in _BMFF_CONTAINER_TYPES:
+            yield from _bmffPayloads(data, payloadStart, payloadEnd)
+        offset = payloadEnd
+
+
+def _cr3PayloadDatetimeRead(payload: bytes) -> Optional[datetime]:
+    """Read DateTimeOriginal from a CR3 uuid/CMT TIFF payload."""
+
+    if payload[:4] in _CMT_MARKERS:
+        return _exifDatetimeRead(payload[4:])
+    if len(payload) > 20 and payload[16:20] in _CMT_MARKERS:
+        return _exifDatetimeRead(payload[20:])
+    if payload[:4] in _TIFF_HEADERS:
+        return _exifDatetimeRead(payload)
+    for header in _TIFF_HEADERS:
+        index = payload.find(header)
+        if 0 <= index <= 64:
+            return _exifDatetimeRead(payload[index:])
+    return None
 
 
 ## datetime

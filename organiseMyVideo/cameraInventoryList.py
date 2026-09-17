@@ -11,15 +11,45 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from .cameraDetect import cameraMediaSuffixCounts
 from .cameraInventory import CameraInventory, CardInventoryRecord
 from .cardLocation import cardLocationGet
 from .constants import CAMERA_INVENTORY_DATABASE, applicationStateDirectory
 
 _KEYWORD_STOPWORDS = {
-    "about", "after", "along", "also", "appears", "around", "been", "being",
-    "camera", "card", "content", "during", "footage", "from", "have", "into",
-    "looks", "mixed", "mostly", "notable", "one", "scene", "shows", "some",
-    "that", "the", "their", "there", "these", "this", "through", "video", "with",
+    "about",
+    "after",
+    "along",
+    "also",
+    "appears",
+    "around",
+    "been",
+    "being",
+    "camera",
+    "card",
+    "content",
+    "during",
+    "footage",
+    "from",
+    "have",
+    "into",
+    "looks",
+    "mixed",
+    "mostly",
+    "notable",
+    "one",
+    "scene",
+    "shows",
+    "some",
+    "that",
+    "the",
+    "their",
+    "there",
+    "these",
+    "this",
+    "through",
+    "video",
+    "with",
 }
 _CAMERA_MEDIA_KINDS = {"video", "photo"}
 
@@ -89,12 +119,17 @@ def cameraInventoryListSummary(
             if record is not None and record.cardRatedGigabytes
             else "-"
         )
-        mediaType = record.volumeKind if record is not None and record.volumeKind else "-"
+        mediaType = (
+            record.volumeKind if record is not None and record.volumeKind else "-"
+        )
         camera = "-"
         if record is not None and status != "missing":
-            camera = " ".join(
-                part for part in (record.manufacturer, record.cameraModel) if part
-            ) or "-"
+            camera = (
+                " ".join(
+                    part for part in (record.manufacturer, record.cameraModel) if part
+                )
+                or "-"
+            )
         latest = _dateTimeDisplay(record.inventoriedAt) if record is not None else "-"
         rows.append(
             (
@@ -125,7 +160,9 @@ def cameraInventoryListSummary(
     ]
 
     def line(values: tuple[str, ...]) -> str:
-        return "  ".join(value.ljust(widths[index]) for index, value in enumerate(values)).rstrip()
+        return "  ".join(
+            value.ljust(widths[index]) for index, value in enumerate(values)
+        ).rstrip()
 
     def rowLine(row: tuple[str, ...]) -> str:
         text = line(row)
@@ -161,9 +198,10 @@ def cameraInventoryFullSummary(entry: CardInventoryListEntry) -> str:
 
     record = entry.inventory
     counts = record.fileCounts
-    camera = " ".join(
-        part for part in (record.manufacturer, record.cameraModel) if part
-    ) or "unknown"
+    camera = (
+        " ".join(part for part in (record.manufacturer, record.cameraModel) if part)
+        or "unknown"
+    )
     dateRange = _dateRangeDisplay(record)
     keywords = _keywordsDisplay(record)
     otherFiles = _otherFiles(record)
@@ -183,10 +221,27 @@ def cameraInventoryFullSummary(entry: CardInventoryListEntry) -> str:
         + f"  Camera:             {camera}\n"
         + f"  Videos:             {counts.get('video', 0)}\n"
         + f"  Photos:             {counts.get('photo', 0)}\n"
+        + _fullSuffixCountLines(record)
         + f"  Thumbnails:         {counts.get('thumbnail', 0)}\n"
         + f"  Other files:        {otherSummary}\n"
         + f"  Content:            {record.contentSummary or '-'}\n"
         + f"  Keywords:           {keywords}\n"
+    )
+
+
+def _fullSuffixCountLines(record: CardInventoryRecord) -> str:
+    """Return aligned CR3/JPEG/MP4 counts for the detailed card report."""
+
+    mediaPaths = tuple(
+        item.relativePath for item in record.files if item.kind in {"photo", "video"}
+    )
+    counts = cameraMediaSuffixCounts(mediaPaths)
+    if "slr" not in record.cameraKinds and counts["cr3"] == 0:
+        return ""
+    return (
+        f"  CR3:                {counts['cr3']}\n"
+        f"  JPEG:               {counts['jpeg']}\n"
+        f"  MP4:                {counts['mp4']}\n"
     )
 
 
@@ -258,7 +313,9 @@ def _archiveDates(manifestDirectory: Path, cardId: int) -> tuple[str, ...]:
     return tuple(sorted(set(found), reverse=True))
 
 
-def _latestSnapshotArchived(databasePath: Path, manifestDirectory: Path, cardId: int) -> bool:
+def _latestSnapshotArchived(
+    databasePath: Path, manifestDirectory: Path, cardId: int
+) -> bool:
     snapshotId = _latestSnapshotId(databasePath, cardId)
     if snapshotId is None or not manifestDirectory.is_dir():
         return False

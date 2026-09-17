@@ -356,6 +356,14 @@ def buildParser() -> argparse.ArgumentParser:
         help="override the configured Dashcam archive destination",
     )
     cameraImport.add_argument(
+        "--photo-destination",
+        help="override the configured photo archive root for SLR stills",
+    )
+    cameraImport.add_argument(
+        "--video-destination",
+        help="override the configured home-video root for SLR clips",
+    )
+    cameraImport.add_argument(
         "--manifest-directory",
         help="override the camera-import manifest directory",
     )
@@ -529,6 +537,18 @@ def _runCameraImportWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
         or configuredStorage.get("dashcam")
         or homeVideoRoot / "Dashcam"
     )
+    photoDestination = Path(
+        args.photo_destination
+        or configuredStorage.get("photos")
+        or configuredStorage.get("photo")
+        or "/mnt/myPictures"
+    )
+    videoDestination = Path(
+        args.video_destination
+        or configuredStorage.get("homeVideo")
+        or configuredStorage.get("videoByDate")
+        or homeVideoRoot
+    )
     manifestDirectory = Path(
         args.manifest_directory
         or constants.applicationStateDirectory() / "cameraImports"
@@ -541,6 +561,8 @@ def _runCameraImportWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
             goproDestination=goproDestination,
             droneDestination=droneDestination,
             dashcamDestination=dashcamDestination,
+            photoDestination=photoDestination,
+            videoDestination=videoDestination,
             manifestDirectory=manifestDirectory,
             dryRun=dryRun,
             includeGoproCompanions=bool(args.include_gopro_companions),
@@ -734,29 +756,25 @@ def _runOrganizerWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
         if args.clean:
             nameStats = organizer.cleanTorrentNames(torrentDir=torrentDir)
         removeStats = organizer.removeTorrentsInLibrary(torrentDir=torrentDir)
-        drawBox(
-            f"""TORRENT SUMMARY
+        drawBox(f"""TORRENT SUMMARY
 Torrents deleted: {removeStats['deleted']}
 Torrents kept:    {removeStats['skipped']}
 Delete errors:    {removeStats['errors']}
 Names renamed:    {nameStats['renamed']}
 Names skipped:    {nameStats['skipped']}
 Rename errors:    {nameStats['errors']}
-"""
-        )
+""")
     elif args.clean:
         logger.doing("running clean mode")
         nameStats = organizer.cleanNames()
         cleanStats = organizer.cleanEmptyFolders()
-        drawBox(
-            f"""CLEAN SUMMARY
+        drawBox(f"""CLEAN SUMMARY
 Names renamed:   {nameStats['renamed']}
 Name errors:     {nameStats['errors']}
 Folders removed: {cleanStats['removed']}
 Folders kept:    {cleanStats['skipped']}
 Folder errors:   {cleanStats['errors']}
-"""
-        )
+""")
         logger.doing("normalising TV show and season folders")
         folderStats = _normaliseSeasonFolders(
             organizer,

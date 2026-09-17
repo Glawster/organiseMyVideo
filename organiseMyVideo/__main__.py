@@ -31,25 +31,37 @@ def _cameraImportParserBuild() -> argparse.ArgumentParser:
         description="plan/import camera media or inspect recorded imports",
     )
     parser.add_argument(
-        "-s", "--source", dest="importSource", metavar="SOURCE",
+        "-s",
+        "--source",
+        dest="importSource",
+        metavar="SOURCE",
         help="mounted card or copied card directory for a new import",
     )
     parser.add_argument(
-        "--list", dest="listHistory", action="store_true",
+        "--list",
+        dest="listHistory",
+        action="store_true",
         help="list all previous confirmed camera imports",
     )
     parser.add_argument("--full", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
-        "--card", type=int,
+        "--card",
+        type=int,
         help="without SOURCE show this card's full import manifest; with SOURCE assert card identity",
     )
     parser.add_argument("--gopro-destination")
     parser.add_argument("--drone-destination")
     parser.add_argument("--dashcam-destination")
+    parser.add_argument("--photo-destination")
+    parser.add_argument("--video-destination")
     parser.add_argument("--manifest-directory")
     parser.add_argument("--include-gopro-companions", action="store_true")
     parser.add_argument(
-        "-y", "--confirm", "--y", dest="confirm", action="store_true",
+        "-y",
+        "--confirm",
+        "--y",
+        dest="confirm",
+        action="store_true",
         help="confirm execution — actually make changes (default is dry-run)",
     )
     parser.add_argument("--debug", action="store_true")
@@ -62,7 +74,9 @@ def _cameraInventoryListParserBuild() -> argparse.ArgumentParser:
         prog="organiseMyVideo camera inventory",
         description="list registered camera cards",
     )
-    parser.add_argument("--list", dest="listInventory", action="store_true", required=True)
+    parser.add_argument(
+        "--list", dest="listInventory", action="store_true", required=True
+    )
     parser.add_argument("--card", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--full", action="store_true", help=argparse.SUPPRESS)
     return parser
@@ -168,7 +182,14 @@ def _cameraInventoryLocationParserBuild() -> argparse.ArgumentParser:
         help="set the card's current physical location",
     )
     parser.add_argument("--location", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("-y", "--confirm", "--y", dest="confirm", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "-y",
+        "--confirm",
+        "--y",
+        dest="confirm",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--quiet", action="store_true")
     return parser
@@ -201,13 +222,20 @@ def _cameraImportHistoryRun(arguments: Sequence[str]) -> int:
         parser.error("--confirm is not valid for import history")
     if args.include_gopro_companions:
         parser.error("--include-gopro-companions is not valid for import history")
-    if args.gopro_destination or args.drone_destination or args.dashcam_destination:
+    if (
+        args.gopro_destination
+        or args.drone_destination
+        or args.dashcam_destination
+        or args.photo_destination
+        or args.video_destination
+    ):
         parser.error("archive destination overrides are not valid for import history")
     if not args.listHistory and args.card is None:
         parser.error("use --list for all imports or --card ID for one card")
 
     manifestDirectory = Path(
-        args.manifest_directory or constants.applicationStateDirectory() / "cameraImports"
+        args.manifest_directory
+        or constants.applicationStateDirectory() / "cameraImports"
     )
     records = cameraImportHistory(manifestDirectory, cardId=args.card)
     if args.card is not None:
@@ -217,7 +245,9 @@ def _cameraImportHistoryRun(arguments: Sequence[str]) -> int:
     return 0
 
 
-def _cameraImportArgumentsValidate(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+def _cameraImportArgumentsValidate(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> None:
     if args.full:
         parser.error("--full is no longer required; use --card ID")
     if args.importSource is None:
@@ -257,17 +287,34 @@ def _byteDisplay(value: int) -> str:
 
 def _cameraImportProgressRenderer() -> Callable[[int, int, str], None]:
     finished = False
+    lastName = ""
 
     def _render(copiedBytes: int, totalBytes: int, filename: str) -> None:
-        nonlocal finished
+        nonlocal finished, lastName
         if finished or totalBytes <= 0:
             return
+        copiedBytes = max(0, min(copiedBytes, totalBytes))
         isTty = getattr(sys.stderr, "isatty", None)
         if not callable(isTty) or not isTty():
+            if not lastName and copiedBytes == 0:
+                print(
+                    f"Importing camera media: {_byteDisplay(totalBytes)} to copy...",
+                    file=sys.stderr,
+                )
+            if filename and filename != lastName:
+                print(f"Importing {filename}...", file=sys.stderr)
+                lastName = filename
+            if copiedBytes >= totalBytes:
+                print(
+                    f"Importing camera media: {_byteDisplay(copiedBytes)} / {_byteDisplay(totalBytes)} complete.",
+                    file=sys.stderr,
+                )
+                finished = True
             return
-        copiedBytes = max(0, min(copiedBytes, totalBytes))
         percent = int((copiedBytes * 100) / totalBytes)
-        progressText = f" {percent:3d}%  {_byteDisplay(copiedBytes)} / {_byteDisplay(totalBytes)}"
+        progressText = (
+            f" {percent:3d}%  {_byteDisplay(copiedBytes)} / {_byteDisplay(totalBytes)}"
+        )
         suffix = f"  {filename}" if filename else ""
         columns = shutil.get_terminal_size(fallback=(100, 24)).columns
         barWidth = max(10, min(40, columns - len(progressText) - len(suffix) - 14))
@@ -322,7 +369,9 @@ def _cameraImportRunPatch(
     return cameraImportModule, originalRun, _run
 
 
-def _cameraImportPlainSummaryRun(arguments: Sequence[str], *, expectedCardId: Optional[int] = None) -> int:
+def _cameraImportPlainSummaryRun(
+    arguments: Sequence[str], *, expectedCardId: Optional[int] = None
+) -> int:
     cameraImportModule, originalRun, patchedRun = _cameraImportRunPatch(expectedCardId)
     originalDrawBox = _legacy.drawBox
     cameraImportModule.cameraImportRun = patchedRun
@@ -335,7 +384,9 @@ def _cameraImportPlainSummaryRun(arguments: Sequence[str], *, expectedCardId: Op
         _legacy.drawBox = originalDrawBox
 
 
-def _cameraImportConfirmedRun(arguments: Sequence[str], *, expectedCardId: Optional[int] = None) -> int:
+def _cameraImportConfirmedRun(
+    arguments: Sequence[str], *, expectedCardId: Optional[int] = None
+) -> int:
     progressCallback = _cameraImportProgressRenderer()
     cameraImportModule, originalRun, patchedRun = _cameraImportRunPatch(
         expectedCardId, progressCallback=progressCallback
