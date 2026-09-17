@@ -357,11 +357,14 @@ def testReassignWithoutExistingLabelIsRejected(cardRoot: Path, databasePath: Pat
         service.inventoryScan(cardRoot, 2, reassign=True)
 
 
-def testFirstScanRequiresCardId(cardRoot: Path, databasePath: Path):
+def testFirstScanSuggestsCardId(cardRoot: Path, databasePath: Path):
     service = CameraInventory(dryRun=True, databasePath=databasePath)
 
-    with pytest.raises(ValueError, match="card ID is required"):
+    with pytest.raises(ValueError, match="suggested card ID: 1") as error:
         service.inventoryScan(cardRoot)
+
+    assert "--card 1" in str(error.value)
+    assert not databasePath.exists()
 
 
 def testMarketedGigabytesRecognisesOperatorCardSizes():

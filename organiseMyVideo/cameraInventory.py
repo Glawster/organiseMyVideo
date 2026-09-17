@@ -65,8 +65,6 @@ CID_BRANDS = {
     0x82: "Sony",
     0x9C: "Amazon",
 }
-# Operator cards are these sold sizes. Matching only them avoids treating a
-# copied tree on a 1 TB disk as a 1024 GB card.
 MARKETED_GIGABYTES = (32, 64, 128, 256)
 PHOTO_SUFFIXES = {".jpg", ".jpeg", ".png"}
 VIDEO_SUFFIXES = {".mp4", ".mov", ".avi", ".m4v"}
@@ -80,26 +78,9 @@ KIND_BY_SUFFIX = {
     **{suffix: "video" for suffix in VIDEO_SUFFIXES},
 }
 DASHCAM_DIRECTORY_NAMES = {
-    "movie",
-    "nbdvr",
-    "record",
-    "rec",
-    "parking",
-    "event",
-    "normal",
-    "front",
-    "rear",
-    "protected",
-    "n-video",
-    "p-video",
-    "n_video",
-    "p_video",
-    "e_video",
-    "video",
-    "snapshot",
-    "jpeg",
-    "dpb10",
-    "drivepro",
+    "movie", "nbdvr", "record", "rec", "parking", "event", "normal",
+    "front", "rear", "protected", "n-video", "p-video", "n_video",
+    "p_video", "e_video", "video", "snapshot", "jpeg", "dpb10", "drivepro",
 }
 DASHCAM_NUMBERED_FOLDER = re.compile(
     r"^\d{3}(EVENT|PHOTO|SAVED|PARKM|TLPSE|UNSVD)$", re.IGNORECASE
@@ -122,8 +103,6 @@ DJI_MEDIA_FOLDER = re.compile(r"^\d+MEDIA$", re.IGNORECASE)
 
 @dataclass(frozen=True)
 class CardCapacity:
-    """Volume and content sizes for one scanned card path."""
-
     totalBytes: Optional[int]
     usedBytes: int
     freeBytes: Optional[int]
@@ -132,8 +111,6 @@ class CardCapacity:
 
 @dataclass(frozen=True)
 class CardFileRecord:
-    """One file discovered on a camera card."""
-
     relativePath: str
     sizeBytes: int
     modifiedAt: Optional[str]
@@ -144,8 +121,6 @@ class CardFileRecord:
 
 @dataclass(frozen=True)
 class CameraIdentity:
-    """Camera manufacturer details gleaned from on-card files."""
-
     manufacturer: Optional[str] = None
     model: Optional[str] = None
     serial: Optional[str] = None
@@ -155,8 +130,6 @@ class CameraIdentity:
 
 @dataclass(frozen=True)
 class CardInventoryRecord:
-    """One inventory snapshot attributed to an operator card ID."""
-
     cardId: int
     sourcePath: str
     inventoriedAt: str
@@ -188,8 +161,6 @@ class CardInventoryRecord:
 
 
 class CameraInventory:
-    """Scan camera cards and persist snapshots keyed by numeric card ID."""
-
     def __init__(
         self,
         dryRun: bool = True,
@@ -197,28 +168,13 @@ class CameraInventory:
         visionDescribe: Optional[Callable[[list[Path]], str]] = None,
         apiKey: Optional[str] = None,
     ):
-        """Initialise the inventory service.
-
-        Args:
-            dryRun: When True, scan and report without SQLite or vision calls.
-            databasePath: SQLite file. Defaults to application local state.
-            visionDescribe: Optional injected thumbnail summariser for tests.
-            apiKey: Optional xAI key. Defaults to ``XAI_API_KEY``.
-        """
-
         self.dryRun = dryRun
-        self.databasePath = (
-            Path(databasePath) if databasePath else CAMERA_INVENTORY_DATABASE
-        )
+        self.databasePath = Path(databasePath) if databasePath else CAMERA_INVENTORY_DATABASE
         self._visionDescribe = visionDescribe
         self._apiKey = apiKey
         self.filesystem = FilesystemOperations(dryRun=dryRun)
 
-    ## inventory
-
     def inventoryPersist(self, record: CardInventoryRecord) -> CardInventoryRecord:
-        """Write *record* as a new snapshot for its card ID."""
-
         logger.action(
             f"write camera inventory snapshot: card {record.cardId} -> {self.databasePath}"
         )
@@ -249,12 +205,9 @@ class CameraInventory:
         reassign: bool = False,
         brand: Optional[str] = None,
     ) -> CardInventoryRecord:
-        """Build an inventory snapshot for *source* attributed to *cardId*."""
-
         source = Path(source).expanduser().resolve()
         if not source.is_dir():
             raise ValueError(f"source directory does not exist: {source}")
-        # A mount container would measure the host disk and label the wrong root.
         mountedChildren = sorted(
             child for child in source.iterdir() if os.path.ismount(str(child))
         )
@@ -281,9 +234,7 @@ class CameraInventory:
             logger.value("reassign to", cardId)
 
         files = tuple(self._cardFilesCollect(source))
-        capacity = self._cardCapacityMeasure(
-            source, sum(item.sizeBytes for item in files)
-        )
+        capacity = self._cardCapacityMeasure(source, sum(item.sizeBytes for item in files))
         dateStart, dateEnd, dateSource = self._cardDateRange(files)
         cameraKinds = tuple(
             sorted({item.cameraKind for item in files if item.cameraKind != "unknown"})
@@ -298,9 +249,7 @@ class CameraInventory:
             or cid.get("brand")
             or _identityText(existingPayload.get("cardBrand"))
         )
-        cardProduct = cid.get("product") or _identityText(
-            existingPayload.get("cardProduct")
-        )
+        cardProduct = cid.get("product") or _identityText(existingPayload.get("cardProduct"))
         cardRatedGigabytes = _ratedGigabytesResolve(
             capacity.totalBytes, existingPayload.get("cardRatedGigabytes")
         )
@@ -342,8 +291,6 @@ class CameraInventory:
         return record
 
     def inventoryShow(self, cardId: int) -> Optional[CardInventoryRecord]:
-        """Return the latest stored snapshot for *cardId*, if one exists."""
-
         cardId = self._cardIdValidate(cardId)
         if not self.databasePath.is_file():
             return None
@@ -371,11 +318,7 @@ class CameraInventory:
             ).fetchall()
         return _recordFromRow(row, files)
 
-    ## card
-
     def _cardCapacityMeasure(self, source: Path, contentBytes: int) -> CardCapacity:
-        """Return volume capacity for *source* plus summed media size."""
-
         try:
             stats = os.statvfs(source)
         except OSError:
@@ -388,8 +331,6 @@ class CameraInventory:
     def _cardDateRange(
         self, files: tuple[CardFileRecord, ...]
     ) -> tuple[Optional[str], Optional[str], str]:
-        """Return earliest/latest capture time, falling back to mtime."""
-
         captureTimes = [item.captureAt for item in files if item.captureAt]
         if captureTimes:
             return min(captureTimes), max(captureTimes), "capture-metadata"
@@ -399,15 +340,11 @@ class CameraInventory:
         return None, None, "unavailable"
 
     def _cardFilesCollect(self, source: Path) -> list[CardFileRecord]:
-        """Walk *source* and classify camera files, skipping known clutter."""
-
         records: list[CardFileRecord] = []
         for directory, dirNames, fileNames in os.walk(source):
             dirNames[:] = [
-                name
-                for name in dirNames
-                if name.lower() not in IGNORED_DIRECTORY_NAMES
-                and not name.startswith("._")
+                name for name in dirNames
+                if name.lower() not in IGNORED_DIRECTORY_NAMES and not name.startswith("._")
             ]
             current = Path(directory)
             for fileName in fileNames:
@@ -423,9 +360,7 @@ class CameraInventory:
                     CardFileRecord(
                         relativePath=relative,
                         sizeBytes=stat.st_size,
-                        modifiedAt=_datetimeFormat(
-                            datetime.fromtimestamp(stat.st_mtime)
-                        ),
+                        modifiedAt=_datetimeFormat(datetime.fromtimestamp(stat.st_mtime)),
                         captureAt=_datetimeFormat(captureAt) if captureAt else None,
                         kind=_fileKind(path),
                         cameraKind=_fileCameraKind(relative),
@@ -433,6 +368,50 @@ class CameraInventory:
                 )
         records.sort(key=lambda item: item.relativePath)
         return records
+
+    def _cardIdsStored(self) -> set[int]:
+        """Return inventoried or explicitly registered card IDs without writing."""
+
+        if not self.databasePath.is_file():
+            return set()
+        try:
+            connection = sqlite3.connect(f"file:{self.databasePath}?mode=ro", uri=True)
+        except sqlite3.Error:
+            return set()
+        used: set[int] = set()
+        try:
+            tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            if "cardInventory" in tables:
+                used.update(
+                    int(row[0])
+                    for row in connection.execute(
+                        "SELECT DISTINCT cardId FROM cardInventory WHERE cardId >= 1"
+                    ).fetchall()
+                )
+            if "cardLocation" in tables:
+                used.update(
+                    int(row[0])
+                    for row in connection.execute(
+                        "SELECT cardId FROM cardLocation WHERE cardId >= 1"
+                    ).fetchall()
+                )
+        except sqlite3.Error:
+            return used
+        finally:
+            connection.close()
+        return used
+
+    def _cardIdNextAvailable(self) -> int:
+        used = self._cardIdsStored()
+        candidate = 1
+        while candidate in used:
+            candidate += 1
+        return candidate
 
     def _cardIdResolve(
         self,
@@ -442,15 +421,19 @@ class CameraInventory:
         *,
         reassign: bool = False,
     ) -> int:
-        """Use `--card` or the on-card label, and refuse a mismatch."""
-
         if cardId is None:
             if reassign:
                 raise ValueError("--reassign requires --card with the new ID")
             if storedId is None:
+                suggested = self._cardIdNextAvailable()
+                existing = sorted(self._cardIdsStored())
+                existingText = ", ".join(str(value) for value in existing) or "none"
                 raise ValueError(
-                    "card ID is required on first scan; pass --card or write "
-                    "organiseMyVideo.001 first"
+                    "no card ID found on this card; "
+                    f"existing card IDs: {existingText}; "
+                    f"suggested card ID: {suggested}; "
+                    f"re-run with --card {suggested} "
+                    "(add --confirm to write the card label)"
                 )
             return storedId
         resolved = self._cardIdValidate(cardId)
@@ -461,48 +444,29 @@ class CameraInventory:
                 "pass --reassign --confirm to change it"
             )
         if reassign and storedId is None:
-            raise ValueError(
-                "no card label to reassign; omit --reassign for a first bind"
-            )
+            raise ValueError("no card label to reassign; omit --reassign for a first bind")
         return resolved
 
     def _cardIdValidate(self, cardId: int) -> int:
-        """Reject non-integers, booleans, and IDs below 1."""
-
         if isinstance(cardId, bool) or not isinstance(cardId, int) or cardId < 1:
             raise ValueError("card ID must be a positive integer")
         return cardId
 
     def _cardLabelRemovePrevious(self, record: CardInventoryRecord) -> None:
-        """Remove superseded on-card label files after a reassign or rename."""
-
         for oldLabel in record.previousLabelPaths:
-            if oldLabel == record.cardLabelPath:
-                continue
-            Path(oldLabel).unlink(missing_ok=True)
+            if oldLabel != record.cardLabelPath:
+                Path(oldLabel).unlink(missing_ok=True)
 
     def _cardLabelWrite(self, record: CardInventoryRecord) -> None:
-        """Write the JSON card summary to ``organiseMyVideo.NNN``."""
-
         if not record.cardLabelPath:
             return
-        payload = json.dumps(
-            _cardLabelPayload(record),
-            indent=2,
-            sort_keys=True,
-        )
+        payload = json.dumps(_cardLabelPayload(record), indent=2, sort_keys=True)
         self.filesystem.writeText(
-            Path(record.cardLabelPath),
-            payload + "\n",
-            encoding="utf-8",
+            Path(record.cardLabelPath), payload + "\n", encoding="utf-8",
             stateKind="application-state",
         )
 
-    ## content
-
     def _contentDescribe(self, thumbnailPaths: list[Path]) -> tuple[str, str]:
-        """Return a card-level summary and how it was produced."""
-
         if not thumbnailPaths:
             return "", "no-thumbnails"
         logger.value("thumbnail samples", len(thumbnailPaths))
@@ -517,8 +481,6 @@ class CameraInventory:
         return summary, "described" if summary else "unavailable"
 
     def _contentDescribeLive(self, thumbnailPaths: list[Path]) -> str:
-        """Call the injected or xAI vision client for *thumbnailPaths*."""
-
         if self._visionDescribe is not None:
             return self._visionDescribe(thumbnailPaths)
         apiKey = (self._apiKey or os.environ.get("XAI_API_KEY") or "").strip()
@@ -540,8 +502,6 @@ class CameraInventory:
     def _contentThumbnailsSample(
         self, files: tuple[CardFileRecord, ...], source: Path
     ) -> list[Path]:
-        """Pick evenly spaced ``.THM`` files, or JPEGs when none exist."""
-
         candidates = [item for item in files if item.kind == "thumbnail"]
         if not candidates:
             candidates = [item for item in files if item.kind == "photo"]
@@ -555,20 +515,14 @@ class CameraInventory:
             chosen = ordered
         else:
             lastIndex = len(ordered) - 1
-            indexes = sorted(
-                {
-                    round(index * lastIndex / (THUMBNAIL_SAMPLE_LIMIT - 1))
-                    for index in range(THUMBNAIL_SAMPLE_LIMIT)
-                }
-            )
+            indexes = sorted({
+                round(index * lastIndex / (THUMBNAIL_SAMPLE_LIMIT - 1))
+                for index in range(THUMBNAIL_SAMPLE_LIMIT)
+            })
             chosen = [ordered[index] for index in indexes]
         return [source / item.relativePath for item in chosen]
 
-    ## database
-
     def _databaseConnect(self) -> sqlite3.Connection:
-        """Open the inventory database with camelCase row access."""
-
         connection = sqlite3.connect(self.databasePath)
         connection.row_factory = sqlite3.Row
         return connection
@@ -579,8 +533,6 @@ class CameraInventory:
         inventoryId: int,
         files: tuple[CardFileRecord, ...],
     ) -> None:
-        """Store the per-file rows for one snapshot."""
-
         connection.executemany(
             """
             INSERT INTO cardInventoryFile (
@@ -588,30 +540,18 @@ class CameraInventory:
                 kind, cameraKind
             ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            [
-                (
-                    inventoryId,
-                    item.relativePath,
-                    item.sizeBytes,
-                    item.modifiedAt,
-                    item.captureAt,
-                    item.kind,
-                    item.cameraKind,
-                )
-                for item in files
-            ],
+            [(
+                inventoryId, item.relativePath, item.sizeBytes, item.modifiedAt,
+                item.captureAt, item.kind, item.cameraKind,
+            ) for item in files],
         )
 
     def _databaseInitialize(self, connection: sqlite3.Connection) -> None:
-        """Create camelCase catalogue tables when they are missing."""
-
         catalogueSchemaApply(connection)
 
     def _databaseSnapshotInsert(
         self, connection: sqlite3.Connection, record: CardInventoryRecord
     ) -> int:
-        """Insert the snapshot header and return its inventoryId."""
-
         counts = record.fileCounts
         cursor = connection.execute(
             """
@@ -627,36 +567,18 @@ class CameraInventory:
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                record.cardId,
-                record.inventoriedAt,
-                record.sourcePath,
-                record.volumeLabel,
-                record.filesystemId,
-                record.capacity.totalBytes,
-                record.capacity.usedBytes,
-                record.capacity.freeBytes,
-                record.capacity.contentBytes,
-                record.cardRatedGigabytes,
-                record.dateStart,
-                record.dateEnd,
-                record.dateSource,
-                ",".join(record.cameraKinds),
-                counts.get("video", 0),
-                counts.get("photo", 0),
-                counts.get("thumbnail", 0),
-                counts.get("preview", 0),
-                counts.get("sidecar", 0),
-                counts.get("other", 0),
-                record.thumbnailSampled,
-                record.contentSummary,
-                record.visionStatus,
-                record.volumeKind,
-                record.manufacturer,
-                record.cameraModel,
-                record.cameraSerial,
-                record.firmwareVersion,
-                record.cameraWifiMac,
-                record.goproCardId,
+                record.cardId, record.inventoriedAt, record.sourcePath,
+                record.volumeLabel, record.filesystemId, record.capacity.totalBytes,
+                record.capacity.usedBytes, record.capacity.freeBytes,
+                record.capacity.contentBytes, record.cardRatedGigabytes,
+                record.dateStart, record.dateEnd, record.dateSource,
+                ",".join(record.cameraKinds), counts.get("video", 0),
+                counts.get("photo", 0), counts.get("thumbnail", 0),
+                counts.get("preview", 0), counts.get("sidecar", 0),
+                counts.get("other", 0), record.thumbnailSampled,
+                record.contentSummary, record.visionStatus, record.volumeKind,
+                record.manufacturer, record.cameraModel, record.cameraSerial,
+                record.firmwareVersion, record.cameraWifiMac, record.goproCardId,
                 record.cardBrand,
             ),
         )
@@ -673,12 +595,8 @@ def cameraInventoryRun(
     reassign: bool = False,
     brand: Optional[str] = None,
 ) -> CardInventoryRecord:
-    """Scan or show a card inventory snapshot for the CLI adapter."""
-
     service = CameraInventory(
-        dryRun=dryRun,
-        databasePath=databasePath,
-        visionDescribe=visionDescribe,
+        dryRun=dryRun, databasePath=databasePath, visionDescribe=visionDescribe
     )
     if source is None:
         if reassign:
@@ -701,14 +619,10 @@ def cameraInventorySummary(
     persisted: bool,
     databasePath: Path,
 ) -> str:
-    """Return a console summary for one inventory snapshot."""
-
     persistedLabel = "yes" if persisted else "no (dry-run)"
     reassignLine = ""
     if record.previousCardId is not None:
-        reassignLine = (
-            f"  Reassign:         {record.previousCardId} -> {record.cardId}\n"
-        )
+        reassignLine = f"  Reassign:         {record.previousCardId} -> {record.cardId}\n"
     return f"""{_cardVolumeSummary(record, extra=reassignLine)}
   Card label:       {record.cardLabelPath or "none"}
   Database:         {databasePath}
@@ -716,12 +630,7 @@ def cameraInventorySummary(
 """
 
 
-## utilities
-
-
 def _cardLabelFiles(root: Path) -> list[Path]:
-    """Return on-card label files at *root*, including the legacy name."""
-
     found: list[Path] = []
     try:
         children = list(root.iterdir())
@@ -730,16 +639,12 @@ def _cardLabelFiles(root: Path) -> list[Path]:
     for child in children:
         if not child.is_file():
             continue
-        if CARD_LABEL_NAME.fullmatch(child.name):
-            found.append(child)
-        elif child.name == CAMERA_CARD_LABEL_LEGACY_FILENAME:
+        if CARD_LABEL_NAME.fullmatch(child.name) or child.name == CAMERA_CARD_LABEL_LEGACY_FILENAME:
             found.append(child)
     return found
 
 
 def _cardLabelLocate(root: Path) -> tuple[Optional[Path], Optional[int]]:
-    """Return the existing label path and card ID at *root*, if any."""
-
     found: list[tuple[Path, int]] = []
     for path in _cardLabelFiles(root):
         match = CARD_LABEL_NAME.fullmatch(path.name)
@@ -762,8 +667,6 @@ def _cardLabelLocate(root: Path) -> tuple[Optional[Path], Optional[int]]:
 
 
 def _cardLabelPayload(record: CardInventoryRecord) -> dict:
-    """Return JSON stored in the on-card label, including the text summary."""
-
     counts = record.fileCounts
     return {
         "application": "organiseMyVideo",
@@ -799,8 +702,6 @@ def _cardLabelPayload(record: CardInventoryRecord) -> dict:
 
 
 def _cardLabelPayloadRead(path: Optional[Path]) -> dict:
-    """Return JSON from an existing on-card label, or an empty dict."""
-
     if path is None or not path.is_file():
         return {}
     try:
@@ -811,8 +712,6 @@ def _cardLabelPayloadRead(path: Optional[Path]) -> dict:
 
 
 def _cidDecode(hexCid: str) -> dict:
-    """Decode an MMC/SD CID hex string into brand and product name."""
-
     cleaned = hexCid.strip().replace(" ", "")
     if len(cleaned) < 32:
         return {}
@@ -823,15 +722,10 @@ def _cidDecode(hexCid: str) -> dict:
     if len(raw) < 8:
         return {}
     product = raw[3:8].decode("ascii", errors="ignore").strip("\x00 ")
-    return {
-        "brand": CID_BRANDS.get(raw[0]),
-        "product": product or None,
-    }
+    return {"brand": CID_BRANDS.get(raw[0]), "product": product or None}
 
 
 def _cidHexForPath(path: Path) -> Optional[str]:
-    """Return a CID hex string from sysfs when the kernel exposes one."""
-
     block = _mountBlockDevice(path)
     if block is None:
         return None
@@ -852,8 +746,6 @@ def _cidHexForPath(path: Path) -> Optional[str]:
 
 
 def _marketedGigabytes(totalBytes: Optional[int]) -> Optional[int]:
-    """Return the sold SD size in decimal GB when *totalBytes* matches."""
-
     if not totalBytes:
         return None
     for gigabytes in MARKETED_GIGABYTES:
@@ -864,8 +756,6 @@ def _marketedGigabytes(totalBytes: Optional[int]) -> Optional[int]:
 
 
 def _ratedGigabytesResolve(totalBytes: Optional[int], stored: object) -> Optional[int]:
-    """Prefer a live volume match, else the size stored on the card label."""
-
     derived = _marketedGigabytes(totalBytes)
     if derived:
         return derived
@@ -875,8 +765,6 @@ def _ratedGigabytesResolve(totalBytes: Optional[int], stored: object) -> Optiona
 
 
 def _mountBlockDevice(path: Path) -> Optional[Path]:
-    """Return /sys/dev/block/MAJOR:MINOR for the mount covering *path*."""
-
     resolved = str(path.resolve())
     bestMinor = None
     bestLength = -1
@@ -904,8 +792,6 @@ def _mountBlockDevice(path: Path) -> Optional[Path]:
 
 
 def _cardLabelRead(labelPath: Path) -> Optional[int]:
-    """Return the stored card ID, or ``None`` when the label is missing."""
-
     if not labelPath.is_file():
         return None
     try:
@@ -930,8 +816,6 @@ def _cardLabelRead(labelPath: Path) -> Optional[int]:
 
 
 def _cardLabelRoot(source: Path) -> Path:
-    """Walk toward the mount point and pick the card volume root."""
-
     current = source.resolve()
     seen: list[Path] = []
     while True:
@@ -950,8 +834,6 @@ def _cardLabelRoot(source: Path) -> Path:
 
 
 def _cameraIdentityCollect(root: Path, cameraKinds: tuple[str, ...]) -> CameraIdentity:
-    """Read manufacturer details from known on-card files and folders."""
-
     gopro = _goproIdentityRead(root)
     if gopro.manufacturer:
         return gopro
@@ -966,8 +848,6 @@ def _cameraIdentityCollect(root: Path, cameraKinds: tuple[str, ...]) -> CameraId
 
 
 def _goproCardIdRead(root: Path) -> Optional[str]:
-    """Read GoPro's opaque card token without treating it as an SD hardware CID."""
-
     try:
         return _identityText((root / "MISC" / "card").read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError):
@@ -975,8 +855,6 @@ def _goproCardIdRead(root: Path) -> Optional[str]:
 
 
 def _goproIdentityRead(root: Path) -> CameraIdentity:
-    """Parse GoPro ``MISC/version.txt`` when present."""
-
     path = root / "MISC" / "version.txt"
     if not path.is_file():
         if (root / "Get_started_with_GoPro.url").is_file():
@@ -984,7 +862,6 @@ def _goproIdentityRead(root: Path) -> CameraIdentity:
         return CameraIdentity()
     try:
         raw = path.read_text(encoding="utf-8-sig")
-        # Older GoPro firmware writes a trailing comma before the final brace.
         data = json.loads(re.sub(r",(\s*})\s*$", r"\1", raw))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return CameraIdentity(manufacturer="GoPro")
@@ -1000,16 +877,12 @@ def _goproIdentityRead(root: Path) -> CameraIdentity:
 
 
 def _identityText(value: object) -> Optional[str]:
-    """Return a stripped string, or ``None`` when empty."""
-
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
 
 
 def _transcendIdentityRead(root: Path) -> CameraIdentity:
-    """Map a DrivePro folder such as ``DP250`` to Transcend model text."""
-
     try:
         names = [child.name for child in root.iterdir() if child.is_dir()]
     except OSError:
@@ -1019,46 +892,29 @@ def _transcendIdentityRead(root: Path) -> CameraIdentity:
             continue
         upper = name.upper()
         if upper.startswith("DPB"):
-            return CameraIdentity(
-                manufacturer="Transcend", model=f"DrivePro Body {name[3:]}"
-            )
+            return CameraIdentity(manufacturer="Transcend", model=f"DrivePro Body {name[3:]}")
         if upper.startswith("DP"):
-            return CameraIdentity(
-                manufacturer="Transcend", model=f"DrivePro {name[2:]}"
-            )
+            return CameraIdentity(manufacturer="Transcend", model=f"DrivePro {name[2:]}")
     return CameraIdentity()
 
 
 def _cardLooksLikeVolumeRoot(path: Path) -> bool:
-    """Return True when *path* looks like a removable camera-card root."""
-
     try:
         names = {child.name.lower() for child in path.iterdir()}
     except OSError:
         return False
     if "dcim" in names:
         return True
-    if names & {
-        "n_video",
-        "n-video",
-        "p_video",
-        "p-video",
-        "record",
-        "system",
-    }:
+    if names & {"n_video", "n-video", "p_video", "p-video", "record", "system"}:
         return True
     return any(DASHCAM_MODEL_FOLDER.fullmatch(name) for name in names)
 
 
 def _cardVolumeSummary(record: CardInventoryRecord, extra: str = "") -> str:
-    """Return the card summary stored on the volume and shown in the console."""
-
     counts = record.fileCounts
     content = record.contentSummary or record.visionStatus
     identity = ""
-    camera = " ".join(
-        part for part in (record.manufacturer, record.cameraModel) if part
-    )
+    camera = " ".join(part for part in (record.manufacturer, record.cameraModel) if part)
     if camera:
         identity += f"  Camera:           {camera}\n"
     if record.cameraSerial:
@@ -1071,8 +927,7 @@ def _cardVolumeSummary(record: CardInventoryRecord, extra: str = "") -> str:
         identity += f"  GoPro card token: {record.goproCardId}\n"
     cardSize = (
         f"  Card size:        {record.cardRatedGigabytes} GB\n"
-        if record.cardRatedGigabytes
-        else ""
+        if record.cardRatedGigabytes else ""
     )
     return f"""CAMERA CARD INVENTORY
   Card ID:          {record.cardId}
@@ -1091,16 +946,12 @@ def _cardVolumeSummary(record: CardInventoryRecord, extra: str = "") -> str:
 
 
 def _bytesFormat(value: Optional[int]) -> str:
-    """Return a short human-readable byte count."""
-
     if value is None:
         return "unknown"
     size = float(value)
     for unit in ("B", "KB", "MB", "GB", "TB"):
         if size < 1024 or unit == "TB":
-            if unit == "B":
-                return f"{int(size)} B"
-            return f"{size:.1f} {unit}"
+            return f"{int(size)} B" if unit == "B" else f"{size:.1f} {unit}"
         size /= 1024
     return f"{int(value)} B"
 
@@ -1108,8 +959,6 @@ def _bytesFormat(value: Optional[int]) -> str:
 def _dateRangeFormat(
     dateStart: Optional[str], dateEnd: Optional[str], dateSource: str
 ) -> str:
-    """Return a one-line date-range description."""
-
     if not dateStart:
         return f"unknown ({dateSource})"
     startDay = dateStart[:10]
@@ -1120,24 +969,19 @@ def _dateRangeFormat(
 
 
 def _datetimeFormat(value: datetime) -> str:
-    """Store timestamps as comparable naive ISO values."""
-
     if value.tzinfo is not None:
         value = value.astimezone(timezone.utc).replace(tzinfo=None)
     return value.replace(microsecond=0).isoformat()
 
 
 def _fileCameraKind(relativePath: str) -> str:
-    """Classify a relative card path as gopro, dji, dashcam, or unknown."""
-
     posix = relativePath.replace("\\", "/")
     name = posix.rsplit("/", 1)[-1]
     stem = name.rsplit(".", 1)[0]
     if name.upper().startswith("DJI_"):
         return "dji"
     for part in posix.split("/"):
-        upper = part.upper()
-        if upper.endswith("GOPRO"):
+        if part.upper().endswith("GOPRO"):
             return "gopro"
         if DJI_MEDIA_FOLDER.fullmatch(part):
             return "dji"
@@ -1149,39 +993,24 @@ def _fileCameraKind(relativePath: str) -> str:
 
 
 def _fileDashcamMatch(posixPath: str, fileName: str) -> bool:
-    """Return True when a path looks like a common dash-cam layout."""
-
     if DASHCAM_FILENAME.match(fileName):
         return True
     for part in posixPath.split("/"):
         if part.lower() in DASHCAM_DIRECTORY_NAMES:
             return True
-        if DASHCAM_NUMBERED_FOLDER.fullmatch(part):
-            return True
-        if DASHCAM_MODEL_FOLDER.fullmatch(part):
+        if DASHCAM_NUMBERED_FOLDER.fullmatch(part) or DASHCAM_MODEL_FOLDER.fullmatch(part):
             return True
     return False
 
 
 def _fileCounts(files: tuple[CardFileRecord, ...]) -> dict[str, int]:
-    """Count files by kind for the snapshot header."""
-
-    counts = {
-        "video": 0,
-        "photo": 0,
-        "thumbnail": 0,
-        "preview": 0,
-        "sidecar": 0,
-        "other": 0,
-    }
+    counts = {"video": 0, "photo": 0, "thumbnail": 0, "preview": 0, "sidecar": 0, "other": 0}
     for item in files:
         counts[item.kind if item.kind in counts else "other"] += 1
     return counts
 
 
 def _fileIgnored(fileName: str) -> bool:
-    """Return True for AppleDouble, desktop, and similar clutter files."""
-
     lowered = fileName.lower()
     return (
         fileName.startswith("._")
@@ -1192,14 +1021,10 @@ def _fileIgnored(fileName: str) -> bool:
 
 
 def _fileKind(path: Path) -> str:
-    """Return the inventory kind for one file suffix."""
-
     return KIND_BY_SUFFIX.get(path.suffix.lower(), "other")
 
 
 def _filesystemIdRead(source: Path) -> Optional[str]:
-    """Return a stable device identifier for the scanned path."""
-
     try:
         return str(source.stat().st_dev)
     except OSError:
@@ -1207,62 +1032,37 @@ def _filesystemIdRead(source: Path) -> Optional[str]:
 
 
 def _recordFromRow(row: sqlite3.Row, files: list[sqlite3.Row]) -> CardInventoryRecord:
-    """Rehydrate a dataclass snapshot from SQLite rows."""
-
     cameraKinds = tuple(part for part in (row["cameraKinds"] or "").split(",") if part)
     return CardInventoryRecord(
-        cardId=row["cardId"],
-        sourcePath=row["sourcePath"],
-        inventoriedAt=row["inventoriedAt"],
-        volumeLabel=row["volumeLabel"] or "",
-        filesystemId=row["filesystemId"],
+        cardId=row["cardId"], sourcePath=row["sourcePath"], inventoriedAt=row["inventoriedAt"],
+        volumeLabel=row["volumeLabel"] or "", filesystemId=row["filesystemId"],
         capacity=CardCapacity(
-            totalBytes=row["cardSizeBytes"],
-            usedBytes=row["usedBytes"],
-            freeBytes=row["freeBytes"],
-            contentBytes=row["contentBytes"],
+            totalBytes=row["cardSizeBytes"], usedBytes=row["usedBytes"],
+            freeBytes=row["freeBytes"], contentBytes=row["contentBytes"],
         ),
-        dateStart=row["dateStart"],
-        dateEnd=row["dateEnd"],
-        dateSource=row["dateSource"],
+        dateStart=row["dateStart"], dateEnd=row["dateEnd"], dateSource=row["dateSource"],
         cameraKinds=cameraKinds,
         fileCounts={
-            "video": row["videoCount"],
-            "photo": row["photoCount"],
-            "thumbnail": row["thumbnailCount"],
-            "preview": row["previewCount"],
-            "sidecar": row["sidecarCount"],
-            "other": row["otherCount"],
+            "video": row["videoCount"], "photo": row["photoCount"],
+            "thumbnail": row["thumbnailCount"], "preview": row["previewCount"],
+            "sidecar": row["sidecarCount"], "other": row["otherCount"],
         },
-        contentSummary=row["contentSummary"] or "",
-        visionStatus=row["visionStatus"],
-        volumeKind=row["volumeKind"],
-        manufacturer=row["manufacturer"],
-        cameraModel=row["cameraModel"],
-        cameraSerial=row["cameraSerial"],
-        firmwareVersion=row["firmwareVersion"],
-        cardBrand=row["cardBrand"],
-        cameraWifiMac=row["cameraWifiMac"],
-        goproCardId=row["goproCardId"],
+        contentSummary=row["contentSummary"] or "", visionStatus=row["visionStatus"],
+        volumeKind=row["volumeKind"], manufacturer=row["manufacturer"],
+        cameraModel=row["cameraModel"], cameraSerial=row["cameraSerial"],
+        firmwareVersion=row["firmwareVersion"], cardBrand=row["cardBrand"],
+        cameraWifiMac=row["cameraWifiMac"], goproCardId=row["goproCardId"],
         thumbnailSampled=row["thumbnailSampled"],
-        cardRatedGigabytes=(
-            row["cardRatedGigabytes"] if "cardRatedGigabytes" in row.keys() else None
-        ),
+        cardRatedGigabytes=row["cardRatedGigabytes"] if "cardRatedGigabytes" in row.keys() else None,
         files=tuple(
             CardFileRecord(
-                relativePath=item["relativePath"],
-                sizeBytes=item["sizeBytes"],
-                modifiedAt=item["modifiedAt"],
-                captureAt=item["captureAt"],
-                kind=item["kind"],
-                cameraKind=item["cameraKind"],
-            )
-            for item in files
+                relativePath=item["relativePath"], sizeBytes=item["sizeBytes"],
+                modifiedAt=item["modifiedAt"], captureAt=item["captureAt"],
+                kind=item["kind"], cameraKind=item["cameraKind"],
+            ) for item in files
         ),
     )
 
 
 def _timestampNow() -> str:
-    """Return the current UTC time as a naive ISO string."""
-
     return _datetimeFormat(datetime.now(timezone.utc))

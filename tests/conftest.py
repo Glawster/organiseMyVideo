@@ -122,7 +122,7 @@ _stubOrganiseMyProjects()
 
 @pytest.fixture(autouse=True)
 def applicationStateIsolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep application configuration and cache writes inside the test sandbox."""
+    """Keep application state and live provider credentials out of tests."""
     from organiseMyVideo import (
         cameraInventory,
         constants,
@@ -134,6 +134,19 @@ def applicationStateIsolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
         videoRescan,
     )
     from organiseMyVideo import __main__ as applicationMain
+
+    # Tests that exercise providers inject their own credentials explicitly.
+    # Never let a developer shell/account make otherwise deterministic tests
+    # perform live TVDB/TMDB/OMDb/xAI calls.
+    for variable in (
+        "ORGANISEMYVIDEO_TVDB_TOKEN",
+        "ORGANISEMYVIDEO_TVDB_API_KEY",
+        "ORGANISEMYVIDEO_TVDB_PIN",
+        "ORGANISEMYVIDEO_TMDB_API_KEY",
+        "ORGANISEMYVIDEO_OMDB_API_KEY",
+        "XAI_API_KEY",
+    ):
+        monkeypatch.delenv(variable, raising=False)
 
     configDir = tmp_path / "config"
     applicationPaths = {
