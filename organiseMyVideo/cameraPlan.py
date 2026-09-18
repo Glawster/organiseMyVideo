@@ -20,20 +20,6 @@ from .cameraMetadata import (
 
 _SLR_BY_DATE = "By Date"
 
-_MONTH_NAMES = (
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-)
 _INCREMENT_SUFFIX = re.compile(r"^(?P<base>.*) \((?P<number>\d+)\)$")
 _TRANSCEND_MODEL_DIRECTORY = re.compile(r"^DPB?\d{2,4}[A-Z]*$", re.IGNORECASE)
 _TRANSCEND_PROXY_DIRECTORIES = {"TEMP", "E_TEMP"}
@@ -168,11 +154,10 @@ class CameraImportPlanner:
             "dji": self.droneDestination,
             "dashcam": self.dashcamDestination,
         }[item.cameraKind]
-        month = f"{captureAt.month:02d}-{_MONTH_NAMES[captureAt.month - 1]}"
         return (
             root
             / f"{captureAt.year:04d}"
-            / month
+            / f"{captureAt.month:02d}"
             / f"{captureAt.day:02d}"
             / item.path.name
         )
