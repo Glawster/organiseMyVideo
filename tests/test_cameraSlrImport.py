@@ -368,6 +368,27 @@ def testSlrVisionSamplesJpegNotCr3(tmp_path: Path):
     assert record.visionStatus == "described"
 
 
+def testCameraImportProgressClearsPreviousTtyLine(
+    capsys, monkeypatch: pytest.MonkeyPatch
+):
+    import sys
+
+    renderer = applicationMain._cameraImportProgressRenderer()
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
+    monkeypatch.setattr(
+        applicationMain.shutil,
+        "get_terminal_size",
+        lambda fallback: os.terminal_size((120, 24)),
+    )
+
+    renderer(40, 100, "IMG_0154.CR3.JPG")
+    renderer(50, 100, "IMG_0154.CR3")
+
+    err = capsys.readouterr().err
+    assert "\r\x1b[2KImporting [" in err
+    assert err.count("\x1b[2K") == 2
+
+
 def testCameraImportProgressIsVisibleWhenNotATty(
     capsys, monkeypatch: pytest.MonkeyPatch
 ):
