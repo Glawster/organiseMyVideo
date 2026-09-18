@@ -323,7 +323,7 @@ def _cameraImportProgressRenderer() -> Callable[[int, int, str], None]:
         line = f"Importing [{bar}]{progressText}{suffix}"
         if len(line) >= columns:
             line = line[: max(1, columns - 1)]
-        sys.stderr.write("\r" + line)
+        sys.stderr.write("\r\x1b[2K" + line)
         sys.stderr.flush()
         if copiedBytes >= totalBytes:
             sys.stderr.write("\n")
