@@ -1,5 +1,6 @@
 """Tests for the SQLite movie and TV catalogue updated on library scan."""
 
+from contextlib import nullcontext
 import json
 from pathlib import Path
 
@@ -107,7 +108,7 @@ def testLibraryRescanUpdatesSharedCatalogue(tmp_path: Path):
         "errors": 0,
     }
     organizer._writeSummaryReport = lambda: None
-    organizer._suppressResetNoiseLogs = _nullContext
+    organizer._suppressResetNoiseLogs = nullcontext
 
     organizer.resetLibraryMetadata(target="both")
 
@@ -380,11 +381,3 @@ def testCameraSnapshotSharesCatalogueFile(tmp_path: Path):
     assert cardCount == 1
     assert len(catalogue.catalogueMoviesList()) == 1
     assert len(catalogue.catalogueTvEpisodesList()) == 1
-
-
-class _nullContext:
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return False

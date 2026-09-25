@@ -104,6 +104,7 @@ class FilesystemOperations:
         *,
         preserveMetadata: bool = True,
         stateKind: str = "media",
+        progressCallback: Optional[Callable[[int, int], None]] = None,
     ) -> Path:
         """Plan or copy a file through a verified temporary destination."""
         source = Path(source)
@@ -115,14 +116,43 @@ class FilesystemOperations:
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = self._temporaryPath(destination)
         try:
-            copier = shutil.copy2 if preserveMetadata else shutil.copyfile
-            copier(source, temporary)
+            self._copyFileContents(
+                source,
+                temporary,
+                preserveMetadata=preserveMetadata,
+                progressCallback=progressCallback,
+            )
             self._verifyFiles(source, temporary)
             temporary.rename(destination)
         except Exception:
             temporary.unlink(missing_ok=True)
             raise
         return destination
+
+    def _copyFileContents(
+        self,
+        source: Path,
+        destination: Path,
+        *,
+        preserveMetadata: bool,
+        progressCallback: Optional[Callable[[int, int], None]],
+    ) -> None:
+        """Stream one file to *destination* while optionally reporting bytes."""
+        totalBytes = source.stat().st_size
+        copiedBytes = 0
+        with source.open("rb") as sourceStream, destination.open("xb") as destinationStream:
+            while True:
+                chunk = sourceStream.read(1024 * 1024)
+                if not chunk:
+                    break
+                destinationStream.write(chunk)
+                copiedBytes += len(chunk)
+                if progressCallback is not None:
+                    progressCallback(copiedBytes, totalBytes)
+        if preserveMetadata:
+            shutil.copystat(source, destination)
+        if progressCallback is not None and copiedBytes == 0:
+            progressCallback(0, totalBytes)
 
     def move(
         self,

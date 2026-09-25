@@ -4,160 +4,212 @@
 
 Implemented behaviour for
 [REQ-009](../project/requirements/features/009-cameraCardInventory.md), following
-[ADR-007](../project/adr/007-cameraInventoryPersistence.md).
+[ADR-007](../project/adr/007-cameraInventoryPersistence.md). Lifecycle and recycle
+behaviour is extended by
+[REQ-023](../project/requirements/features/023-removableMediaFormat.md).
 
 ## Outcome
 
-`organiseMyVideo` catalogues a mounted camera SD card or a copied card
-directory against an operator-assigned numeric card ID. Each confirmed run
-stores a snapshot: date range, sold size, free space, file counts, camera
-kinds, and a short description of the footage. GoPro, DJI, and dash-cam
-layouts are recognised. Snapshots are written into the shared
-[media catalogue](mediaCatalogue.md). USB thumb drives will use the same
-numbered inventory
-([REQ-015](../project/requirements/features/015-usbVolumeInventory.md))
-and are not imported as camera media.
+`organiseMyVideo` catalogues a mounted camera SD card or copied card directory
+against an operator-assigned numeric card ID. Each confirmed run stores a snapshot:
+date range, sold size, free space, file counts, camera identity and content analysis.
+GoPro, DJI, dash-cam and numbered USB media use the shared removable-media catalogue.
 
-Inventory never copies, moves, or deletes camera media. Confirmed inventory
-does write `organiseMyVideo.001` (zero-padded card ID) at the card root so
-the volume itself records its numeric ID and the latest inventory summary. Archive import remains the separate
-`camera import` action described in
-[Camera media import](cameraImport.md).
+Inventory never imports archive files. Confirmed inventory writes a durable identity
+such as `organiseMyVideo.018` at the card root and appends a SQLite snapshot. Camera
+archive import remains the separate `camera import` action.
 
-## Command-line interface
+## Canonical query commands
+
+Use:
 
 ```bash
-$ python -m organiseMyVideo camera inventory /media/andy/7000-8000 --card 12
-$ python -m organiseMyVideo camera inventory /media/andy/7000-8000 --card 12 --confirm
-$ python -m organiseMyVideo camera inventory /media/andy/7000-8000
-$ python -m organiseMyVideo camera inventory --card 12
+organiseMyVideo camera inventory --list
+organiseMyVideo camera inventory --card 18
 ```
 
-The first form scans and prints a dry-run report. The second form writes
-SQLite and `organiseMyVideo.NNN` on the card, where `NNN` is the zero-padded
-card ID (`organiseMyVideo.001`). After that file exists, a scan can omit
-`--card` and read the ID from the volume. The file contains the same summary
-shown in the console, including free space. The last form prints
-the latest stored snapshot for that card ID.
+`--list` shows all known cards in the compact register. `--card 18` shows all useful
+known details for card 18. A separate `--full` report switch is not required.
 
-`--card` is required on the first scan of an unlabelled card. Dry-run remains
-the default. `--confirm` is the only way to persist a snapshot, write the
-card ID file, or call the vision API. A later `--card` that disagrees with
-the on-card file is refused unless `--reassign` is also given:
+The one-card report contains lifecycle state, location, snapshot count, successful
+archive history and the latest stored inventory. Timestamps use `yyyy/mm/dd hh:mm`
+and date-only capture ranges use `yyyy/mm/dd`.
+
+Transient mount information such as the historical source path and filesystem volume
+name is stored for audit purposes but omitted from the normal one-card report.
+
+Example:
+
+```text
+CAMERA CARD 018
+  Status:             available
+  Location:           unknown
+  Snapshots:          1
+  Last archived:      2026/09/15 18:05
+  Previous archives:  -
+  Last inventoried:   2026/09/15 14:10
+
+CAMERA CARD INVENTORY
+  Card ID:            18
+  Brand:              unknown
+  Type:               sd
+  Card size:          128 GB
+  Free space:         104.5 MB
+  Content size:       118.8 GB
+  Volume size:        119.1 GB
+  Date range:         2026/05/13 to 2026/05/16 (capture-metadata)
+  Camera:             Transcend DrivePro 250
+  Videos:             1573
+  Photos:             0
+  Thumbnails:         0
+  Content:            no-thumbnails
+  Keywords:           -
+```
+
+`Last archived` and `Previous archives` are successful import dates for that physical
+card, newest first. They remain historical evidence after later formats or new
+inventory snapshots. The current `Status` is derived only from the latest known card
+state.
+
+`Keywords` are generated from stored content-analysis text when useful analysis is
+available; otherwise `-` is shown.
+
+## Scanning and persistence
+
+The source may be positional or supplied with `-s/--source`:
 
 ```bash
-$ python -m organiseMyVideo camera inventory /media/andy/7000-8000 --card 5 --reassign
-$ python -m organiseMyVideo camera inventory /media/andy/7000-8000 --card 5 --reassign --confirm
+organiseMyVideo camera inventory /media/andy/CARD --card 18
+organiseMyVideo camera inventory -s /media/andy/CARD --card 18
+organiseMyVideo camera inventory -s /media/andy/CARD --card 18 --confirm
 ```
 
-`--reassign` replaces `organiseMyVideo.001` with `organiseMyVideo.005` (for a
-change from 1 to 5) and stores the new snapshot under the new ID. Earlier
-SQLite snapshots for the old ID are kept.
+The first two forms are dry-run scans. `--confirm` persists the snapshot and writes the
+on-card identity file. Once a card is labelled, scanning may omit `--card`; OMV reads
+the durable ID from the volume.
+
+On the first scan of an unlabelled card, omitting `--card` never silently allocates an
+ID. OMV reports used IDs and suggests the lowest unused positive integer.
+
+A supplied ID that conflicts with an existing on-card identity is refused unless
+`--reassign` is explicitly requested and confirmed:
+
+```bash
+organiseMyVideo camera inventory -s /media/andy/CARD --card 5 --reassign
+organiseMyVideo camera inventory -s /media/andy/CARD --card 5 --reassign --confirm
+```
+
+## Metadata and action overrides
+
+Options such as `--brand`, `--location`, `--set-location`, `--reassign`, and
+`--format` are metadata/action overrides rather than alternate report formats.
+
+Examples:
+
+```bash
+organiseMyVideo camera inventory -s /media/andy/CARD --card 18 --brand Transcend --confirm
+organiseMyVideo camera inventory --card 18 --location
+organiseMyVideo camera inventory --card 18 --set-location "Car Rufus" --confirm
+organiseMyVideo camera inventory --format card18
+```
+
+With a source present, `--card 18` means scan that physical card using/asserting ID 18.
+Without a source or another action flag, `--card 18` means show the stored detailed
+card report.
+
+## Lifecycle status
+
+Status is derived from current location, latest inventory content and successful
+archive evidence:
+
+| Status | Meaning |
+| --- | --- |
+| `in use` | A normal current location is set. |
+| `missing` | Location is explicitly `missing`. |
+| `empty` | Latest inventory has no content and there is no active location. |
+| `to archive` | Latest inventory has content but no successful archive evidence. |
+| `available` | Latest inventoried content is fully archived and the card is safe to wipe/reuse. |
+
+The compact list also shows `Archived yes/no` for the latest snapshot. That value does
+not permanently belong to the card. Re-inventorying new content creates a new latest
+snapshot, so older archive evidence does not make the new content safe to wipe.
+
+The detailed one-card report additionally preserves successful archive dates across
+snapshots.
 
 ## What is recorded
 
 Each snapshot includes:
 
-- operator card ID
-- source path and volume label
-- volume capacity, free space, and summed content size
-- earliest and latest capture time, with filesystem time as fallback
-- detected camera kinds (`gopro`, `dji`, `dashcam`, or a mixture)
-- camera manufacturer, model, serial, and firmware when on-card files
-  provide them (GoPro `MISC/version.txt`, Transcend `DP250` folders)
-- derived card size (32, 64, 128, or 256 GB) and free space, which the UI
-  should show from `catalogueCardsList()`; USB-reader brand is not used
-- counts of video, photo, thumbnail, preview, sidecar, and other files
-- a content summary from sampled `.THM` files, or JPEGs when no `.THM` exists
+- durable numeric card ID;
+- source path and volume label for audit/provenance;
+- physical volume kind (`sd` or `usb`);
+- volume capacity, free space, used space and summed content size;
+- earliest/latest capture date and provenance;
+- camera kind and manufacturer/model metadata when detectable;
+- derived sold capacity (32, 64, 128, or 256 GB where recognisable);
+- counts of video, photo, thumbnail, preview, sidecar and other files;
+- content summary from sampled thumbnails/JPEGs where available;
+- vision-analysis status;
+- per-file snapshot rows for audit and later matching.
 
-Re-inventorying the same card ID appends a new snapshot. Show returns the
-latest row; earlier rows stay in the database.
+Re-inventorying the same card ID appends a new snapshot. Earlier snapshots remain in
+the database.
 
-## Thumbnail recognition
+## Thumbnail/content recognition
 
-GoPro `.THM` files are JPEG thumbnails. Confirmed inventory samples up to
-eight of them, evenly spaced across the capture timeline, and sends them to
-xAI image understanding (`grok-4.6`) using `XAI_API_KEY`. When the card has
-no `.THM` files, JPEG stills are sampled instead. When neither exists, or the
-API key is missing, the snapshot is still stored and the missing summary is
-reported.
+GoPro `.THM` files are JPEG thumbnails. Confirmed inventory samples up to eight of
+them, evenly spaced across the capture timeline, and can send them to xAI image
+understanding using `XAI_API_KEY`. JPEG stills are sampled when `.THM` files are
+absent. When neither exists, or analysis is unavailable, the snapshot is still stored.
 
-Tests inject a vision function and do not require a network or API key.
+The detailed card report derives a short keyword list from useful persisted analysis
+text; it does not invent keywords when analysis is unavailable.
 
 ## Storage
 
-Card snapshots are stored in the shared media catalogue:
+Snapshots are stored in:
 
 ```text
 $XDG_STATE_HOME/organiseMyVideo/mediaCatalogue.sqlite
 ```
 
-When `XDG_STATE_HOME` is unset the default is
-`~/.local/state/organiseMyVideo/mediaCatalogue.sqlite`. Tables, columns, and
-indexes use camelCase identifiers.
+or, when `XDG_STATE_HOME` is unset:
 
-Dash-cam capture times are read from MP4 headers when present, then from
-dated filenames such as `YYYYMMDD_HHMMSS_NF.mp4`,
-`YYYY_MMDD_HHMMSS_*F.MP4`, compact `YYYYMMDDHHMMSS.MOV`, or Transcend
-`TSYYYYMMDDHHMMSS.MOV`, then from filesystem mtime.
+```text
+~/.local/state/organiseMyVideo/mediaCatalogue.sqlite
+```
 
-Transcend DrivePro 250 cards use a model folder and underscore video
-directories, with sequence-numbered MP4 names:
+Tables, columns and indexes use camelCase identifiers.
+
+## Dash-cam handling
+
+Dash-cam capture times are read from embedded metadata where available, then from
+recognised dated filenames and finally from filesystem mtime. Transcend DrivePro 250
+cards commonly use paths such as:
 
 ```text
 DP250/N_VIDEO/2026_0513_120237_012.mp4
 ```
 
-That filename is `YYYY_MMDD_HHMMSS_sequence.mp4`. Older DrivePro cards may
-use `N-Video` / `P-Video`, `.MOV`, and `.NMEA` GPS sidecars. The `SYSTEM`
-firmware folder is ignored.
+`SYSTEM` firmware content is ignored. Older DrivePro layouts, GoPro media and DJI
+layouts remain supported through their existing recognisers.
 
-## Python module boundary
+## Python boundary
 
-Inventory is a pure Python application feature. Scanning, metadata reading,
-and persistence are callable without argparse or console parsing. The CLI
-adapter constructs `CameraInventory` and prints the result.
-
-Capture times come from JPEG EXIF and the MP4 movie header through
-`cameraMetadata.py`. Filesystem modification time is the documented fallback.
-
-Ignored clutter matches the camera-import rules: `._*` files, `_gsdata_`,
-`MISC`, `LOST.DIR`, `System Volume Information`, and desktop metadata files.
+Scanning, metadata reading, persistence and report data are Python application
+services. CLI parsing remains an adapter. Capture-time extraction is handled by the
+camera metadata layer, with filesystem mtime as the documented fallback.
 
 ## Verification
 
-Tests use temporary directories and synthetic JPEG, MP4, `.THM`, DJI, and
-ignored-file fixtures. They cover dry-run immutability, confirmed snapshots,
-repeat card IDs, capture-time precedence, vision injection, missing API keys,
-invalid card IDs, show-without-source, and execution through
-`python -m organiseMyVideo camera inventory`.
+Tests use temporary directories and synthetic media fixtures. Coverage includes
+confirmed/dry-run snapshots, repeated card IDs, ID suggestions, positional and
+`-s/--source` scan forms, location-only cards, archive-state derivation, compact list
+output, detailed one-card output, date formatting and camera-import linkage.
 
 ## Source and permission errors
 
-Select the mounted card itself, for example `/media/andy/disk`, rather than
-its parent `/media/andy`. Inventory rejects a source containing immediate child
-mounts before scanning or writing, and lists those mounts in the error message.
-Copied card directories remain supported.
-
-Permission failures are reported as CLI errors with a nonzero exit status,
-without a Python traceback. Check the selected card path and its permissions.
-
-## GoPro MISC metadata
-
-When present, `MISC/version.txt` supplies the camera manufacturer, model,
-serial number, firmware version, and Wi-Fi MAC address. The reader accepts
-older GoPro files with a trailing comma before the closing brace. Missing,
-unreadable, or malformed metadata does not prevent inventory.
-
-`MISC/card` is retained as `goproCardId`, an opaque text token. It is separate
-from the operator's numeric `cardId` and is not interpreted as an SD hardware
-CID or used to infer the card manufacturer.
-
-These details are included in the confirmed on-card JSON label, SQLite snapshot,
-and inventory summary. Stored inventory can show them while the card is absent.
-Existing databases gain nullable metadata columns on their next schema upgrade;
-old snapshots retain unknown values until a new inventory is recorded.
-
-The summary shows the card `Brand` (or `unknown`) and a single `Camera` manufacturer-and-model
-line, without the redundant `Cameras` category line. Card brand is retained in
-SQLite as well as the on-card label, so saved inventory shows it offline.
+Select the mounted card itself, not a parent directory containing mounted volumes.
+Copied card directories remain supported. Permission failures are reported as CLI
+errors with a nonzero exit status rather than a Python traceback.

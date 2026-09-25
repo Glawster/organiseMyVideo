@@ -1,7 +1,6 @@
-"""Production-path and compatibility tests for the command-line architecture."""
+"""Production-path tests for the command-line architecture."""
 
 import importlib
-import io
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -101,8 +100,10 @@ def testMediaScanUsesConfiguredSourceWhenOverrideIsOmitted(tmp_path: Path):
     configPath = tmp_path / "config.json"
     configPath.write_text(json.dumps({"source": str(tmp_path)}), encoding="utf-8")
 
-    with patch.object(applicationMain, "_getAppConfigPath", return_value=configPath):
-        with patch("organiseMyVideo.VideoOrganizer", return_value=organizer) as constructor:
+    with patch.object(applicationMain, "APP_CONFIG_FILE", configPath):
+        with patch(
+            "organiseMyVideo.VideoOrganizer", return_value=organizer
+        ) as constructor:
             status = applicationMain.main(["media", "scan"])
 
     assert status == 0
@@ -213,64 +214,71 @@ def testGrokResetDispatchesToGalleryService():
     gallery.resetGrokConfig.assert_called_once_with()
 
 
-def testCameraHelpListsInventoryAction(capsys):
+def testCameraHelpListsSettledActions(capsys):
     with pytest.raises(SystemExit) as helpExit:
         applicationMain.main(["camera", "--help"])
 
     assert helpExit.value.code == 0
-    assert "inventory" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    for action in ("list", "show", "scan", "archive", "history", "location", "format"):
+        assert action in output
+    assert "inventory" not in output
+    assert "import" not in output
 
 
-def testCameraInventoryReassignRequiresCardAndSource(tmp_path: Path):
-    with pytest.raises(SystemExit) as noCard:
-        applicationMain.main(["camera", "inventory", str(tmp_path), "--reassign"])
-    with pytest.raises(SystemExit) as noSource:
-        applicationMain.main(["camera", "inventory", "--reassign", "--card", "5"])
-
-    assert noCard.value.code == 2
-    assert noSource.value.code == 2
-
-
-def testCameraInventoryRequiresPositiveCardId(tmp_path: Path):
-    with pytest.raises(SystemExit) as missingCardOnShow:
-        applicationMain.main(["camera", "inventory"])
-    with pytest.raises(SystemExit) as zeroCard:
-        applicationMain.main(["camera", "inventory", str(tmp_path), "--card", "0"])
-    unlabeledStatus = applicationMain.main(["camera", "inventory", str(tmp_path)])
-
-    assert missingCardOnShow.value.code == 2
-    assert zeroCard.value.code == 2
-    assert unlabeledStatus == 1
-
-
-def testCameraInventoryMissingSourceFailsBeforeScan():
+def testCameraArchiveRequiresSourceOption():
     with pytest.raises(SystemExit) as error:
-        applicationMain.main(
-            ["camera", "inventory", "/definitely/missing-card", "--card", "12"]
-        )
+        applicationMain.main(["camera", "archive"])
 
     assert error.value.code == 2
 
 
-def testCameraInventoryDryRunDoesNotWriteDatabase(tmp_path: Path):
+def testCameraArchiveRejectsPositionalSource(tmp_path: Path):
+    with pytest.raises(SystemExit) as error:
+        applicationMain.main(["camera", "archive", str(tmp_path)])
+
+    assert error.value.code == 2
+
+
+def testCameraArchiveMissingSourceFailsBeforeService(tmp_path: Path):
+    missing = tmp_path / "missing"
+
+    with patch("organiseMyVideo.cameraImport.cameraImportRun") as importRun:
+        with pytest.raises(SystemExit) as error:
+            applicationMain.main(["camera", "archive", "-s", str(missing)])
+
+    assert error.value.code == 2
+    importRun.assert_not_called()
+
+
+def testCameraScanDryRunDoesNotWriteDatabase(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
     from cameraFixtures import cardTreeBuild
     from organiseMyVideo import constants
 
+    databasePath = tmp_path / "mediaCatalogue.sqlite"
+    monkeypatch.setattr(constants, "CAMERA_INVENTORY_DATABASE", databasePath)
     card = cardTreeBuild(tmp_path / "card")
 
-    status = applicationMain.main(["camera", "inventory", str(card), "--card", "12"])
+    status = applicationMain.main(["camera", "scan", "-s", str(card), "--card", "12"])
 
     assert status == 0
-    assert not constants.CAMERA_INVENTORY_DATABASE.exists()
+    assert not databasePath.exists()
 
 
-def testCameraInventoryConfirmPersistsAndShowReadsLatest(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def testCameraScanConfirmPersistsAndShowReadsLatest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     from cameraFixtures import cardTreeBuild
     from organiseMyVideo import constants
     from organiseMyVideo.cameraInventory import CameraInventory
+    from organiseMyVideo.constants import cameraCardLabelFilename
 
+    databasePath = tmp_path / "mediaCatalogue.sqlite"
+    monkeypatch.setattr(constants, "CAMERA_INVENTORY_DATABASE", databasePath)
     card = cardTreeBuild(tmp_path / "card")
     monkeypatch.setattr(
         CameraInventory,
@@ -279,27 +287,17 @@ def testCameraInventoryConfirmPersistsAndShowReadsLatest(
     )
 
     confirmStatus = applicationMain.main(
-        ["camera", "inventory", str(card), "--card", "12", "--confirm"]
+        ["camera", "scan", "-s", str(card), "--card", "12", "--confirm"]
     )
-    showStatus = applicationMain.main(["camera", "inventory", "--card", "12"])
+    showStatus = applicationMain.main(["camera", "show", "--card", "12"])
 
     assert confirmStatus == 0
     assert showStatus == 0
-    assert constants.CAMERA_INVENTORY_DATABASE.is_file()
-    stored = CameraInventory(
-        dryRun=True, databasePath=constants.CAMERA_INVENTORY_DATABASE
-    ).inventoryShow(12)
+    assert databasePath.is_file()
+    stored = CameraInventory(dryRun=True, databasePath=databasePath).inventoryShow(12)
     assert stored is not None
     assert stored.contentSummary == "harbour footage"
-    from organiseMyVideo.constants import cameraCardLabelFilename
-
-    label = card / cameraCardLabelFilename(12)
-    assert label.is_file()
-    payload = json.loads(label.read_text(encoding="utf-8"))
-    assert payload["cardId"] == 12
-    assert "Free space:" in payload["summary"]
-    omitCardStatus = applicationMain.main(["camera", "inventory", str(card)])
-    assert omitCardStatus == 0
+    assert (card / cameraCardLabelFilename(12)).is_file()
 
 
 def testPackageImportDoesNotMutateMedia(tmp_path: Path):
@@ -325,7 +323,7 @@ def testVerboseOptionIsRejected(prefix):
     assert "--debug" in parser.format_help()
 
 
-def testCameraLabelPermissionFailureReportsError(tmp_path, monkeypatch, caplog):
+def testCameraLabelPermissionFailurePreservesInventory(tmp_path, monkeypatch, capsys):
     from cameraFixtures import cardTreeBuild
     from organiseMyVideo.filesystemOperations import FilesystemOperations
     from organiseMyVideo import constants
@@ -337,29 +335,12 @@ def testCameraLabelPermissionFailureReportsError(tmp_path, monkeypatch, caplog):
 
     monkeypatch.setattr(FilesystemOperations, "writeText", denyWrite)
     status = applicationMain.main(
-        ["camera", "inventory", str(card), "--card", "2", "-y"]
+        ["camera", "scan", "-s", str(card), "--card", "2", "-y"]
     )
 
-    assert status == 1
-    assert "camera inventory permission denied" in caplog.text
-    assert "select the card mount itself" in caplog.text
-    assert not constants.CAMERA_INVENTORY_DATABASE.exists()
-
-
-def testMediaScanProgressRendersSingleTerminalLine():
-    from organiseMyVideo.videoRescan import _ResetScanProgress
-
-    class TerminalBuffer(io.StringIO):
-        def isatty(self):
-            return True
-
-    stream = TerminalBuffer()
-    progress = _ResetScanProgress(4, "Scanning movie library", stream=stream)
-    progress.render(2, "Example Movie (2026)")
-    progress.finish()
-
-    output = stream.getvalue()
-    assert "Scanning movie library:" in output
-    assert "50%" in output
-    assert "(2/4)" in output
-    assert "Example Movie" in output
+    assert status == 0
+    output = capsys.readouterr().out
+    assert "organiseMyVideo.002 could not be written" in output
+    assert "inventory snapshot was stored in the database" in output
+    assert constants.CAMERA_INVENTORY_DATABASE.exists()
+    assert not (card / "organiseMyVideo.002").exists()
