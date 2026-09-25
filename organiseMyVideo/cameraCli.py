@@ -31,7 +31,7 @@ def cameraCliRun(arguments: Sequence[str]) -> int:
     if args.cameraAction == "archive":
         return _cameraArchiveRun(args)
     if args.cameraAction == "history":
-        return _cameraHistoryRun(args.card)
+        return _cameraHistoryRun(args.card, check=args.check)
     if args.cameraAction == "migrate":
         return _cameraMigrateRun(args)
     if args.cameraAction == "format":
@@ -108,10 +108,15 @@ def _cameraParserBuild() -> argparse.ArgumentParser:
 
     historyParser = subparsers.add_parser(
         "history",
-        help="show previous archive manifests for one card",
-        description="Show the recorded archive history for one numbered card, including files and previous import results.",
+        help="show or verify recorded camera archive history",
+        description="Show recorded archive history, or verify recorded destinations against the current archive with --check.",
     )
-    historyParser.add_argument("--card", type=_positiveCardId, required=True)
+    historyParser.add_argument("--card", type=_positiveCardId)
+    historyParser.add_argument(
+        "--check",
+        action="store_true",
+        help="verify recorded archive assets and report ok, moved, missing, ambiguous, or changed",
+    )
 
     migrateParser = subparsers.add_parser(
         "migrate",
@@ -200,11 +205,22 @@ def _cameraShowRun(cardId: int) -> int:
     return 0
 
 
-def _cameraHistoryRun(cardId: int) -> int:
+def _cameraHistoryRun(cardId: int | None, *, check: bool = False) -> int:
+    manifestDirectory = constants.applicationStateDirectory() / "cameraImports"
+    if check:
+        from .cameraHistory import cameraHistoryCheck, cameraHistorySummary
+
+        results = cameraHistoryCheck(manifestDirectory, cardId=cardId)
+        print(cameraHistorySummary(results, cardId=cardId), end="")
+        return 0
+
+    if cardId is None:
+        print("organiseMyVideo camera history: error: --card is required unless --check is used")
+        return 2
+
     from .cameraImport import cameraImportHistory
     from .cameraImportHistoryView import cameraImportHistoryFullSummary
 
-    manifestDirectory = constants.applicationStateDirectory() / "cameraImports"
     records = cameraImportHistory(manifestDirectory, cardId=cardId)
     print(cameraImportHistoryFullSummary(records, cardId=cardId), end="")
     return 0
