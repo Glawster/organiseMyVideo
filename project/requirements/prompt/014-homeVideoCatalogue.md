@@ -2,7 +2,7 @@
 
 Role: implement and verify
 
-Read the requirement, REQ-002, REQ-004, REQ-010, REQ-016, REQ-020,
+Read the requirement, REQ-002, REQ-004, REQ-010, REQ-016, REQ-021,
 ADR-008, `documentation/homeVideo.md`, and `documentation/mediaCatalogue.md`.
 
 Implement Home Video catalogue support for `/mnt/myVideo/Video` using an

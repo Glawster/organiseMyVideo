@@ -83,7 +83,7 @@ def cameraInventoryListSummary(
     rows: list[tuple[str, str, str, str, str, str, str, str]] = []
     for entry in entries:
         record = entry.inventory
-        status = _status(entry)
+        status = _inventoryStatus(entry)
         size = (
             f"{record.cardRatedGigabytes} GB"
             if record is not None and record.cardRatedGigabytes
@@ -150,7 +150,7 @@ def cameraInventoryFullSummary(entry: CardInventoryListEntry) -> str:
     previousArchives = ", ".join(archiveDates[1:]) if len(archiveDates) > 1 else "-"
     header = (
         f"CAMERA CARD {entry.cardId:03d}\n"
-        f"  Status:             {_status(entry)}\n"
+        f"  Status:             {_inventoryStatus(entry)}\n"
         f"  Location:           {entry.location or 'unknown'}\n"
         f"  Snapshots:          {entry.snapshotCount}\n"
         f"  Last archived:      {lastArchived}\n"
@@ -206,7 +206,7 @@ def _otherFiles(record: CardInventoryRecord) -> tuple[str, ...]:
     )
 
 
-def _status(entry: CardInventoryListEntry) -> str:
+def _inventoryStatus(entry: CardInventoryListEntry) -> str:
     location = (entry.location or "").strip().lower()
     if location == "missing":
         return "missing"

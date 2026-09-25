@@ -1,8 +1,8 @@
-# 024: Media keywords and tagging
+# 025: Media keywords and tagging
 
 ## Status
 
-Planned
+ToDo
 
 ## Outcome
 
@@ -169,8 +169,8 @@ Mutating embedded metadata remains dry-run by default and requires `-y` / `--con
 ## Dependencies and decisions
 
 - [REQ-010: SQLite media catalogue](010-sqliteMediaCatalogue.md)
-- [REQ-021: Shared media processing platform](021-sharedMediaProcessing.md)
-- [REQ-023: Camera capture-time correction](023-cameraCaptureTimeCorrection.md)
+- [REQ-022: Shared media processing platform](022-sharedMediaProcessing.md)
+- [REQ-024: Camera capture-time correction](024-cameraCaptureTimeCorrection.md)
 - [ADR-003: Centralise filesystem safety](../../adr/003-filesystemSafetyBoundary.md)
 - [ADR-010: Use organiseMediaStudio as the shared media-processing boundary](../../adr/010-sharedMediaProcessingBoundary.md)
 

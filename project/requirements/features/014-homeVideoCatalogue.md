@@ -235,7 +235,7 @@ change and must be covered by tests.
 - [REQ-004: Camera media import](004-cameraMediaImport.md)
 - [REQ-010: SQLite media catalogue](010-sqliteMediaCatalogue.md)
 - [REQ-016: Catalogue media identities](016-catalogueMediaIdentities.md)
-- [REQ-020: Removable media discovery and lifecycle](020-removableMediaDiscovery.md)
+- [REQ-021: Removable media discovery and lifecycle](021-removableMediaDiscovery.md)
 - [ADR-008: SQLite media catalogue](../../adr/008-sqliteMediaCatalogue.md)
 - [Home video archive](../../../documentation/homeVideo.md)
 

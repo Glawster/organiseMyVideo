@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress — acceptance criteria 1-13 and 16 implemented; card-aware import
+InProgress
 history listing is implemented while snapshot linkage and lifecycle
 reconciliation remain pending.
 
@@ -206,7 +206,7 @@ The agreed behaviour and development sequence are maintained in
 
 - [REQ-009: Camera card inventory](009-cameraCardInventory.md) provides durable
   `cardId` and historical `snapshotId` evidence.
-- [REQ-020: Removable media discovery and lifecycle](020-removableMediaDiscovery.md)
+- [REQ-021: Removable media discovery and lifecycle](021-removableMediaDiscovery.md)
   consumes inventory/import evidence to derive current card lifecycle state.
 - [ADR-001: Preserve the packaged CLI layout](../../adr/001-packagedCliLayout.md)
 - [ADR-002: Migrate the CLI with compatibility](../../adr/002-cliCompatibility.md)

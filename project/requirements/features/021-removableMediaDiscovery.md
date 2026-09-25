@@ -1,4 +1,4 @@
-# 020: Removable media discovery and lifecycle
+# 021: Removable media discovery and lifecycle
 
 ## Status
 

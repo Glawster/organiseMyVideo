@@ -1,4 +1,4 @@
-# 026: SLR card import
+# 027: SLR card import
 
 ## Status
 
@@ -77,7 +77,7 @@ The photo and video roots are independent configured archive roots. Routing is d
 
 - [REQ-004: Camera media import](004-cameraMediaImport.md) provides camera detection, planning, verified copying, manifests, history, conflict handling, and dry-run semantics.
 - [REQ-009: Camera card inventory](009-cameraCardInventory.md) provides durable card and snapshot identity.
-- [REQ-020: Removable media discovery and lifecycle](020-removableMediaDiscovery.md) consumes inventory/import evidence for lifecycle state.
+- [REQ-021: Removable media discovery and lifecycle](021-removableMediaDiscovery.md) consumes inventory/import evidence for lifecycle state.
 - [ADR-003: Centralise filesystem safety](../../adr/003-filesystemSafetyBoundary.md)
 - [ADR-006: Camera import architecture](../../adr/006-cameraImportArchitecture.md)
 - [ADR-007: Persist camera-card inventory in SQLite](../../adr/007-cameraInventoryPersistence.md)

@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress — baseline inventory completed; full filename snapshot extension pending.
+InProgress
 
 ## Outcome
 
@@ -151,7 +151,7 @@ folder rather than beside the media archive.
 - [REQ-004: Camera media import](004-cameraMediaImport.md) — sibling workflow;
   import may consume `cardId`/`snapshotId` evidence but inventory does not copy
   media.
-- [REQ-020: Removable media discovery and lifecycle](020-removableMediaDiscovery.md)
+- [REQ-021: Removable media discovery and lifecycle](021-removableMediaDiscovery.md)
   consumes historical snapshots and their filename inventories to derive the
   current card state.
 - [ADR-001: Preserve the packaged CLI layout](../../adr/001-packagedCliLayout.md)

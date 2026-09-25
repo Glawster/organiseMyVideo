@@ -1,8 +1,8 @@
-# 025: Camera archive normalisation
+# 026: Camera archive normalisation
 
 ## Status
 
-Planned
+ToDo
 
 ## Outcome
 
@@ -232,8 +232,8 @@ correction, explicitly changes the authoritative date.
 
 - [REQ-004: Camera media import](004-cameraMediaImport.md)
 - [REQ-007: Filesystem safety](007-filesystemSafety.md)
-- [REQ-021: Shared media processing](021-sharedMediaProcessing.md)
-- [REQ-023: Camera capture-time correction](023-cameraCaptureTimeCorrection.md)
+- [REQ-022: Shared media processing](022-sharedMediaProcessing.md)
+- [REQ-024: Camera capture-time correction](024-cameraCaptureTimeCorrection.md)
 
 The canonical camera archive date hierarchy is `YYYY/MM/DD`. Named-month
 folders such as `01-Jan` and `07-Jul` are legacy inputs to migration, not

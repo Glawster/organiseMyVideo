@@ -86,5 +86,5 @@ cross-media analysis capabilities.
 
 ## Requirements
 
-- [REQ-021: Shared media processing platform](../requirements/features/021-sharedMediaProcessing.md)
+- [REQ-022: Shared media processing platform](../requirements/features/022-sharedMediaProcessing.md)
 - [REQ-014: Home video catalogue](../requirements/features/014-homeVideoCatalogue.md)

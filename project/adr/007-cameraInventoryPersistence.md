@@ -105,4 +105,4 @@ mistaken as proof that the card's current contents are archived.
 
 - [REQ-009: Camera card inventory](../requirements/features/009-cameraCardInventory.md)
 - [REQ-004: Camera media import](../requirements/features/004-cameraMediaImport.md)
-- [REQ-020: Removable media discovery and lifecycle](../requirements/features/020-removableMediaDiscovery.md)
+- [REQ-021: Removable media discovery and lifecycle](../requirements/features/021-removableMediaDiscovery.md)

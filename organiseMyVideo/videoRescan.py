@@ -696,9 +696,8 @@ class VideoRescanMixin:
             freeBytes = shutil.disk_usage(destinationDir).free
         except OSError as error:
             logger.error(
-                "could not determine free space for TV merge destination %s: %s",
-                destinationDir,
-                error,
+                f"could not determine free space for TV merge destination "
+                f"{destinationDir}: {error}"
             )
             return False
 
@@ -706,12 +705,10 @@ class VideoRescanMixin:
             return True
 
         logger.error(
-            "not enough free space to merge TV show folders: %s requires %s; %s has %s free",
-            sourceDir,
-            self._formatResetTvShowMergeBytes(requiredBytes),
-            destinationDir,
-            self._formatResetTvShowMergeBytes(freeBytes),
-        )
+            f"not enough free space to merge TV show folders: "
+            f"{sourceDir} requires {self._formatResetTvShowMergeBytes(requiredBytes)}; "
+            f"{destinationDir} has {self._formatResetTvShowMergeBytes(freeBytes)} free"
+)
         self._recordSummaryCleanup(
             f"merge blocked by insufficient free space: {sourceDir} -> {destinationDir}"
         )

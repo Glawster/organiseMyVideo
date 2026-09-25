@@ -6,7 +6,7 @@ Implemented behaviour for
 [REQ-009](../project/requirements/features/009-cameraCardInventory.md), following
 [ADR-007](../project/adr/007-cameraInventoryPersistence.md). Lifecycle and recycle
 behaviour is extended by
-[REQ-022](../project/requirements/features/022-removableMediaFormat.md).
+[REQ-023](../project/requirements/features/023-removableMediaFormat.md).
 
 ## Outcome
 

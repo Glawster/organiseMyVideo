@@ -1,6 +1,8 @@
+# Requirement: 021 — Removable media discovery and lifecycle
+
 Role: refine, implement, and verify
 
-Read REQ-020 together with REQ-004, REQ-009, REQ-010, REQ-015, REQ-016,
+Read REQ-021 together with REQ-004, REQ-009, REQ-010, REQ-015, REQ-016,
 ADR-008, and ADR-009.
 
 Implement removable-media discovery as importable Python catalogue/query

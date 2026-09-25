@@ -1,8 +1,8 @@
-# 023: Camera capture-time correction
+# 024: Camera capture-time correction
 
 ## Status
 
-Planned
+ToDo
 
 ## Outcome
 
@@ -31,7 +31,7 @@ a correctly configured clock. Correction scope belongs to a particular import,
 inventory snapshot, or explicitly selected capture session/range.
 
 The generic arithmetic and provenance model belong in `organiseMediaStudio`
-under REQ-021. This requirement defines the `organiseMyVideo` policy and
+under REQ-022. This requirement defines the `organiseMyVideo` policy and
 operator workflow around that shared primitive.
 
 ## Scope
@@ -153,7 +153,7 @@ offset to the rest of the selected session.
 
 - [REQ-004: Camera media import](004-cameraMediaImport.md)
 - [REQ-009: Camera card inventory](009-cameraCardInventory.md)
-- [REQ-021: Shared media processing platform](021-sharedMediaProcessing.md)
+- [REQ-022: Shared media processing platform](022-sharedMediaProcessing.md)
 - [ADR-003: Centralise filesystem safety](../../adr/003-filesystemSafetyBoundary.md)
 - [ADR-010: Use organiseMediaStudio as the shared media-processing boundary](../../adr/010-sharedMediaProcessingBoundary.md)
 
