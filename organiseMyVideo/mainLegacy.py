@@ -241,6 +241,9 @@ def buildParser() -> argparse.ArgumentParser:
         "organise", parents=[_buildSharedFlags(True)], help="organise staged media"
     )
     mediaOrganise.add_argument("source", nargs="?", default="/mnt/video2/toFile")
+    mediaOrganise.add_argument(
+        "-s", "--source", dest="sourceOverride", help="override the positional source"
+    )
     mediaOrganise.add_argument("--auto", action="store_true")
     mediaOrganise.add_argument(
         "--refresh", dest="refresh_metadata_library", action="store_true"
@@ -256,6 +259,9 @@ def buildParser() -> argparse.ArgumentParser:
         help="clean staged media names and folders",
     )
     mediaClean.add_argument("source", nargs="?", default="/mnt/video2/toFile")
+    mediaClean.add_argument(
+        "-s", "--source", dest="sourceOverride", help="override the positional source"
+    )
     mediaScan = mediaSub.add_parser(
         "scan",
         parents=[_buildSharedFlags(True)],
@@ -285,6 +291,9 @@ def buildParser() -> argparse.ArgumentParser:
     )
     libraryRescan.add_argument("source", nargs="?", default="/mnt/video2/toFile")
     libraryRescan.add_argument(
+        "-s", "--source", dest="sourceOverride", help="override the positional source"
+    )
+    libraryRescan.add_argument(
         "--target", choices=("both", "movies", "tv"), default="both"
     )
 
@@ -296,6 +305,9 @@ def buildParser() -> argparse.ArgumentParser:
         help="remove obsolete torrent files",
     )
     torrentMaintain.add_argument("source", nargs="?", default="/mnt/video2/toFile")
+    torrentMaintain.add_argument(
+        "-s", "--source", dest="sourceOverride", help="override the positional source"
+    )
     torrentMaintain.add_argument("--clean-names", action="store_true")
 
     cameraParser = subparsers.add_parser(
@@ -357,6 +369,9 @@ def buildParser() -> argparse.ArgumentParser:
 
 def _normalizeArguments(args: argparse.Namespace) -> argparse.Namespace:
     """Map canonical commands onto the established workflow argument shape."""
+    # Keep optional source aliases independent of positional argparse defaults.
+    if getattr(args, "sourceOverride", None) is not None:
+        args.source = args.sourceOverride
     command = getattr(args, "command", None)
     if command == "media":
         args.clean = args.mediaAction == "clean"

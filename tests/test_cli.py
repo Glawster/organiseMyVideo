@@ -100,8 +100,10 @@ def testMediaScanUsesConfiguredSourceWhenOverrideIsOmitted(tmp_path: Path):
     configPath = tmp_path / "config.json"
     configPath.write_text(json.dumps({"source": str(tmp_path)}), encoding="utf-8")
 
-    with patch.object(applicationMain, "_getAppConfigPath", return_value=configPath):
-        with patch("organiseMyVideo.VideoOrganizer", return_value=organizer) as constructor:
+    with patch.object(applicationMain, "APP_CONFIG_FILE", configPath):
+        with patch(
+            "organiseMyVideo.VideoOrganizer", return_value=organizer
+        ) as constructor:
             status = applicationMain.main(["media", "scan"])
 
     assert status == 0
@@ -321,7 +323,7 @@ def testVerboseOptionIsRejected(prefix):
     assert "--debug" in parser.format_help()
 
 
-def testCameraLabelPermissionFailureReportsError(tmp_path, monkeypatch, caplog):
+def testCameraLabelPermissionFailurePreservesInventory(tmp_path, monkeypatch, capsys):
     from cameraFixtures import cardTreeBuild
     from organiseMyVideo.filesystemOperations import FilesystemOperations
     from organiseMyVideo import constants
@@ -333,10 +335,12 @@ def testCameraLabelPermissionFailureReportsError(tmp_path, monkeypatch, caplog):
 
     monkeypatch.setattr(FilesystemOperations, "writeText", denyWrite)
     status = applicationMain.main(
-        ["camera", "inventory", str(card), "--card", "2", "-y"]
+        ["camera", "scan", "-s", str(card), "--card", "2", "-y"]
     )
 
-    assert status == 1
-    assert "camera inventory permission denied" in caplog.text
-    assert "select the card mount itself" in caplog.text
-    assert not constants.CAMERA_INVENTORY_DATABASE.exists()
+    assert status == 0
+    output = capsys.readouterr().out
+    assert "organiseMyVideo.002 could not be written" in output
+    assert "inventory snapshot was stored in the database" in output
+    assert constants.CAMERA_INVENTORY_DATABASE.exists()
+    assert not (card / "organiseMyVideo.002").exists()

@@ -94,6 +94,10 @@ that need repair. Use `--show NAME` for a focused repair across all TV roots,
 matching normalized partial physical folder names or catalogue show titles, and
 `--all` for the exhaustive episode-by-episode integrity scan and catalogue refresh.
 
+The `media organise`, `media clean`, `library rescan`, and `torrent maintain`
+commands accept a positional source or `-s`/`--source PATH`. An explicit source
+option takes precedence when both are supplied.
+
 ### Clean source-folder names and remove empty folders
 
 ```bash

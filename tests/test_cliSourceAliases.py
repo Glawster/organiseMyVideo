@@ -29,6 +29,13 @@ def testCanonicalSourceAliasesMatchPositional(prefix, dest, option, tmp_path: Pa
     assert getattr(optional, dest) == path
     assert getattr(optional, dest) == getattr(positional, dest)
 
+    # Explicit options win regardless of their position relative to SOURCE.
+    for arguments in (["/unused", option, path], [option, path, "/unused"]):
+        combined = applicationMain._normalizeArguments(
+            parser.parse_args([*prefix, *arguments])
+        )
+        assert getattr(combined, dest) == path
+
 
 @pytest.mark.parametrize("option", ["-s", "--source"])
 def testCameraScanSourceOptionRunsThroughValidation(tmp_path: Path, option: str):
