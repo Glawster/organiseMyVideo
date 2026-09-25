@@ -4,10 +4,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
-from cameraFixtures import jpegWithExif, jpegWithoutExif
+from cameraFixtures import cr3WithExif, cr3WithoutExif, jpegWithExif, jpegWithoutExif
 from organiseMediaStudio.video.errors import VideoProcessingError
 from organiseMyVideo.cameraMetadata import (
     metadataCaptureRead,
+    metadataCr3CaptureRead,
     metadataFilenameCaptureRead,
     metadataJpegCaptureRead,
     metadataMp4CaptureRead,
@@ -60,13 +61,31 @@ def testMp4ProbeFailureReturnsNone(tmp_path: Path, monkeypatch):
     assert metadataMp4CaptureRead(path) is None
 
 
+def testCr3ExifDateTimeOriginalIsRead(tmp_path: Path):
+    path = tmp_path / "IMG_0154.CR3"
+    path.write_bytes(cr3WithExif(datetime(2026, 9, 17, 10, 15, 0)))
+
+    captured = metadataCr3CaptureRead(path)
+
+    assert captured == datetime(2026, 9, 17, 10, 15, 0)
+
+
+def testCr3WithoutExifReturnsNone(tmp_path: Path):
+    path = tmp_path / "IMG_0154.CR3"
+    path.write_bytes(cr3WithoutExif())
+
+    assert metadataCr3CaptureRead(path) is None
+
+
 def testCaptureReadDispatchesBySuffix(tmp_path: Path, monkeypatch):
     jpegPath = tmp_path / "still.jpg"
     mp4Path = tmp_path / "movie.mp4"
+    cr3Path = tmp_path / "IMG_0154.CR3"
     otherPath = tmp_path / "notes.txt"
     capture = datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
     jpegPath.write_bytes(jpegWithExif(datetime(2024, 1, 2, 3, 4, 5)))
     mp4Path.write_bytes(b"video handled by shared probe")
+    cr3Path.write_bytes(cr3WithExif(datetime(2026, 9, 17, 10, 15, 0)))
     otherPath.write_text("nope", encoding="utf-8")
     monkeypatch.setattr(
         "organiseMyVideo.cameraMetadata.videoProbe",
@@ -75,6 +94,7 @@ def testCaptureReadDispatchesBySuffix(tmp_path: Path, monkeypatch):
 
     assert metadataCaptureRead(jpegPath) == datetime(2024, 1, 2, 3, 4, 5)
     assert metadataCaptureRead(mp4Path) == capture
+    assert metadataCaptureRead(cr3Path) == datetime(2026, 9, 17, 10, 15, 0)
     assert metadataCaptureRead(otherPath) is None
 
 

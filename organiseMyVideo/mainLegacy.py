@@ -346,6 +346,49 @@ def buildParser() -> argparse.ArgumentParser:
         "--brand",
         help="SD card brand to store on the card, for example SanDisk",
     )
+    cameraImport = cameraSub.add_parser(
+        "import",
+        parents=[_buildSharedFlags(True)],
+        help="plan or import supported camera media",
+    )
+    cameraImport.add_argument(
+        "-s",
+        "--source",
+        dest="importSource",
+        required=True,
+        metavar="SOURCE",
+        help="mounted card or copied card directory",
+    )
+    cameraImport.add_argument(
+        "--gopro-destination",
+        help="override the configured GoPro archive destination",
+    )
+    cameraImport.add_argument(
+        "--drone-destination",
+        help="override the configured Drone archive destination",
+    )
+    cameraImport.add_argument(
+        "--dashcam-destination",
+        help="override the configured Dashcam archive destination",
+    )
+    cameraImport.add_argument(
+        "--photo-destination",
+        help="override the configured photo archive root for SLR stills",
+    )
+    cameraImport.add_argument(
+        "--video-destination",
+        help="override the configured home-video root for SLR clips",
+    )
+    cameraImport.add_argument(
+        "--manifest-directory",
+        help="override the camera-import manifest directory",
+    )
+    cameraImport.add_argument(
+        "--include-gopro-companions",
+        action="store_true",
+        help="retain GoPro LRV and THM helper files",
+    )
+
     grokParser = subparsers.add_parser(
         "grok",
         parents=[_buildSharedFlags(True)],
@@ -489,6 +532,69 @@ def _selectedMode(args: argparse.Namespace) -> str:
     if getattr(args, "merge", False):
         return "merge"
     return "process"
+
+
+def _runCameraImportWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
+    """Run camera media import through the public application service."""
+
+    from . import constants
+    from .cameraImport import cameraImportRun, cameraImportSummary
+
+    config = _loadAppConfig(_getAppConfigPath())
+    configuredStorage = config.get("storage_locations", {})
+    if not isinstance(configuredStorage, dict):
+        configuredStorage = {}
+    homeVideoRoot = Path("/mnt/myVideo/Video")
+    goproDestination = Path(
+        args.gopro_destination
+        or configuredStorage.get("gopro")
+        or homeVideoRoot / "GoPro"
+    )
+    droneDestination = Path(
+        args.drone_destination
+        or configuredStorage.get("drone")
+        or homeVideoRoot / "Drone"
+    )
+    dashcamDestination = Path(
+        args.dashcam_destination
+        or configuredStorage.get("dashcam")
+        or homeVideoRoot / "Dashcam"
+    )
+    photoDestination = Path(
+        args.photo_destination
+        or configuredStorage.get("photos")
+        or configuredStorage.get("photo")
+        or "/mnt/myPictures"
+    )
+    videoDestination = Path(
+        args.video_destination
+        or configuredStorage.get("homeVideo")
+        or configuredStorage.get("videoByDate")
+        or homeVideoRoot
+    )
+    manifestDirectory = Path(
+        args.manifest_directory
+        or constants.applicationStateDirectory() / "cameraImports"
+    )
+    logger.value("mode", "camera-import")
+    logger.value("source directory", args.importSource)
+    try:
+        result = cameraImportRun(
+            source=Path(args.importSource),
+            goproDestination=goproDestination,
+            droneDestination=droneDestination,
+            dashcamDestination=dashcamDestination,
+            photoDestination=photoDestination,
+            videoDestination=videoDestination,
+            manifestDirectory=manifestDirectory,
+            dryRun=dryRun,
+            includeGoproCompanions=bool(args.include_gopro_companions),
+        )
+    except (OSError, RuntimeError, ValueError) as error:
+        logger.error("%s", error)
+        return 1
+    drawBox(cameraImportSummary(result))
+    return 1 if result.failed else 0
 
 
 def _runCameraWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
@@ -674,29 +780,25 @@ def _runOrganizerWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
         if args.clean:
             nameStats = organizer.cleanTorrentNames(torrentDir=torrentDir)
         removeStats = organizer.removeTorrentsInLibrary(torrentDir=torrentDir)
-        drawBox(
-            f"""TORRENT SUMMARY
+        drawBox(f"""TORRENT SUMMARY
 Torrents deleted: {removeStats['deleted']}
 Torrents kept:    {removeStats['skipped']}
 Delete errors:    {removeStats['errors']}
 Names renamed:    {nameStats['renamed']}
 Names skipped:    {nameStats['skipped']}
 Rename errors:    {nameStats['errors']}
-"""
-        )
+""")
     elif args.clean:
         logger.doing("running clean mode")
         nameStats = organizer.cleanNames()
         cleanStats = organizer.cleanEmptyFolders()
-        drawBox(
-            f"""CLEAN SUMMARY
+        drawBox(f"""CLEAN SUMMARY
 Names renamed:   {nameStats['renamed']}
 Name errors:     {nameStats['errors']}
 Folders removed: {cleanStats['removed']}
 Folders kept:    {cleanStats['skipped']}
 Folder errors:   {cleanStats['errors']}
-"""
-        )
+""")
         logger.doing("normalising TV show and season folders")
         folderStats = _normaliseSeasonFolders(
             organizer,
@@ -797,7 +899,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if command == "grok":
             status = _runGalleryWorkflow(args, dryRun)
         elif command == "camera":
-            status = _runCameraWorkflow(args, dryRun)
+            # Archive wrappers use the internal import command after inventory.
+            if args.cameraAction == "import":
+                status = _runCameraImportWorkflow(args, dryRun)
+            else:
+                status = _runCameraWorkflow(args, dryRun)
         else:
             status = _runOrganizerWorkflow(args, dryRun)
     except KeyboardInterrupt:

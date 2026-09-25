@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .cameraInventory import (
+    CANON_FOLDER,
+    CANON_STEM,
     DASHCAM_DIRECTORY_NAMES,
     DASHCAM_FILENAME,
     DASHCAM_MODEL_FOLDER,
@@ -18,6 +20,7 @@ from .cameraInventory import (
 )
 
 SUPPORTED_SUFFIXES = {
+    ".cr3",
     ".jpg",
     ".jpeg",
     ".mp4",
@@ -27,6 +30,10 @@ SUPPORTED_SUFFIXES = {
     ".lrv",
     ".thm",
 }
+SLR_ARCHIVE_SUFFIXES = {".cr3", ".jpg", ".jpeg", ".mp4"}
+CANON_IGNORED_DIRECTORY_NAMES = {"canonmsc"}
+CANON_IGNORED_FILE_NAMES = {"comstate.to3"}
+CANON_IGNORED_SUFFIXES = {".ctg"}
 
 
 @dataclass(frozen=True)
@@ -48,8 +55,23 @@ class CameraDetection:
     unknownPaths: tuple[str, ...]
 
 
+def cameraMediaSuffixCounts(relativePaths: tuple[str, ...]) -> dict[str, int]:
+    """Return CR3/JPEG/MP4 counts from relative paths, ignoring control files."""
+
+    counts = {"cr3": 0, "jpeg": 0, "mp4": 0}
+    for relative in relativePaths:
+        suffix = Path(relative).suffix.lower()
+        if suffix == ".cr3":
+            counts["cr3"] += 1
+        elif suffix in {".jpg", ".jpeg"}:
+            counts["jpeg"] += 1
+        elif suffix == ".mp4":
+            counts["mp4"] += 1
+    return counts
+
+
 def cameraDetect(source: Path) -> CameraDetection:
-    """Detect supported GoPro, DJI and dash-cam files below *source*."""
+    """Detect supported GoPro, DJI, dash-cam and SLR files below *source*."""
 
     sourcePath = Path(source).expanduser().resolve()
     if not sourcePath.is_dir():
@@ -80,12 +102,12 @@ def cameraDetect(source: Path) -> CameraDetection:
 
 
 def cameraKindDetect(relativePath: Path) -> str:
-    """Return ``gopro``, ``dji``, ``dashcam`` or ``unknown`` for a relative path."""
+    """Return ``gopro``, ``dji``, ``slr``, ``dashcam`` or ``unknown`` for a relative path."""
 
     parts = relativePath.parts
     lowerParts = [part.lower() for part in parts[:-1]]
-    name = relativePath.name
     stem = relativePath.stem
+    suffix = relativePath.suffix.lower()
 
     if any(part.endswith("gopro") for part in lowerParts) or GOPRO_STEM.match(stem):
         return "gopro"
@@ -95,6 +117,9 @@ def cameraKindDetect(relativePath: Path) -> str:
             return "dji"
     if stem.upper().startswith("DJI_"):
         return "dji"
+
+    if _slrPathMatch(relativePath, suffix, stem, parts):
+        return "slr"
 
     if DASHCAM_FILENAME.match(stem):
         return "dashcam"
@@ -112,21 +137,39 @@ def cameraKindDetect(relativePath: Path) -> str:
 def _pathIgnored(relativePath: Path) -> bool:
     """Return whether a path is known non-media camera/OS content."""
 
+    ignoredDirectories = IGNORED_DIRECTORY_NAMES | CANON_IGNORED_DIRECTORY_NAMES
     for part in relativePath.parts[:-1]:
-        if part.lower() in IGNORED_DIRECTORY_NAMES:
+        if part.lower() in ignoredDirectories:
             return True
     name = relativePath.name.lower()
+    suffix = relativePath.suffix.lower()
     return (
         name in IGNORED_FILE_NAMES
+        or name in CANON_IGNORED_FILE_NAMES
+        or suffix in CANON_IGNORED_SUFFIXES
         or name.startswith("._")
         or re.search(r"\.(db|log)$", name) is not None
     )
 
 
+def _slrPathMatch(
+    relativePath: Path, suffix: str, stem: str, parts: tuple[str, ...]
+) -> bool:
+    """Return whether *relativePath* is Canon-style SLR archive media."""
+
+    if suffix not in SLR_ARCHIVE_SUFFIXES:
+        return False
+    if suffix == ".cr3" or CANON_STEM.match(stem):
+        return True
+    return any(
+        CANON_FOLDER.fullmatch(part) for part in parts[:-1]
+    ) or CANON_FOLDER.fullmatch(relativePath.parent.name)
+
+
 def _fileKind(suffix: str) -> str:
     if suffix in {".mp4", ".mov"}:
         return "video"
-    if suffix in {".jpg", ".jpeg"}:
+    if suffix in {".cr3", ".jpg", ".jpeg"}:
         return "photo"
     if suffix in {".srt", ".nmea"}:
         return "sidecar"

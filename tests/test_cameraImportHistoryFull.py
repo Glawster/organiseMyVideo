@@ -22,17 +22,17 @@ def _manifestWrite(path: Path, *, cardId: int = 4) -> None:
                 "assets": [
                     {
                         "sourcePath": "/media/card/DCIM/A.MP4",
-                        "destinationPath": "/mnt/myVideo/Video/GoPro/2026/09-Sep/15/A.MP4",
+                        "destinationPath": "/mnt/myVideo/Video/GoPro/2026/09/15/A.MP4",
                         "outcome": "copied",
                     },
                     {
                         "sourcePath": "/media/card/DCIM/B.MP4",
-                        "destinationPath": "/mnt/myVideo/Video/GoPro/2026/09-Sep/15/B.MP4",
+                        "destinationPath": "/mnt/myVideo/Video/GoPro/2026/09/15/B.MP4",
                         "outcome": "alreadyPresent",
                     },
                     {
                         "sourcePath": "/media/card/DCIM/C.MP4",
-                        "destinationPath": "/mnt/myVideo/Video/GoPro/2026/09-Sep/15/C.MP4",
+                        "destinationPath": "/mnt/myVideo/Video/GoPro/2026/09/15/C.MP4",
                         "outcome": "failed",
                         "error": "OSError: verification failed",
                     },
@@ -61,7 +61,7 @@ def testCameraImportHistoryFullSummaryUsesDestinationOutputRows(tmp_path: Path):
     assert "CAMERA IMPORT HISTORY — CARD 004" in summary
     assert "IMPORT 2026/09/15 12:34" in summary
     assert "Source root:   /media/card" in summary
-    assert "Archive root:  /mnt/myVideo/Video/GoPro/2026/09-Sep/15" in summary
+    assert "Archive root:  /mnt/myVideo/Video/GoPro/2026/09/15" in summary
     assert "Result:        1 copied, 1 already present, 1 failed" in summary
     assert "Result" in summary and "Output" in summary
     assert "Source" not in next(line for line in summary.splitlines() if "Output" in line)
@@ -69,16 +69,16 @@ def testCameraImportHistoryFullSummaryUsesDestinationOutputRows(tmp_path: Path):
     copiedLine = next(line for line in summary.splitlines() if line.endswith("A.MP4"))
     presentLine = next(line for line in summary.splitlines() if "B.MP4" in line)
     failedLine = next(line for line in summary.splitlines() if "C.MP4" in line)
-    assert "/mnt/myVideo/Video/GoPro/2026/09-Sep/15/A.MP4" in copiedLine
+    assert "/mnt/myVideo/Video/GoPro/2026/09/15/A.MP4" in copiedLine
     assert "already present" in presentLine
     assert "OSError: verification failed" in failedLine
     assert "2 archived files" in summary
     assert "1 failed file" in summary
 
 
-def testCameraHistoryLeftTruncatesLongDestinationToFiftyCharacters(tmp_path: Path):
+def testCameraHistoryShowsLongDestinationWithoutTruncation(tmp_path: Path):
     manifest = tmp_path / "camera-import-long.json"
-    longDestination = "/mnt/myVideo/Video/GoPro/2026/09-Sep/15/very/long/destination/folder/GOPR4171.MP4"
+    longDestination = "/mnt/myVideo/Video/GoPro/2026/09/15/very/long/destination/folder/GOPR4171.MP4"
     manifest.write_text(
         json.dumps(
             {
@@ -108,10 +108,9 @@ def testCameraHistoryLeftTruncatesLongDestinationToFiftyCharacters(tmp_path: Pat
 
     summary = cameraImportHistoryFullSummary((record,), cardId=4)
     outputLine = next(line for line in summary.splitlines() if "GOPR4171.MP4" in line)
-    output = outputLine.split("  ", 2)[-1]
-    assert len(output) == 50
-    assert output.startswith("…")
-    assert output.endswith("destination/folder/GOPR4171.MP4")
+    assert longDestination in outputLine
+    assert "…" not in outputLine
+
 
 
 def testCameraHistoryShowsManifestDetail(
@@ -130,5 +129,5 @@ def testCameraHistoryShowsManifestDetail(
     assert "CAMERA IMPORT HISTORY — CARD 004" in output
     assert "Source root:" in output
     assert "Archive root:" in output
-    assert "/mnt/myVideo/Video/GoPro/2026/09-Sep/15/A.MP4" in output
-    assert "/mnt/myVideo/Video/GoPro/2026/09-Sep/15/B.MP4" in output
+    assert "/mnt/myVideo/Video/GoPro/2026/09/15/A.MP4" in output
+    assert "/mnt/myVideo/Video/GoPro/2026/09/15/B.MP4" in output

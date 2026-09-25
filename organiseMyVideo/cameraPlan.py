@@ -12,25 +12,14 @@ from organiseMediaStudio.identity.hash import mediaHashCalculate
 
 from .cameraDetect import CameraDetectedFile, cameraDetect
 from .cameraMetadata import (
+    metadataCr3CaptureRead,
     metadataFilenameCaptureRead,
     metadataJpegCaptureRead,
     metadataMp4CaptureRead,
 )
 
-_MONTH_NAMES = (
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-)
+_SLR_BY_DATE = "By Date"
+
 _INCREMENT_SUFFIX = re.compile(r"^(?P<base>.*) \((?P<number>\d+)\)$")
 _TRANSCEND_MODEL_DIRECTORY = re.compile(r"^DPB?\d{2,4}[A-Z]*$", re.IGNORECASE)
 _TRANSCEND_PROXY_DIRECTORIES = {"TEMP", "E_TEMP"}
@@ -79,11 +68,15 @@ class CameraImportPlanner:
         goproDestination: Path,
         droneDestination: Path,
         dashcamDestination: Path,
+        photoDestination: Optional[Path] = None,
+        videoDestination: Optional[Path] = None,
         includeGoproCompanions: bool = False,
     ):
         self.goproDestination = Path(goproDestination)
         self.droneDestination = Path(droneDestination)
         self.dashcamDestination = Path(dashcamDestination)
+        self.photoDestination = Path(photoDestination) if photoDestination else None
+        self.videoDestination = Path(videoDestination) if videoDestination else None
         self.includeGoproCompanions = includeGoproCompanions
 
     def importPlan(self, source: Path) -> ImportPlan:
@@ -93,6 +86,7 @@ class CameraImportPlanner:
         excluded: list[str] = []
         operations: list[ImportOperation] = []
         plannedCopies: dict[Path, Path] = {}
+        slrPairDates = _slrPairDates(detection.files)
 
         videosByStem = {
             (item.path.parent, item.path.stem.lower()): item
@@ -117,7 +111,9 @@ class CameraImportPlanner:
                     continue
                 captureItem = primary
 
-            captureAt, dateSource = _captureRead(captureItem)
+            captureAt, dateSource = slrPairDates.get(item.path, (None, ""))
+            if captureAt is None:
+                captureAt, dateSource = _captureRead(captureItem)
             if captureAt is None:
                 excluded.append(item.relativePath)
                 continue
@@ -132,10 +128,16 @@ class CameraImportPlanner:
                 dateSource=dateSource,
                 destinationPath=destination,
             )
-            operation = _operationBuild(asset, plannedCopies)
+            operation = _operationBuild(
+                asset,
+                plannedCopies,
+                inventFilename=item.cameraKind != "slr",
+            )
             operations.append(operation)
             if operation.outcome == "copy":
-                plannedCopies[operation.asset.destinationPath] = operation.asset.sourcePath
+                plannedCopies[operation.asset.destinationPath] = (
+                    operation.asset.sourcePath
+                )
 
         return ImportPlan(
             sourcePath=detection.sourcePath,
@@ -145,16 +147,41 @@ class CameraImportPlanner:
         )
 
     def _destinationFor(self, item: CameraDetectedFile, captureAt: datetime) -> Path:
+        if item.cameraKind == "slr":
+            return self._slrDestinationFor(item, captureAt)
         root = {
             "gopro": self.goproDestination,
             "dji": self.droneDestination,
             "dashcam": self.dashcamDestination,
         }[item.cameraKind]
-        month = f"{captureAt.month:02d}-{_MONTH_NAMES[captureAt.month - 1]}"
         return (
             root
             / f"{captureAt.year:04d}"
-            / month
+            / f"{captureAt.month:02d}"
+            / f"{captureAt.day:02d}"
+            / item.path.name
+        )
+
+    def _slrDestinationFor(self, item: CameraDetectedFile, captureAt: datetime) -> Path:
+        """Route one SLR asset into ``By Date/YYYY/MM/DD`` under the matching root."""
+
+        if item.fileKind == "video":
+            root = self.videoDestination
+            if root is None:
+                raise ValueError(
+                    "SLR video import requires a configured video destination"
+                )
+        else:
+            root = self.photoDestination
+            if root is None:
+                raise ValueError(
+                    "SLR photo import requires a configured photo destination"
+                )
+        return (
+            root
+            / _SLR_BY_DATE
+            / f"{captureAt.year:04d}"
+            / f"{captureAt.month:02d}"
             / f"{captureAt.day:02d}"
             / item.path.name
         )
@@ -167,7 +194,9 @@ def _transcendProxyPath(item: CameraDetectedFile) -> bool:
         return False
     parts = Path(item.relativePath).parts
     hasModelRoot = any(_TRANSCEND_MODEL_DIRECTORY.fullmatch(part) for part in parts)
-    hasProxyDirectory = any(part.upper() in _TRANSCEND_PROXY_DIRECTORIES for part in parts)
+    hasProxyDirectory = any(
+        part.upper() in _TRANSCEND_PROXY_DIRECTORIES for part in parts
+    )
     return hasModelRoot and hasProxyDirectory
 
 
@@ -180,6 +209,8 @@ def _captureRead(item: CameraDetectedFile) -> tuple[Optional[datetime], str]:
         captured = metadataJpegCaptureRead(item.path)
     elif suffix in {".mp4", ".mov"}:
         captured = metadataMp4CaptureRead(item.path)
+    elif suffix == ".cr3":
+        captured = metadataCr3CaptureRead(item.path)
     if captured is not None:
         return captured, "metadata"
 
@@ -196,6 +227,8 @@ def _captureRead(item: CameraDetectedFile) -> tuple[Optional[datetime], str]:
 def _operationBuild(
     asset: CameraAsset,
     plannedCopies: Optional[dict[Path, Path]] = None,
+    *,
+    inventFilename: bool = True,
 ) -> ImportOperation:
     """Resolve duplicate/collision state without mutating source or archive.
 
@@ -204,6 +237,8 @@ def _operationBuild(
     occupied candidate, content identity is checked first. Identical content is
     ``alreadyPresent``; only different content advances to the next name.
     ``plannedCopies`` makes the same rule apply to earlier files in this plan.
+    SLR assets keep their original names: different content at the planned
+    destination is a conflict rather than an invented ``(2)`` filename.
     """
 
     plannedCopies = plannedCopies or {}
@@ -225,11 +260,20 @@ def _operationBuild(
                     sourceDigest=sourceDigest,
                     destinationDigest=plannedDigest,
                 )
+            if not inventFilename:
+                return ImportOperation(
+                    asset=asset,
+                    outcome="conflict",
+                    reason="same destination name with different content",
+                    sourceDigest=sourceDigest,
+                    destinationDigest=plannedDigest,
+                )
             candidate = _incrementedPath(asset.destinationPath, counter)
             counter += 1
             continue
 
         if candidate.exists():
+            destinationDigest = None
             if candidate.is_file():
                 sourceDigest = sourceDigest or _sha256(asset.sourcePath)
                 destinationDigest = _sha256(candidate)
@@ -242,6 +286,14 @@ def _operationBuild(
                         sourceDigest=sourceDigest,
                         destinationDigest=destinationDigest,
                     )
+            if not inventFilename:
+                return ImportOperation(
+                    asset=asset,
+                    outcome="conflict",
+                    reason="same destination name with different content",
+                    sourceDigest=sourceDigest,
+                    destinationDigest=destinationDigest,
+                )
             candidate = _incrementedPath(asset.destinationPath, counter)
             counter += 1
             continue
@@ -265,6 +317,54 @@ def _operationBuild(
         reason="no collision-free destination filename available",
         sourceDigest=sourceDigest,
     )
+
+
+def _slrPairDates(
+    files: tuple[CameraDetectedFile, ...],
+) -> dict[Path, tuple[datetime, str]]:
+    """Share one capture date across same-stem SLR RAW/JPEG pairs."""
+
+    groups: dict[tuple[Path, str], list[CameraDetectedFile]] = {}
+    for item in files:
+        if item.cameraKind != "slr" or item.fileKind != "photo":
+            continue
+        key = (item.path.parent, item.path.stem.lower())
+        groups.setdefault(key, []).append(item)
+
+    paired: dict[Path, tuple[datetime, str]] = {}
+    for items in groups.values():
+        if len(items) < 2:
+            continue
+        preferred = _slrPreferredCapture(items)
+        if preferred is None:
+            continue
+        for item in items:
+            paired[item.path] = preferred
+    return paired
+
+
+def _slrPhotoRank(item: CameraDetectedFile) -> int:
+    """Prefer RAW capture metadata when pairing a same-stem JPEG."""
+
+    suffix = item.path.suffix.lower()
+    if suffix == ".cr3":
+        return 0
+    if suffix in {".jpg", ".jpeg"}:
+        return 1
+    return 2
+
+
+def _slrPreferredCapture(
+    items: list[CameraDetectedFile],
+) -> Optional[tuple[datetime, str]]:
+    """Return the strongest shared capture date for one RAW/JPEG pair."""
+
+    ranked = [_captureRead(item) for item in sorted(items, key=_slrPhotoRank)]
+    for sourceName in ("metadata", "filename", "filesystem"):
+        for captured, dateSource in ranked:
+            if captured is not None and dateSource == sourceName:
+                return captured, dateSource
+    return None
 
 
 def _incrementStart(path: Path) -> int:

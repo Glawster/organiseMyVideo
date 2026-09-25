@@ -56,7 +56,7 @@ def testDifferentSameNameInOnePlanGetsIncrementedFilename(tmp_path: Path):
 
 def testExistingDifferentNameThenExistingIdenticalIncrementIsReused(tmp_path: Path):
     card = _dashcamPair(tmp_path, b"new-content", b"other-new-content")
-    archive = tmp_path / "archive" / "Dashcam" / "2026" / "09-Sep" / "09"
+    archive = tmp_path / "archive" / "Dashcam" / "2026" / "09" / "09"
     archive.mkdir(parents=True)
     (archive / "2026_0909_113441_010.MOV").write_bytes(b"older-different-content")
     (archive / "2026_0909_113441_010 (2).MOV").write_bytes(b"new-content")
