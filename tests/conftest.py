@@ -111,6 +111,8 @@ def _stubOrganiseMyProjects() -> None:
     logUtils.getLogger = _getStubLogger
     logUtils.setApplication = lambda name, *args, **kwargs: None
     logUtils.drawBox = lambda text: None
+    logUtils.line = lambda: None
+    logUtils.runStart = lambda: None
 
     pkg.logUtils = logUtils
     sys.modules["organiseMyProjects"] = pkg

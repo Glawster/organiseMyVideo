@@ -1,5 +1,5 @@
 mutagen
-organiseMyProjects @ git+https://github.com/Glawster/organiseMyProjects.git@0.6
+organiseMyProjects @ git+https://github.com/Glawster/organiseMyProjects.git@0aa24c1ca875c12919c14fab939ab24e0d82a24c
 organiseMediaStudio @ git+ssh://git@github.com/Glawster/organiseMediaStudio.git@feature/shared-media-primitives
 playwright>=1.50.0
 xai-sdk

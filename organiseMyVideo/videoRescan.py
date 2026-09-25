@@ -708,7 +708,7 @@ class VideoRescanMixin:
             f"not enough free space to merge TV show folders: "
             f"{sourceDir} requires {self._formatResetTvShowMergeBytes(requiredBytes)}; "
             f"{destinationDir} has {self._formatResetTvShowMergeBytes(freeBytes)} free"
-)
+        )
         self._recordSummaryCleanup(
             f"merge blocked by insufficient free space: {sourceDir} -> {destinationDir}"
         )
@@ -1040,7 +1040,7 @@ class VideoRescanMixin:
         if destinationPath.exists() or (
             reservedDestinations is not None and destinationPath in reservedDestinations
         ):
-            logger.error("scan movie target already exists: %s", destinationPath)
+            logger.error("Scan movie target already exists: %s", destinationPath)
             return "errors"
         if reservedDestinations is not None:
             reservedDestinations.add(destinationPath)
@@ -1055,7 +1055,7 @@ class VideoRescanMixin:
         except OSError as error:
             if error.errno != errno.EINVAL or ":" not in destinationPath.name:
                 logger.error(
-                    "could not rename movie %s -> %s: %s",
+                    "Could not rename movie %s -> %s: %s",
                     videoFile,
                     destinationPath,
                     error,
@@ -1067,7 +1067,7 @@ class VideoRescanMixin:
                 and fallbackPath in reservedDestinations
             ):
                 logger.error(
-                    "scan movie fallback target already exists: %s", fallbackPath
+                    "Scan movie fallback target already exists: %s", fallbackPath
                 )
                 return "errors"
             logger.multiline(
@@ -1077,7 +1077,7 @@ class VideoRescanMixin:
                 self.filesystem.rename(videoFile, fallbackPath)
             except (OSError, ValueError) as fallbackError:
                 logger.error(
-                    "could not rename movie %s -> %s: %s",
+                    "Could not rename movie %s -> %s: %s",
                     videoFile,
                     fallbackPath,
                     fallbackError,
@@ -1088,7 +1088,7 @@ class VideoRescanMixin:
                 reservedDestinations.add(destinationPath)
         except ValueError as error:
             logger.error(
-                "could not rename movie %s -> %s: %s",
+                "Could not rename movie %s -> %s: %s",
                 videoFile,
                 destinationPath,
                 error,
@@ -1144,7 +1144,7 @@ class VideoRescanMixin:
             fallbackDir = self._filesystemSafeResetFallback(destinationDir)
             if fallbackDir.exists():
                 logger.error(
-                    "rescan movie folder fallback target already exists: %s",
+                    "Rescan movie folder fallback target already exists: %s",
                     fallbackDir,
                 )
                 return movieFolder, videoFiles
@@ -1155,7 +1155,7 @@ class VideoRescanMixin:
                 self.filesystem.rename(movieFolder, fallbackDir)
             except (OSError, ValueError) as fallbackError:
                 logger.error(
-                    "could not rename movie folder %s -> %s: %s",
+                    "Could not rename movie folder %s -> %s: %s",
                     movieFolder,
                     fallbackDir,
                     fallbackError,
@@ -1324,7 +1324,7 @@ class VideoRescanMixin:
                 self._recordSummaryRename(sourcePath, companionDestination)
         except (OSError, ValueError) as error:
             logger.error(
-                "could not rename TV episode %s -> %s: %s",
+                "Could not rename TV episode %s -> %s: %s",
                 videoFile,
                 destinationPath,
                 error,

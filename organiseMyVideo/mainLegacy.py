@@ -10,7 +10,13 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Optional, Sequence
 
-from organiseMyProjects.logUtils import drawBox, getLogger, setApplication  # type: ignore
+from organiseMyProjects.logUtils import (  # type: ignore
+    drawBox,
+    getLogger,
+    line,
+    runStart,
+    setApplication,
+)
 
 from .constants import APP_CONFIG_FILE
 from .filesystemOperations import FilesystemOperations
@@ -777,7 +783,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     dryRun = not args.confirm
     _configureLogging(args, dryRun)
+    runStart()
     logger.doing("organiseMyVideo starting")
+    line()
 
     if dryRun:
         logger.info("entering dry-run mode, use --confirm to execute")
@@ -796,6 +804,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         logger.warning("cancelled by user")
         return 130
 
+    line()
     logger.done("organiseMyVideo complete")
     return status
 
