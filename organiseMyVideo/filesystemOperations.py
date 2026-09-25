@@ -10,7 +10,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 
 @dataclass(frozen=True)
@@ -130,6 +130,7 @@ class FilesystemOperations:
         destination: Path,
         *,
         stateKind: str = "media",
+        progressCallback: Optional[Callable[[int, int], None]] = None,
     ) -> Path:
         """Plan or safely move a file or directory without overwriting."""
         source = Path(source)
@@ -144,7 +145,15 @@ class FilesystemOperations:
         except OSError as error:
             if error.errno != errno.EXDEV:
                 raise
-            self._crossFilesystemMove(source, destination)
+            self._crossFilesystemMove(
+                source,
+                destination,
+                progressCallback=progressCallback,
+            )
+        else:
+            if progressCallback is not None and destination.is_file():
+                totalBytes = destination.stat().st_size
+                progressCallback(totalBytes, totalBytes)
         return destination
 
     def rename(
@@ -206,7 +215,13 @@ class FilesystemOperations:
         if not self.dryRun:
             path.rmdir()
 
-    def _crossFilesystemMove(self, source: Path, destination: Path) -> None:
+    def _crossFilesystemMove(
+        self,
+        source: Path,
+        destination: Path,
+        *,
+        progressCallback: Optional[Callable[[int, int], None]] = None,
+    ) -> None:
         """Copy, verify, finalize, then remove a cross-filesystem source."""
         temporary = self._temporaryPath(destination)
         try:
@@ -216,7 +231,15 @@ class FilesystemOperations:
                 temporary.rename(destination)
                 shutil.rmtree(source)
             else:
-                shutil.copy2(source, temporary)
+                totalBytes = source.stat().st_size
+                copiedBytes = 0
+                with source.open("rb") as sourceStream, temporary.open("wb") as destStream:
+                    for chunk in iter(lambda: sourceStream.read(1024 * 1024), b""):
+                        destStream.write(chunk)
+                        copiedBytes += len(chunk)
+                        if progressCallback is not None:
+                            progressCallback(copiedBytes, totalBytes)
+                shutil.copystat(source, temporary)
                 self._verifyFiles(source, temporary)
                 temporary.rename(destination)
                 source.unlink()

@@ -25,7 +25,7 @@ dev = [
 ]
 
 [project.scripts]
-organiseMyVideo = "organiseMyVideo.__main__:main"
+organiseMyVideo = "organiseMyVideo.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["organiseMyVideo*"]

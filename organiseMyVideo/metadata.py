@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
+from .terminalProgress import TerminalProgress
+
 from .constants import (
     METADATA_LIBRARY_FILE,
     TMDB_API_BASE_URL,
@@ -468,43 +470,58 @@ class MetadataMixin:
     ) -> None:
         """Preload the metadata library from existing movie/TV storage MCM files."""
         logger.doing("building metadata library from storage")
+        progress = TerminalProgress(0, "Loading metadata")
+        completed = 0
 
-        for movieDir in movieDirs:
-            if not movieDir.exists() or not movieDir.is_dir():
-                continue
-            logger.value("movie metadata storage", movieDir)
+        try:
+            for movieDir in movieDirs:
+                if not movieDir.exists() or not movieDir.is_dir():
+                    continue
+                logger.value("movie metadata storage", movieDir)
 
-            for movieXml in sorted(movieDir.rglob("movie.xml")):
-                self._updateMetadataLibraryFromHints(
-                    self._readMovieMcmHints(self._metadataScanPath(movieXml.parent))
-                )
-
-        for tvDir in videoDirs:
-            if not tvDir.exists() or not tvDir.is_dir():
-                continue
-            logger.value("TV metadata storage", tvDir)
-
-            try:
-                showDirs = sorted(
-                    [showDir for showDir in tvDir.iterdir() if showDir.is_dir()]
-                )
-            except OSError as error:
-                logger.warning(
-                    "could not read TV metadata storage %s: %s", tvDir, error
-                )
-                continue
-            for showDir in showDirs:
-                self._updateMetadataLibraryFromHints(
-                    self._readTvSeriesMcmHints(showDir)
-                )
-                for episodeXml in sorted(showDir.rglob("metadata/*.xml")):
+                for movieXml in sorted(movieDir.rglob("movie.xml")):
+                    progress.render(completed, movieXml.parent.name)
                     self._updateMetadataLibraryFromHints(
-                        self._readTvMcmHints(
-                            self._metadataScanPath(
-                                episodeXml.parent.parent, stem=episodeXml.stem
+                        self._readMovieMcmHints(self._metadataScanPath(movieXml.parent))
+                    )
+                    completed += 1
+                    progress.render(completed, movieXml.parent.name)
+
+            for tvDir in videoDirs:
+                if not tvDir.exists() or not tvDir.is_dir():
+                    continue
+                logger.value("TV metadata storage", tvDir)
+
+                try:
+                    showDirs = sorted(
+                        [showDir for showDir in tvDir.iterdir() if showDir.is_dir()]
+                    )
+                except OSError as error:
+                    progress.finish()
+                    logger.warning(
+                        "could not read TV metadata storage %s: %s", tvDir, error
+                    )
+                    continue
+                for showDir in showDirs:
+                    progress.render(completed, showDir.name)
+                    self._updateMetadataLibraryFromHints(
+                        self._readTvSeriesMcmHints(showDir)
+                    )
+                    completed += 1
+                    progress.render(completed, showDir.name)
+                    for episodeXml in sorted(showDir.rglob("metadata/*.xml")):
+                        progress.render(completed, episodeXml.name)
+                        self._updateMetadataLibraryFromHints(
+                            self._readTvMcmHints(
+                                self._metadataScanPath(
+                                    episodeXml.parent.parent, stem=episodeXml.stem
+                                )
                             )
                         )
-                    )
+                        completed += 1
+                        progress.render(completed, episodeXml.name)
+        finally:
+            progress.finish()
 
         logger.done("building metadata library from storage")
 

@@ -15,6 +15,7 @@ logger = getLogger()
 LEADING_THE = re.compile(r"^the\s+(.+)$", re.IGNORECASE)
 TRAILING_THE = re.compile(r",\s*the$", re.IGNORECASE)
 MOVIE_FOLDER = re.compile(r"^(?P<title>.+?)\s*\((?P<year>\d{4})\)$")
+_FILESYSTEM_SEPARATOR_PATTERN = re.compile(r"[\\/:]+")
 
 
 def restoreLeadingThe(name: str) -> str:
@@ -35,13 +36,16 @@ def canonicalMovieFolderName(name: str) -> str:
     if not parsed:
         return name
     title = canonicalTvShowFolderName(parsed.group("title").strip())
+    title = _FILESYSTEM_SEPARATOR_PATTERN.sub(" - ", title)
+    title = re.sub(r"\s+", " ", title).strip()
     return f"{title} ({parsed.group('year')})"
 
 
 def canonicalTvShowFolderName(name: str) -> str:
     """Return the on-disk show folder name, moving a leading ``The`` to the end."""
 
-    normalised = re.sub(r"\s+", " ", name).strip()
+    normalised = _FILESYSTEM_SEPARATOR_PATTERN.sub(" - ", name)
+    normalised = re.sub(r"\s+", " ", normalised).strip()
     if not normalised:
         return name
     if TRAILING_THE.search(normalised):

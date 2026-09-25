@@ -430,25 +430,33 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         return canonicalTvShowFolderName(showName)
 
     def _stripResetTvShowDuplicateSuffixes(self, showName: str) -> str:
-        """Return a show name with common duplicate-only suffixes removed."""
-        normalised = unicodedata.normalize(
-            "NFKC", self._buildTvShowFolderName(showName)
-        )
-        normalised = re.sub(r"\s+", " ", normalised).strip()
+        """Return a canonical show name with duplicate-only suffixes removed."""
         suffixPatterns = (
+            r"[\s._-]+$",
             r"\s*\[\d+\]\s*$",
             r"\s*\((?:19|20)\d{2}\)\s*$",
             r"\s+(?:19|20)\d{2}\s*$",
             r"\s+the\s+series\s*$",
         )
-        changed = True
-        while changed and normalised:
-            changed = False
-            for pattern in suffixPatterns:
-                updated = re.sub(pattern, "", normalised, flags=re.IGNORECASE).strip()
-                if updated != normalised:
-                    normalised = updated
-                    changed = True
+
+        def _stripSuffixes(value: str) -> str:
+            normalisedValue = re.sub(r"\s+", " ", value).strip()
+            changed = True
+            while changed and normalisedValue:
+                changed = False
+                for pattern in suffixPatterns:
+                    updated = re.sub(
+                        pattern, "", normalisedValue, flags=re.IGNORECASE
+                    ).strip()
+                    if updated != normalisedValue:
+                        normalisedValue = updated
+                        changed = True
+            return normalisedValue
+
+        rawName = unicodedata.normalize("NFKC", showName)
+        strippedName = _stripSuffixes(rawName)
+        canonicalName = self._buildTvShowFolderName(strippedName)
+        normalised = _stripSuffixes(unicodedata.normalize("NFKC", canonicalName))
         return normalised or self._buildTvShowFolderName(showName)
 
     def _buildResetTvShowDuplicateKey(self, showName: str) -> str:
@@ -849,12 +857,38 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         stream.flush()
 
     def _copyFileWithProgress(self, sourceFile: Path, destFile: Path) -> None:
-        """Safely move a file through the centralized operation boundary."""
-        self.filesystem.move(sourceFile, destFile)
+        """Move one file through the filesystem boundary with terminal progress."""
+        self._moveFileWithProgress(sourceFile, destFile)
 
     def _moveFileWithProgress(self, sourceFile: Path, destFile: Path) -> None:
-        """Safely move a file through the centralized operation boundary."""
-        self.filesystem.move(sourceFile, destFile)
+        """Move one file through the filesystem boundary with terminal progress."""
+        stream = sys.stderr
+        isatty = getattr(stream, "isatty", None)
+        if not callable(isatty) or not isatty():
+            self.filesystem.move(sourceFile, destFile)
+            return
+
+        self._moveProgressDisplayWidth = 0
+
+        def _progress(copiedBytes: int, totalBytes: int) -> None:
+            self._renderMoveProgress(
+                stream,
+                sourceFile.name,
+                copiedBytes,
+                totalBytes,
+            )
+
+        try:
+            self.filesystem.move(
+                sourceFile,
+                destFile,
+                progressCallback=_progress,
+            )
+        finally:
+            if self._moveProgressDisplayWidth:
+                stream.write("\n")
+                stream.flush()
+                self._moveProgressDisplayWidth = 0
 
     def _recordSummaryTransfer(self, sourcePath: Path, destPath: Path) -> None:
         """Record a file transfer for the optional text summary."""
@@ -1548,6 +1582,7 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
     def _sanitiseTvFilenamePart(self, value: str) -> str:
         """Return a spacing-preserving, filesystem-safe TV filename fragment."""
         normalised = unicodedata.normalize("NFKC", value).replace("'", "")
+        normalised = re.sub(r"\s*:\s*", " - ", normalised)
         normalised = re.sub(r"[^\w.\s-]+", " ", normalised, flags=re.UNICODE)
         normalised = normalised.replace("_", " ")
         normalised = re.sub(r"\s+", " ", normalised).strip()
@@ -1748,8 +1783,8 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
             logger.error("rescan TV show target already exists: %s", destinationDir)
             return displayName, videoFiles
 
-        logger.action(
-            "renaming TV show: %s (from %s)", destinationDir.name, showDir.name
+        logger.multiline(
+            ["renaming TV show", showDir.name, destinationDir.name]
         )
         self._recordSummaryRename(showDir, destinationDir)
         if self.dryRun:
@@ -1775,7 +1810,9 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
 
         if not title or not year:
             return sourceFile.name
-        return f"{title} ({year}){extension}"
+        safeTitle = re.sub(r"[\\/:]+", " - ", str(title))
+        safeTitle = re.sub(r"\s+", " ", safeTitle).strip()
+        return f"{safeTitle} ({year}){extension}"
 
     def _writeEpisodeMcmTemplate(
         self,
@@ -2001,15 +2038,31 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         self._writeXml(seriesFile, root)
 
     def _ensureSeriesMetadata(self, showDir: Path, tvInfo: dict) -> None:
-        """Create or backfill destination ``series.xml`` while preserving existing values."""
+        """Create, repair, or backfill destination ``series.xml`` metadata."""
         showName = tvInfo.get("showName")
+        seriesId = tvInfo.get("seriesId")
+        imdbId = tvInfo.get("imdbId")
         if not showName:
             return
         seriesFile = showDir / "series.xml"
         if seriesFile.exists():
             root = self._readXmlRoot(seriesFile)
             if root is None:
-                logger.value("preserving existing metadata", seriesFile)
+                if not (seriesId or imdbId):
+                    logger.warning(
+                        "could not repair corrupt series metadata without provider identity: %s",
+                        seriesFile,
+                    )
+                    return
+                logger.action("repair metadata: %s", seriesFile)
+                if self.dryRun:
+                    return
+                root = ET.Element("Series")
+                ET.SubElement(root, "SeriesName").text = showName
+                ET.SubElement(root, "LocalTitle").text = showName
+                ET.SubElement(root, "SeriesID").text = seriesId or ""
+                ET.SubElement(root, "IMDB_ID").text = imdbId or ""
+                self._writeXml(seriesFile, root)
                 return
             root, changed = self._updateSeriesMetadataRoot(root, tvInfo)
             if not changed:

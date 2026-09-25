@@ -24,6 +24,7 @@ def testCanonicalTvShowFolderNameMovesLeadingThe():
     assert canonicalMovieFolderName("The Godfather (1972)") == "Godfather, The (1972)"
     assert canonicalMovieFolderName("Godfather, The (1972)") == "Godfather, The (1972)"
     assert canonicalMovieFolderName("Inception (2010)") == "Inception (2010)"
+    assert canonicalMovieFolderName("Hitchcock/Truffaut (2015)") == "Hitchcock - Truffaut (2015)"
 
 
 def testNormaliseRenamesLeadingTheShowFolder(tmp_path: Path):

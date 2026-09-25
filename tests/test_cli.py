@@ -1,6 +1,7 @@
 """Production-path and compatibility tests for the command-line architecture."""
 
 import importlib
+import io
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -15,6 +16,7 @@ import organiseMyVideo.__main__ as applicationMain
     [
         (["--source", "/tmp"], ["media", "organise", "/tmp"], "process"),
         (["--source", "/tmp", "--clean"], ["media", "clean", "/tmp"], "clean"),
+        (["--source", "/tmp", "--rescan"], ["media", "scan", "--source", "/tmp"], "rescan"),
         (
             ["--source", "/tmp", "--rescan", "--movie"],
             ["library", "rescan", "/tmp", "--target", "movies"],
@@ -54,6 +56,67 @@ def testCanonicalOrganiseDispatchesThroughExistingService(tmp_path: Path):
     organizer.processFiles.assert_called_once_with(interactive=True)
 
 
+def testMediaScanDispatchesBothLibrariesThroughExistingService(tmp_path: Path):
+    organizer = MagicMock()
+
+    with patch("organiseMyVideo.VideoOrganizer", return_value=organizer):
+        status = applicationMain.main(["media", "scan", "--source", str(tmp_path)])
+
+    assert status == 0
+    organizer.resetLibraryMetadata.assert_called_once_with(
+        target="both", showFilter=None, deepScan=False
+    )
+
+
+def testMediaScanShowTargetsOneTvShowAcrossRoots(tmp_path: Path):
+    organizer = MagicMock()
+
+    with patch("organiseMyVideo.VideoOrganizer", return_value=organizer):
+        status = applicationMain.main(
+            ["media", "scan", "--source", str(tmp_path), "--show", "Farscape"]
+        )
+
+    assert status == 0
+    organizer.resetLibraryMetadata.assert_called_once_with(
+        target="tv", showFilter="Farscape", deepScan=False
+    )
+
+
+def testMediaScanAllRequestsDeepIntegrityPass(tmp_path: Path):
+    organizer = MagicMock()
+
+    with patch("organiseMyVideo.VideoOrganizer", return_value=organizer):
+        status = applicationMain.main(
+            ["media", "scan", "--source", str(tmp_path), "--all"]
+        )
+
+    assert status == 0
+    organizer.resetLibraryMetadata.assert_called_once_with(
+        target="both", showFilter=None, deepScan=True
+    )
+
+
+def testMediaScanUsesConfiguredSourceWhenOverrideIsOmitted(tmp_path: Path):
+    organizer = MagicMock()
+    configPath = tmp_path / "config.json"
+    configPath.write_text(json.dumps({"source": str(tmp_path)}), encoding="utf-8")
+
+    with patch.object(applicationMain, "_getAppConfigPath", return_value=configPath):
+        with patch("organiseMyVideo.VideoOrganizer", return_value=organizer) as constructor:
+            status = applicationMain.main(["media", "scan"])
+
+    assert status == 0
+    constructor.assert_called_once_with(
+        sourceDir=str(tmp_path),
+        dryRun=True,
+        refreshMetadataLibrary=False,
+        useCurses=True,
+    )
+    organizer.resetLibraryMetadata.assert_called_once_with(
+        target="both", showFilter=None, deepScan=False
+    )
+
+
 def testCanonicalMissingSourceFailsBeforeOrganizerConstruction(tmp_path: Path):
     missing = tmp_path / "missing"
 
@@ -84,6 +147,11 @@ def testUniversalVersionAndNestedHelpAreSuccessful(capsys):
         applicationMain.main(["library", "--help"])
     assert helpExit.value.code == 0
     assert "rescan" in capsys.readouterr().out
+
+    with pytest.raises(SystemExit) as mediaHelpExit:
+        applicationMain.main(["media", "--help"])
+    assert mediaHelpExit.value.code == 0
+    assert "scan" in capsys.readouterr().out
 
 
 def testEntryPointConfiguresEstablishedLogging(tmp_path: Path):
@@ -276,3 +344,22 @@ def testCameraLabelPermissionFailureReportsError(tmp_path, monkeypatch, caplog):
     assert "camera inventory permission denied" in caplog.text
     assert "select the card mount itself" in caplog.text
     assert not constants.CAMERA_INVENTORY_DATABASE.exists()
+
+
+def testMediaScanProgressRendersSingleTerminalLine():
+    from organiseMyVideo.videoRescan import _ResetScanProgress
+
+    class TerminalBuffer(io.StringIO):
+        def isatty(self):
+            return True
+
+    stream = TerminalBuffer()
+    progress = _ResetScanProgress(4, "Scanning movie library", stream=stream)
+    progress.render(2, "Example Movie (2026)")
+    progress.finish()
+
+    output = stream.getvalue()
+    assert "Scanning movie library:" in output
+    assert "50%" in output
+    assert "(2/4)" in output
+    assert "Example Movie" in output

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import os
 import re
 import sqlite3
@@ -13,10 +14,48 @@ from typing import Optional
 from organiseMyProjects.logUtils import getLogger  # type: ignore
 
 from .constants import MEDIA_CATALOGUE_DATABASE, VIDEO_EXTENSIONS
+from .terminalProgress import TerminalProgress
 
 logger = getLogger()
 
 MOVIE_FOLDER_NAME = re.compile(r"^(?P<title>.+?)\s*\((?P<year>\d{4})\)$")
+
+
+@contextmanager
+def _bufferCatalogueDiagnostics():
+    """Buffer catalogue warnings/errors until the active progress line finishes."""
+    from . import metadata as metadata_module
+    from . import video as video_module
+
+    targets = (logger, metadata_module.logger, video_module.logger)
+    methodNames = ("warning", "error")
+    originals = {
+        target: {name: getattr(target, name) for name in methodNames}
+        for target in targets
+    }
+    events = []
+
+    def _capture(original):
+        def _buffered(*args, **kwargs):
+            events.append((original, args, kwargs))
+
+        return _buffered
+
+    try:
+        for target in targets:
+            for name in methodNames:
+                setattr(target, name, _capture(originals[target][name]))
+        yield events
+    finally:
+        for target, methods in originals.items():
+            for name, original in methods.items():
+                setattr(target, name, original)
+
+
+def _flushCatalogueDiagnostics(events: list) -> None:
+    """Emit buffered catalogue warnings/errors after progress is complete."""
+    for original, args, kwargs in events:
+        original(*args, **kwargs)
 
 CATALOGUE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS cardInventory (
@@ -405,24 +444,33 @@ def _catalogueColumnEnsure(
 def _moviesCollect(movieDirs: list[Path], identity) -> list[MovieCatalogueRecord]:
     """Walk movie storage roots and record known movie metadata."""
 
-    records: list[MovieCatalogueRecord] = []
-    seen: set[str] = set()
+    folders: list[Path] = []
     for root in movieDirs:
         root = Path(root)
         if not root.is_dir():
             continue
         try:
-            children = sorted(root.iterdir())
+            folders.extend(folder for folder in sorted(root.iterdir()) if folder.is_dir())
         except OSError:
             continue
-        for folder in children:
-            if not folder.is_dir():
-                continue
-            record = _movieFromFolder(folder, identity)
-            if record is None or record.folderPath in seen:
-                continue
-            seen.add(record.folderPath)
-            records.append(record)
+
+    progress = TerminalProgress(len(folders), "Cataloguing movie library")
+    records: list[MovieCatalogueRecord] = []
+    seen: set[str] = set()
+    diagnostics = []
+    try:
+        with _bufferCatalogueDiagnostics() as diagnostics:
+            for completed, folder in enumerate(folders):
+                progress.render(completed, folder.name)
+                record = _movieFromFolder(folder, identity)
+                if record is not None and record.folderPath not in seen:
+                    seen.add(record.folderPath)
+                    records.append(record)
+                progress.render(completed + 1, folder.name)
+    finally:
+        progress.finish()
+    _flushCatalogueDiagnostics(diagnostics)
+
     records.sort(
         key=lambda item: (item.title.lower(), item.year or "", item.folderPath)
     )
@@ -515,33 +563,44 @@ def _tvCollect(
 ) -> tuple[list[TvEpisodeCatalogueRecord], list[TvSeriesCatalogueRecord]]:
     """Walk TV storage roots and record known series and episode metadata."""
 
-    episodes: list[TvEpisodeCatalogueRecord] = []
-    seriesByFolder: dict[str, TvSeriesCatalogueRecord] = {}
-    seen: set[str] = set()
+    shows: list[Path] = []
     for root in videoDirs:
         root = Path(root)
         if not root.is_dir():
             continue
         try:
-            shows = sorted(path for path in root.iterdir() if path.is_dir())
+            shows.extend(path for path in sorted(root.iterdir()) if path.is_dir())
         except OSError:
             continue
-        for showDir in shows:
-            folderPath = str(showDir)
-            seriesByFolder[folderPath] = _tvSeriesFromFolder(showDir, identity)
-            for dirPath, dirNames, fileNames in os.walk(showDir):
-                dirNames[:] = [name for name in dirNames if not name.startswith(".")]
-                current = Path(dirPath)
-                seasonHint = identity._inferSeasonFromPath(current)
-                for fileName in fileNames:
-                    path = current / fileName
-                    if path.suffix.lower() not in VIDEO_EXTENSIONS:
-                        continue
-                    record = _tvEpisodeFromFile(path, showDir, seasonHint, identity)
-                    if record.filePath in seen:
-                        continue
-                    seen.add(record.filePath)
-                    episodes.append(record)
+
+    progress = TerminalProgress(len(shows), "Cataloguing TV library")
+    episodes: list[TvEpisodeCatalogueRecord] = []
+    seriesByFolder: dict[str, TvSeriesCatalogueRecord] = {}
+    seen: set[str] = set()
+    diagnostics = []
+    try:
+        with _bufferCatalogueDiagnostics() as diagnostics:
+            for completed, showDir in enumerate(shows):
+                progress.render(completed, showDir.name)
+                folderPath = str(showDir)
+                seriesByFolder[folderPath] = _tvSeriesFromFolder(showDir, identity)
+                for dirPath, dirNames, fileNames in os.walk(showDir):
+                    dirNames[:] = [name for name in dirNames if not name.startswith(".")]
+                    current = Path(dirPath)
+                    seasonHint = identity._inferSeasonFromPath(current)
+                    for fileName in fileNames:
+                        path = current / fileName
+                        if path.suffix.lower() not in VIDEO_EXTENSIONS:
+                            continue
+                        record = _tvEpisodeFromFile(path, showDir, seasonHint, identity)
+                        if record.filePath in seen:
+                            continue
+                        seen.add(record.filePath)
+                        episodes.append(record)
+                progress.render(completed + 1, showDir.name)
+    finally:
+        progress.finish()
+    _flushCatalogueDiagnostics(diagnostics)
     episodes.sort(
         key=lambda item: (
             item.showName.lower(),

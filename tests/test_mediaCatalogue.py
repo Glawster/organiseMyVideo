@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import sqlite3
+import io
 
 import pytest
 
@@ -100,7 +101,7 @@ def testLibraryRescanUpdatesSharedCatalogue(tmp_path: Path):
         "skipped": 0,
         "errors": 0,
     }
-    organizer.resetTvEpisodeTitles = lambda videoDirs: {
+    organizer.resetTvEpisodeTitles = lambda videoDirs, **kwargs: {
         "renamed": 0,
         "skipped": 0,
         "errors": 0,
@@ -113,6 +114,58 @@ def testLibraryRescanUpdatesSharedCatalogue(tmp_path: Path):
     catalogue = MediaCatalogue(databasePath=constants.MEDIA_CATALOGUE_DATABASE)
     assert len(catalogue.catalogueMoviesList()) == 1
     assert len(catalogue.catalogueTvEpisodesList()) == 1
+
+
+def testCatalogueBuffersWarningsUntilTvProgressFinishes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from organiseMyVideo import mediaCatalogue as media_catalogue_module
+    from organiseMyVideo import metadata as metadata_module
+    from organiseMyVideo import video as video_module
+
+    class TerminalBuffer(io.StringIO):
+        def isatty(self):
+            return True
+
+    tvRoot = tmp_path / "TV"
+    season = tvRoot / "Middle, The" / "Season 9"
+    metadataDir = season / "metadata"
+    metadataDir.mkdir(parents=True)
+    episode = season / "The.Middle.S09E23.mkv"
+    episode.write_bytes(b"tv")
+    (metadataDir / "The.Middle.S09E23.xml").write_text(
+        "<Item><EpisodeName>Broken & title</EpisodeName></Item>", encoding="utf-8"
+    )
+
+    stream = TerminalBuffer()
+    originalProgress = media_catalogue_module.TerminalProgress
+
+    class TestProgress(originalProgress):
+        def __init__(self, total, label):
+            super().__init__(total, label, stream=stream)
+
+    warningPositions = []
+    originalWarning = media_catalogue_module.logger.warning
+
+    def captureWarning(*args, **kwargs):
+        warningPositions.append(len(stream.getvalue()))
+        return originalWarning(*args, **kwargs)
+
+    monkeypatch.setattr(media_catalogue_module, "TerminalProgress", TestProgress)
+    monkeypatch.setattr(media_catalogue_module.logger, "warning", captureWarning)
+    monkeypatch.setattr(metadata_module.logger, "warning", captureWarning)
+    monkeypatch.setattr(video_module.logger, "warning", captureWarning)
+
+    media_catalogue_module._tvCollect(
+        [tvRoot], media_catalogue_module._catalogueIdentitySource()
+    )
+
+    output = stream.getvalue()
+    assert "Cataloguing TV library:" in output
+    assert "100%" in output
+    assert output.endswith("\n")
+    assert warningPositions
+    assert warningPositions[0] == len(output)
 
 
 def testCatalogueUsesMcmEpisodeTitleOverFilename(tmp_path: Path):

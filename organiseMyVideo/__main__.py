@@ -75,6 +75,15 @@ def _loadTvdbApiKeyFromConfig(configPath: Path) -> None:
         os.environ["ORGANISEMYVIDEO_TVDB_API_KEY"] = configured.strip()
 
 
+def _configuredSource(configPath: Path) -> str:
+    """Return the configured media source, falling back to the historical default."""
+    config = _loadAppConfig(configPath)
+    configured = config.get("source")
+    if isinstance(configured, str) and configured.strip():
+        return configured.strip()
+    return "/mnt/video2/toFile"
+
+
 def _promptForTvdbApiKey(configPath: Path) -> Optional[str]:
     """Prompt the user for a TVDB API key and persist it when provided."""
     try:
@@ -247,6 +256,27 @@ def buildParser() -> argparse.ArgumentParser:
         help="clean staged media names and folders",
     )
     mediaClean.add_argument("source", nargs="?", default="/mnt/video2/toFile")
+    mediaScan = mediaSub.add_parser(
+        "scan",
+        parents=[_buildSharedFlags(True)],
+        help="scan existing movie and TV libraries",
+    )
+    mediaScan.add_argument(
+        "-s",
+        "--source",
+        default=None,
+        help="override the media source stored in application config",
+    )
+    mediaScan.add_argument(
+        "--show",
+        help="limit TV scanning/repair to matching show folders across all TV roots",
+    )
+    mediaScan.add_argument(
+        "--all",
+        dest="scan_all",
+        action="store_true",
+        help="perform the full movie/TV integrity scan, including every TV episode",
+    )
 
     libraryParser = subparsers.add_parser("library", help="maintain media libraries")
     librarySub = libraryParser.add_subparsers(dest="libraryAction", required=True)
@@ -330,6 +360,10 @@ def _normalizeArguments(args: argparse.Namespace) -> argparse.Namespace:
     command = getattr(args, "command", None)
     if command == "media":
         args.clean = args.mediaAction == "clean"
+        if args.mediaAction == "scan":
+            args.rescan = True
+            args.movie = False
+            args.video = False
     elif command == "library":
         args.rescan = True
         args.movie = args.target == "movies"
@@ -356,17 +390,22 @@ def _validateArguments(
     )
     if legacyModes > 1:
         parser.error("select only one workflow mode")
-    if (
-        args.command
-        and legacyModes
-        and args.command
-        not in {
-            "library",
-            "torrent",
-            "grok",
-        }
-    ):
-        parser.error("do not combine a canonical command with a legacy mode flag")
+    if args.command and legacyModes:
+        canonicalLegacyMode = (
+            (args.command == "library" and args.rescan)
+            or (args.command == "torrent" and args.torrent)
+            or (
+                args.command == "grok"
+                and (args.grok or args.import_firefox_session or args.reset_grok)
+            )
+            or (
+                args.command == "media"
+                and getattr(args, "mediaAction", None) == "scan"
+                and args.rescan
+            )
+        )
+        if not canonicalLegacyMode:
+            parser.error("do not combine a canonical command with a legacy mode flag")
     if args.command == "camera":
         if getattr(args, "cameraAction", None) == "inventory":
             cardId = getattr(args, "card", None)
@@ -386,6 +425,12 @@ def _validateArguments(
                     parser.error(f"source directory does not exist: {sourcePath}")
                 args.inventorySource = str(sourcePath)
         return
+    if (
+        args.command == "media"
+        and getattr(args, "mediaAction", None) == "scan"
+        and not args.source
+    ):
+        args.source = _configuredSource(_getAppConfigPath())
     if args.command in {"media", "library", "torrent"}:
         sourcePath = Path(args.source).expanduser()
         if not sourcePath.is_dir():
@@ -580,7 +625,8 @@ def _runOrganizerWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
 
     selectedMode = _selectedMode(args)
     logger.value("source directory", args.source)
-    logger.value("mode", selectedMode)
+    displayMode = "scan" if selectedMode == "rescan" else selectedMode
+    logger.value("mode", displayMode)
     logger.doing("initializing video organizer")
     from . import VideoOrganizer
 
@@ -639,13 +685,25 @@ Folder errors:   {cleanStats['errors']}
         if folderStats.errors:
             return 1
     elif args.rescan:
+        showFilter = getattr(args, "show", None)
+        canonicalScan = (
+            getattr(args, "command", None) == "media"
+            and getattr(args, "mediaAction", None) == "scan"
+        )
         target = (
-            "movies"
+            "tv"
+            if showFilter
+            else "movies"
             if args.movie and not args.video
             else "tv" if args.video and not args.movie else "both"
         )
-        logger.doing(f"running rescan mode ({target})")
-        organizer.resetLibraryMetadata(target=target)
+        deepScan = bool(getattr(args, "scan_all", False)) if canonicalScan else True
+        logger.doing(f"running scan mode ({target})")
+        organizer.resetLibraryMetadata(
+            target=target,
+            showFilter=showFilter,
+            deepScan=deepScan,
+        )
     elif getattr(args, "merge", False):
         from .mediaCatalogue import MediaCatalogue
         from .mediaMerge import mergeDuplicateMovies, mergeDuplicateTvShows
@@ -712,12 +770,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         logger.info("confirm mode, changes will be made")
 
     command = getattr(args, "command", None)
-    if command == "grok":
-        status = _runGalleryWorkflow(args, dryRun)
-    elif command == "camera":
-        status = _runCameraWorkflow(args, dryRun)
-    else:
-        status = _runOrganizerWorkflow(args, dryRun)
+    try:
+        if command == "grok":
+            status = _runGalleryWorkflow(args, dryRun)
+        elif command == "camera":
+            status = _runCameraWorkflow(args, dryRun)
+        else:
+            status = _runOrganizerWorkflow(args, dryRun)
+    except KeyboardInterrupt:
+        logger.warning("cancelled by user")
+        return 130
+
     logger.done("organiseMyVideo complete")
     return status
 

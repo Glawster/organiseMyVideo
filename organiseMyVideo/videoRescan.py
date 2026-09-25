@@ -1,14 +1,16 @@
 """TV rescan/reset workflows and duplicate-folder handling."""
 
 from contextlib import contextmanager
+import errno
 import difflib
 import json
 import re
+import shutil
 import sys
 import unicodedata
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, Optional, TextIO
 
 from .constants import APP_CONFIG_FILE, VIDEO_EXTENSIONS
 from organiseMyProjects.logUtils import getLogger  # type: ignore
@@ -16,10 +18,69 @@ from organiseMyProjects.logUtils import getLogger  # type: ignore
 logger = getLogger()
 
 _IGNORED_TV_SHOW_DUPLICATES_CONFIG_KEY = "ignored_tv_show_duplicates"
+_SCAN_PROGRESS_BAR_WIDTH = 24
+
+
+class _ResetScanProgress:
+    """Single-line terminal progress display for movie/TV library scans."""
+
+    def __init__(self, total: int, label: str, stream: Optional[TextIO] = None):
+        self.total = max(total, 0)
+        self.label = label
+        self.stream = stream if stream is not None else sys.stderr
+        isatty = getattr(self.stream, "isatty", None)
+        self.enabled = bool(callable(isatty) and isatty())
+        self.displayWidth = 0
+
+    def render(self, completed: int, name: str = "") -> None:
+        """Render current progress without adding a scrolling log line."""
+        if not self.enabled:
+            return
+        progress = min(completed / self.total, 1.0) if self.total else 0.0
+        filled = int(progress * _SCAN_PROGRESS_BAR_WIDTH)
+        bar = "#" * filled + "-" * (_SCAN_PROGRESS_BAR_WIDTH - filled)
+        totalText = str(self.total) if self.total else "?"
+        prefix = (
+            f"{self.label}: [{bar}] {progress * 100:3.0f}% "
+            f"({completed}/{totalText})"
+        )
+        columns = max(shutil.get_terminal_size(fallback=(80, 24)).columns, 20)
+        available = columns - len(prefix) - 1
+        suffix = ""
+        if name and available > 0:
+            suffix = " " + self._truncate(name, available)
+        line = prefix + suffix
+        padding = max(self.displayWidth - len(line), 0)
+        self.stream.write(f"\r{line}{' ' * padding}")
+        self.stream.flush()
+        self.displayWidth = len(line)
+
+    def finish(self) -> None:
+        """Finish the live progress line before normal logger output resumes."""
+        if self.enabled and self.displayWidth:
+            self.stream.write("\n")
+            self.stream.flush()
+            self.displayWidth = 0
+
+    @staticmethod
+    def _truncate(text: str, maxWidth: int) -> str:
+        """Return text shortened to the available terminal width."""
+        if len(text) <= maxWidth:
+            return text
+        if maxWidth <= 3:
+            return text[:maxWidth]
+        return text[: maxWidth - 3] + "..."
 
 
 class VideoRescanMixin:
     """Workflow methods for TV rescans and duplicate-folder repair."""
+
+    @staticmethod
+    def _filesystemSafeResetFallback(path: Path) -> Path:
+        """Return a colon-free fallback name for filesystems that reject colons."""
+        safeName = re.sub(r"\s*:\s*", " - ", path.name)
+        safeName = re.sub(r"\s+", " ", safeName).strip()
+        return path.with_name(safeName)
 
     @contextmanager
     def _suppressResetNoiseLogs(self):
@@ -46,12 +107,15 @@ class VideoRescanMixin:
 
     @contextmanager
     def _suppressResetMetadataPreserveLogs(self):
-        """Hide no-op metadata preservation logs while keeping real update logs."""
+        """Hide routine metadata preservation/creation noise during reset scans."""
         from . import metadata as metadata_module
         from . import video as video_module
 
         targets = (logger, video_module.logger, metadata_module.logger)
-        originals = {target: target.value for target in targets}
+        originals = {
+            target: {"value": target.value, "action": target.action}
+            for target in targets
+        }
 
         def _wrapValue(original):
             def _value(label, *args, **kwargs):
@@ -64,13 +128,133 @@ class VideoRescanMixin:
 
             return _value
 
+        def _wrapAction(original):
+            def _action(message, *args, **kwargs):
+                if isinstance(message, str) and message.startswith(
+                    ("create metadata", "update metadata")
+                ):
+                    return None
+                return original(message, *args, **kwargs)
+
+            return _action
+
         try:
             for target in targets:
                 target.value = _wrapValue(target.value)
+                target.action = _wrapAction(target.action)
             yield
         finally:
-            for target, original in originals.items():
-                target.value = original
+            for target, methods in originals.items():
+                target.value = methods["value"]
+                target.action = methods["action"]
+
+    @contextmanager
+    def _bufferResetItemLogs(self):
+        """Buffer one scan item's meaningful logs until its progress completes."""
+        from . import metadata as metadata_module
+        from . import video as video_module
+
+        targets = (logger, video_module.logger, metadata_module.logger)
+        methodNames = ("action", "error", "warning", "multiline", "value", "info")
+        originals = {
+            target: {name: getattr(target, name) for name in methodNames}
+            for target in targets
+        }
+        events = []
+
+        def _capture(original):
+            def _buffered(*args, **kwargs):
+                events.append((original, args, kwargs))
+
+            return _buffered
+
+        try:
+            for target in targets:
+                for name in methodNames:
+                    setattr(target, name, _capture(originals[target][name]))
+            yield events
+        finally:
+            for target, methods in originals.items():
+                for name, original in methods.items():
+                    setattr(target, name, original)
+
+    def _flushResetItemLogs(self, progress: _ResetScanProgress, events: list) -> None:
+        """Finish the current progress line, then emit buffered item results."""
+        if not events:
+            return
+        progress.finish()
+        for original, args, kwargs in events:
+            original(*args, **kwargs)
+
+    def _resetTvShowMatchesFilter(
+        self, showName: str, showFilter: Optional[str]
+    ) -> bool:
+        """Return True when *showName* matches the optional canonical show filter."""
+        if not showFilter:
+            return True
+        targetKey = self._buildResetTvShowDuplicateKey(showFilter)
+        return bool(
+            targetKey and targetKey in self._buildResetTvShowDuplicateKey(showName)
+        )
+
+    def _resetTvShowFoldersResolve(
+        self, videoDirs: list[Path], showFilter: str
+    ) -> set[Path]:
+        """Resolve physical and catalogue title matches once for a targeted scan."""
+        from .mediaCatalogue import MediaCatalogue
+
+        # Keep every matching path, including aliases sharing a canonical title.
+        catalogueFolders = {
+            Path(record.folderPath)
+            for record in MediaCatalogue().catalogueTvSeriesList()
+            if self._resetTvShowMatchesFilter(record.showName, showFilter)
+        }
+        return {
+            showDir
+            for tvDir in videoDirs
+            for showDir in self._iterResetTvShowDirs(tvDir)
+            if showDir in catalogueFolders
+            or self._resetTvShowMatchesFilter(showDir.name, showFilter)
+        }
+
+    def _resetTvShowNeedsMetadataRepair(self, showDir: Path) -> bool:
+        """Return True when show-level TV identity metadata is missing or unusable."""
+        seriesFile = showDir / "series.xml"
+        seriesRoot = self._readXmlRoot(seriesFile)
+        if seriesRoot is None:
+            return True
+        seriesId = self._readFirstXmlText(seriesRoot, ("SeriesID", "seriesid", "id"))
+        imdbId = self._readFirstXmlText(seriesRoot, ("IMDB_ID", "IMDbId"))
+        if seriesId or imdbId:
+            return False
+        return self._readTvShowTopLevelSeriesId(showDir) is None
+
+    def _iterResetSelectedTvShowFiles(
+        self,
+        tvDir: Path,
+        *,
+        showFilter: Optional[str] = None,
+        deepScan: bool = True,
+        selectedFolders: Optional[set[Path]] = None,
+    ):
+        """Yield only TV shows that require the requested level of scan work."""
+        if selectedFolders is None and showFilter:
+            selectedFolders = self._resetTvShowFoldersResolve([tvDir], showFilter)
+        for showDir in self._iterResetTvShowDirs(tvDir):
+            showName = showDir.name
+            if selectedFolders is not None and showDir not in selectedFolders:
+                continue
+            if not deepScan and not self._resetTvShowNeedsMetadataRepair(showDir):
+                continue
+            videoFiles = [
+                path
+                for path in sorted(showDir.rglob("*"))
+                if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS
+            ]
+            if not videoFiles:
+                continue
+            seriesId = self._readResetTvShowSeriesId(showDir)
+            yield showName, seriesId, videoFiles
 
     def _iterResetTvShowFiles(self, tvDir: Path):
         """Yield grouped reset candidates by top-level TV show folder."""
@@ -467,27 +651,126 @@ class VideoRescanMixin:
         )
         return choiceMap[selectedChoice], orderedShowNames
 
-    def _mergeResetTvShowFolderContents(
+    @staticmethod
+    def _formatResetTvShowMergeBytes(value: int) -> str:
+        """Return a compact human-readable byte count for merge diagnostics."""
+        size = float(max(value, 0))
+        for unit in ("B", "KB", "MB", "GB", "TB"):
+            if size < 1024.0 or unit == "TB":
+                return f"{size:.1f} {unit}"
+            size /= 1024.0
+        return f"{size:.1f} TB"
+
+    def _resetTvShowMergeRequiredBytes(self, sourceDir: Path) -> int:
+        """Return the total regular-file bytes below *sourceDir*."""
+        total = 0
+        try:
+            paths = sourceDir.rglob("*")
+            for path in paths:
+                if path.is_file():
+                    total += path.stat().st_size
+        except OSError as error:
+            logger.warning(
+                "could not size TV show merge source %s: %s", sourceDir, error
+            )
+        return total
+
+    def _resetTvShowMergeIsCrossFilesystem(
         self, sourceDir: Path, destinationDir: Path
+    ) -> bool:
+        """Return True when a merge must copy data between filesystems."""
+        try:
+            return sourceDir.stat().st_dev != destinationDir.stat().st_dev
+        except OSError:
+            return True
+
+    def _resetTvShowMergeHasSufficientSpace(
+        self, sourceDir: Path, destinationDir: Path
+    ) -> bool:
+        """Return whether a cross-filesystem merge fits on the destination."""
+        if not self._resetTvShowMergeIsCrossFilesystem(sourceDir, destinationDir):
+            return True
+
+        requiredBytes = self._resetTvShowMergeRequiredBytes(sourceDir)
+        try:
+            freeBytes = shutil.disk_usage(destinationDir).free
+        except OSError as error:
+            logger.error(
+                "could not determine free space for TV merge destination %s: %s",
+                destinationDir,
+                error,
+            )
+            return False
+
+        if requiredBytes <= freeBytes:
+            return True
+
+        logger.error(
+            "not enough free space to merge TV show folders: %s requires %s; %s has %s free",
+            sourceDir,
+            self._formatResetTvShowMergeBytes(requiredBytes),
+            destinationDir,
+            self._formatResetTvShowMergeBytes(freeBytes),
+        )
+        self._recordSummaryCleanup(
+            f"merge blocked by insufficient free space: {sourceDir} -> {destinationDir}"
+        )
+        return False
+
+    def _countResetTvShowMergeEntries(self, sourceDir: Path) -> int:
+        """Return the number of descendant entries involved in a TV merge."""
+        try:
+            return sum(1 for _path in sourceDir.rglob("*"))
+        except OSError:
+            return 0
+
+    def _mergeResetTvShowFolderContents(
+        self,
+        sourceDir: Path,
+        destinationDir: Path,
+        progress=None,
     ) -> None:
         """Move non-conflicting files from *sourceDir* into *destinationDir*."""
         if not sourceDir.exists() or not sourceDir.is_dir():
             return
+        destinationDir.mkdir(parents=True, exist_ok=True)
         for sourcePath in sorted(
             sourceDir.iterdir(), key=lambda item: item.name.casefold()
         ):
             destinationPath = destinationDir / sourcePath.name
-            if destinationPath.exists():
-                if sourcePath.is_dir() and destinationPath.is_dir():
-                    self._mergeResetTvShowFolderContents(sourcePath, destinationPath)
-                    try:
-                        self.filesystem.removeEmptyDirectory(sourcePath)
-                        self._recordSummaryCleanup(
-                            f"removed empty folder: {sourcePath}"
-                        )
-                    except OSError:
-                        pass
+            if progress is not None:
+                progress.show(sourcePath.name)
+
+            if sourcePath.is_dir():
+                if destinationPath.exists() and not destinationPath.is_dir():
+                    if progress is not None:
+                        progress.pause()
+                    logger.warning(
+                        "skipping rescan merge; destination already exists: %s",
+                        destinationPath,
+                    )
+                    self._recordSummaryCleanup(
+                        f"cleanup needed: {sourcePath} conflicts with existing {destinationPath}"
+                    )
+                    if progress is not None:
+                        progress.advance(1, sourcePath.name)
                     continue
+
+                self._mergeResetTvShowFolderContents(
+                    sourcePath, destinationPath, progress=progress
+                )
+                try:
+                    self.filesystem.removeEmptyDirectory(sourcePath)
+                    self._recordSummaryCleanup(f"removed empty folder: {sourcePath}")
+                except OSError:
+                    pass
+                if progress is not None:
+                    progress.advance(1, sourcePath.name)
+                continue
+
+            if destinationPath.exists():
+                if progress is not None:
+                    progress.pause()
                 logger.warning(
                     "skipping rescan merge; destination already exists: %s",
                     destinationPath,
@@ -495,12 +778,14 @@ class VideoRescanMixin:
                 self._recordSummaryCleanup(
                     f"cleanup needed: {sourcePath} conflicts with existing {destinationPath}"
                 )
+                if progress is not None:
+                    progress.advance(1, sourcePath.name)
                 continue
-            logger.multiline(
-                ["merging TV show folder item", sourcePath, destinationPath]
-            )
+
             self._recordSummaryTransfer(sourcePath, destinationPath)
             self.filesystem.move(sourcePath, destinationPath)
+            if progress is not None:
+                progress.advance(1, sourcePath.name)
 
         try:
             self.filesystem.removeEmptyDirectory(sourceDir)
@@ -710,8 +995,8 @@ class VideoRescanMixin:
             return
         self._writeXml(metadataFile, root)
 
-    def _resetMovieMetadataForFile(self, videoFile: Path) -> str:
-        """Repair metadata and canonical naming for one stored movie file."""
+    def _resolveResetMovieInfo(self, videoFile: Path) -> Optional[dict]:
+        """Resolve one canonical movie identity for a reset-scan folder."""
         with self._suppressResetNoiseLogs():
             mcmHints = self._readMovieMcmHints(videoFile)
             parsedMovieInfo = self.parseMovieFilename(videoFile.name)
@@ -721,10 +1006,22 @@ class VideoRescanMixin:
             )
             sourceMovieInfo = self._normaliseMovieMetadata(sourceMovieInfo)
             if not sourceMovieInfo:
-                return "skipped"
-            resolvedMovieInfo = (
-                self._enrichMovieMetadata(sourceMovieInfo) or sourceMovieInfo
-            )
+                return None
+            return self._enrichMovieMetadata(sourceMovieInfo) or sourceMovieInfo
+
+    def _resetMovieMetadataForFile(
+        self,
+        videoFile: Path,
+        reservedDestinations: Optional[set[Path]] = None,
+        resolvedMovieInfo: Optional[dict] = None,
+    ) -> str:
+        """Repair metadata and canonical naming for one stored movie file."""
+        if resolvedMovieInfo is None:
+            resolvedMovieInfo = self._resolveResetMovieInfo(videoFile)
+        if not resolvedMovieInfo:
+            return "skipped"
+        resolvedMovieInfo = dict(resolvedMovieInfo)
+        resolvedMovieInfo["extension"] = videoFile.suffix
 
         movieDir = videoFile.parent
         with self._suppressResetMetadataPreserveLogs():
@@ -743,28 +1040,78 @@ class VideoRescanMixin:
             return "skipped"
 
         destinationPath = videoFile.with_name(destinationName)
-        if destinationPath.exists():
-            logger.error("rescan movie target already exists: %s", destinationPath)
+        if destinationPath.exists() or (
+            reservedDestinations is not None and destinationPath in reservedDestinations
+        ):
+            logger.error("scan movie target already exists: %s", destinationPath)
             return "errors"
+        if reservedDestinations is not None:
+            reservedDestinations.add(destinationPath)
 
         logger.multiline(["renaming movie", videoFile.name, destinationPath.name])
         if self.dryRun:
             self._recordSummaryRename(videoFile, destinationPath)
             return "renamed"
 
-        self.filesystem.rename(videoFile, destinationPath)
+        try:
+            self.filesystem.rename(videoFile, destinationPath)
+        except OSError as error:
+            if error.errno != errno.EINVAL or ":" not in destinationPath.name:
+                logger.error(
+                    "could not rename movie %s -> %s: %s",
+                    videoFile,
+                    destinationPath,
+                    error,
+                )
+                return "errors"
+            fallbackPath = self._filesystemSafeResetFallback(destinationPath)
+            if fallbackPath.exists() or (
+                reservedDestinations is not None
+                and fallbackPath in reservedDestinations
+            ):
+                logger.error(
+                    "scan movie fallback target already exists: %s", fallbackPath
+                )
+                return "errors"
+            logger.multiline(
+                ["filesystem-safe movie name", destinationPath.name, fallbackPath.name]
+            )
+            try:
+                self.filesystem.rename(videoFile, fallbackPath)
+            except (OSError, ValueError) as fallbackError:
+                logger.error(
+                    "could not rename movie %s -> %s: %s",
+                    videoFile,
+                    fallbackPath,
+                    fallbackError,
+                )
+                return "errors"
+            destinationPath = fallbackPath
+            if reservedDestinations is not None:
+                reservedDestinations.add(destinationPath)
+        except ValueError as error:
+            logger.error(
+                "could not rename movie %s -> %s: %s",
+                videoFile,
+                destinationPath,
+                error,
+            )
+            return "errors"
         self._recordSummaryRename(videoFile, destinationPath)
         return "renamed"
 
-    def _maybeRenameResetMovieFolder(self, movieFolder: Path, videoFiles: list[Path]):
+    def _maybeRenameResetMovieFolder(
+        self,
+        movieFolder: Path,
+        videoFiles: list[Path],
+        movieInfo: Optional[dict] = None,
+    ):
         """Return updated movie folder and paths after canonical folder rename."""
         if not movieFolder.is_dir() or not videoFiles:
             return movieFolder, videoFiles
 
-        movieInfo = self._readMovieMcmHints(videoFiles[0]) or self.parseMovieFilename(
-            videoFiles[0].name
-        )
-        movieInfo = self._normaliseMovieMetadata(movieInfo)
+        if movieInfo is None:
+            movieInfo = self._resolveResetMovieInfo(videoFiles[0])
         if not movieInfo or not movieInfo.get("title") or not movieInfo.get("year"):
             return movieFolder, videoFiles
 
@@ -781,13 +1128,11 @@ class VideoRescanMixin:
             )
             return movieFolder, videoFiles
 
-        logger.action(
-            "renaming movie folder: %s (from %s)",
-            destinationDir.name,
-            movieFolder.name,
+        logger.multiline(
+            ["renaming movie folder", movieFolder.name, destinationDir.name]
         )
-        self._recordSummaryRename(movieFolder, destinationDir)
         if self.dryRun:
+            self._recordSummaryRename(movieFolder, destinationDir)
             return destinationDir, [
                 destinationDir / videoFile.relative_to(movieFolder)
                 for videoFile in videoFiles
@@ -796,8 +1141,31 @@ class VideoRescanMixin:
         try:
             self.filesystem.rename(movieFolder, destinationDir)
         except OSError as error:
-            logger.error("could not rename movie folder %s: %s", movieFolder, error)
-            return movieFolder, videoFiles
+            if error.errno != errno.EINVAL or ":" not in destinationDir.name:
+                logger.error("could not rename movie folder %s: %s", movieFolder, error)
+                return movieFolder, videoFiles
+            fallbackDir = self._filesystemSafeResetFallback(destinationDir)
+            if fallbackDir.exists():
+                logger.error(
+                    "rescan movie folder fallback target already exists: %s",
+                    fallbackDir,
+                )
+                return movieFolder, videoFiles
+            logger.multiline(
+                ["filesystem-safe movie folder", destinationDir.name, fallbackDir.name]
+            )
+            try:
+                self.filesystem.rename(movieFolder, fallbackDir)
+            except (OSError, ValueError) as fallbackError:
+                logger.error(
+                    "could not rename movie folder %s -> %s: %s",
+                    movieFolder,
+                    fallbackDir,
+                    fallbackError,
+                )
+                return movieFolder, videoFiles
+            destinationDir = fallbackDir
+        self._recordSummaryRename(movieFolder, destinationDir)
 
         return destinationDir, [
             destinationDir / videoFile.relative_to(movieFolder)
@@ -951,17 +1319,118 @@ class VideoRescanMixin:
                 self._recordSummaryRename(sourcePath, companionDestination)
             return "renamed"
 
-        self.filesystem.rename(videoFile, destinationPath)
-        self._recordSummaryRename(videoFile, destinationPath)
-        for sourcePath, companionDestination in companionRenames:
-            self.filesystem.rename(sourcePath, companionDestination)
-            self._recordSummaryRename(sourcePath, companionDestination)
+        try:
+            self.filesystem.rename(videoFile, destinationPath)
+            self._recordSummaryRename(videoFile, destinationPath)
+            for sourcePath, companionDestination in companionRenames:
+                self.filesystem.rename(sourcePath, companionDestination)
+                self._recordSummaryRename(sourcePath, companionDestination)
+        except (OSError, ValueError) as error:
+            logger.error(
+                "could not rename TV episode %s -> %s: %s",
+                videoFile,
+                destinationPath,
+                error,
+            )
+            return "errors"
         if destinationMetadataFile.exists():
             self._updateEpisodeMetadataFile(destinationMetadataFile, resolvedTvInfo)
         return "renamed"
 
-    def resetTvEpisodeTitles(self, videoDirs: Optional[list[Path]] = None) -> dict:
-        """Retitle stored TV episodes whose filename suffix still looks noisy."""
+    def _handleTargetedResetTvShowDuplicates(
+        self,
+        videoDirs: list[Path],
+        showFilter: str,
+        selectedFolders: Optional[set[Path]] = None,
+    ) -> None:
+        """Detect and optionally merge one targeted TV show across all storage roots."""
+        if selectedFolders is None:
+            selectedFolders = self._resetTvShowFoldersResolve(videoDirs, showFilter)
+        entries = [
+            {"showName": showDir.name, "showDir": showDir}
+            for showDir in sorted(selectedFolders)
+        ]
+        if len(entries) < 2:
+            return
+
+        canonicalName = self._stripResetTvShowDuplicateSuffixes(showFilter)
+        displayPaths = sorted(str(entry["showDir"]) for entry in entries)
+        label = f"possible duplicate TV show folders: {canonicalName}"
+        logger.multiline([label, *displayPaths])
+        self._recordSummaryDuplicateTvShow(label, displayPaths)
+
+        if not self._shouldPromptInteractively():
+            return
+
+        shouldMerge = self._readMenuChoice(
+            "Merge these folders? (y/n/q): ",
+            validChoices={"y", "n", "q"},
+            defaultChoice="n",
+        )
+        if shouldMerge in {"q", "quit"}:
+            logger.info("user requested to quit")
+            sys.exit(0)
+        if shouldMerge != "y":
+            return
+
+        selectionKeys = "123456789abcdefghijklmnopqrstuvwxyz"
+        if len(entries) > len(selectionKeys):
+            logger.warning("too many matching TV show folders to choose a merge master")
+            return
+
+        orderedEntries = sorted(
+            entries, key=lambda entry: str(entry["showDir"]).casefold()
+        )
+        choiceMap = dict(zip(selectionKeys, orderedEntries))
+        choiceLines = "\n".join(
+            f"  {key}) {entry['showDir']}" for key, entry in choiceMap.items()
+        )
+        defaultChoice = next(iter(choiceMap))
+        selectedChoice = self._readMenuChoice(
+            "Choose the master TV show folder for the merged result:\n"
+            f"{choiceLines}\n"
+            f"Select master folder ({'/'.join(choiceMap)}): ",
+            validChoices=set(choiceMap),
+            defaultChoice=defaultChoice,
+        )
+        masterDir = choiceMap[selectedChoice]["showDir"]
+
+        for entry in orderedEntries:
+            sourceDir = entry["showDir"]
+            if sourceDir == masterDir:
+                continue
+            logger.multiline(["merging TV show folders", masterDir, sourceDir])
+            if not self._resetTvShowMergeHasSufficientSpace(sourceDir, masterDir):
+                continue
+            if self.dryRun:
+                self._recordSummaryCleanup(
+                    f"merge TV show folders needed: {sourceDir} -> {masterDir}"
+                )
+                continue
+            from .mediaMerge import _TvMergeProgress
+
+            mergeProgress = _TvMergeProgress(
+                self._stripResetTvShowDuplicateSuffixes(masterDir.name),
+                sourceDir.name,
+            )
+            mergeProgress.setTotal(self._countResetTvShowMergeEntries(sourceDir))
+            try:
+                self._mergeResetTvShowFolderContents(
+                    sourceDir, masterDir, progress=mergeProgress
+                )
+            finally:
+                mergeProgress.finish()
+            if sourceDir.exists():
+                self._recordSummaryCleanup(f"cleanup needed: {sourceDir}")
+
+    def resetTvEpisodeTitles(
+        self,
+        videoDirs: Optional[list[Path]] = None,
+        *,
+        showFilter: Optional[str] = None,
+        deepScan: bool = True,
+    ) -> dict:
+        """Repair selected TV metadata; deep scans also retitle every selected episode."""
         stats = {"renamed": 0, "skipped": 0, "errors": 0}
 
         if videoDirs is None:
@@ -973,48 +1442,76 @@ class VideoRescanMixin:
             self._writeSummaryReport()
             return stats
 
+        selectedFolders = None
+        if showFilter:
+            # Duplicate handling and episode discovery must use the same selection.
+            selectedFolders = self._resetTvShowFoldersResolve(videoDirs, showFilter)
+            self._handleTargetedResetTvShowDuplicates(
+                videoDirs, showFilter, selectedFolders
+            )
+
+        preparedGroupsByDir = []
         for tvDir in videoDirs:
-            if self._shouldPromptInteractively():
+            if not showFilter:
                 showEntries = self._buildResetDuplicateTvShowEntries(tvDir)
                 duplicateAnalysis = self._buildResetDuplicateTvShowAnalysis(showEntries)
                 self._recordSummaryDuplicateTvShowWarnings(
                     duplicateAnalysis["showNamesBySeriesId"],
                     duplicateAnalysis["canonicalNameGroups"],
                 )
-                self._mergeResetDuplicateTvShowFolders(
+                duplicateGroups = self._filterIgnoredResetDuplicateTvShowGroups(
+                    duplicateAnalysis["duplicateGroups"]
+                )
+
+                if self._shouldPromptInteractively():
+                    self._mergeResetDuplicateTvShowFolders(
+                        tvDir,
+                        showEntries,
+                        duplicateGroups,
+                        duplicateAnalysis["showNamesBySeriesId"],
+                        duplicateAnalysis["canonicalNameGroups"],
+                    )
+                else:
+                    for warning in self._iterResetDuplicateTvShowWarnings(
+                        duplicateAnalysis["showNamesBySeriesId"],
+                        duplicateAnalysis["canonicalNameGroups"],
+                    ):
+                        logger.multiline([warning["label"], *warning["showNames"]])
+
+            preparedGroupsByDir.append(
+                (
                     tvDir,
-                    showEntries,
-                    self._filterIgnoredResetDuplicateTvShowGroups(
-                        duplicateAnalysis["duplicateGroups"]
+                    list(
+                        self._iterResetSelectedTvShowFiles(
+                            tvDir,
+                            showFilter=showFilter,
+                            selectedFolders=selectedFolders,
+                            deepScan=deepScan or bool(showFilter),
+                        )
                     ),
-                    duplicateAnalysis["showNamesBySeriesId"],
-                    duplicateAnalysis["canonicalNameGroups"],
                 )
-                showEntryIterator = self._iterResetTvShowFiles(tvDir)
-            else:
-                duplicateAnalysis = self._buildResetDuplicateTvShowAnalysis(
-                    self._buildResetDuplicateTvShowEntries(tvDir)
-                )
-                self._recordSummaryDuplicateTvShowWarnings(
-                    duplicateAnalysis["showNamesBySeriesId"],
-                    duplicateAnalysis["canonicalNameGroups"],
-                )
-                self._logResetDuplicateTvShowFolders(tvDir)
-                showEntryIterator = self._iterResetTvShowFiles(tvDir)
+            )
 
-            for showName, seriesId, videoFiles in showEntryIterator:
-                showName, videoFiles = self._maybeRenameResetTvShowFolder(
-                    tvDir, showName, videoFiles
-                )
-                showDisplayName = self._buildTvShowFolderName(showName)
-                showLabel = (
-                    f"{showDisplayName} [{seriesId}]" if seriesId else showDisplayName
-                )
-                logger.action(f"rescanning: {showLabel}")
-                for videoFile in videoFiles:
-                    outcome = self._resetTvEpisodeTitleForFile(videoFile)
-                    stats[outcome] += 1
+        totalShows = sum(len(groups) for _tvDir, groups in preparedGroupsByDir)
+        progress = _ResetScanProgress(totalShows, "Scanning TV library")
+        completedShows = 0
 
+        for tvDir, preparedShowGroups in preparedGroupsByDir:
+            for showName, seriesId, videoFiles in preparedShowGroups:
+                progress.render(completedShows, showName)
+                with self._bufferResetItemLogs() as itemLogs:
+                    showName, videoFiles = self._maybeRenameResetTvShowFolder(
+                        tvDir, showName, videoFiles
+                    )
+                    showDisplayName = self._buildTvShowFolderName(showName)
+                    for videoFile in videoFiles:
+                        outcome = self._resetTvEpisodeTitleForFile(videoFile)
+                        stats[outcome] += 1
+                completedShows += 1
+                progress.render(completedShows, showDisplayName)
+                self._flushResetItemLogs(progress, itemLogs)
+
+        progress.finish()
         self._writeSummaryReport()
         return stats
 
@@ -1031,20 +1528,41 @@ class VideoRescanMixin:
             logger.error("No movie storage locations found!")
             return stats
 
-        for movieDir in movieDirs:
-            for movieFolder, videoFiles in self._iterResetMovieFiles(movieDir):
-                logger.action(f"rescanning movie: {movieFolder.name}")
-                movieFolder, videoFiles = self._maybeRenameResetMovieFolder(
-                    movieFolder, videoFiles
-                )
-                for videoFile in videoFiles:
-                    outcome = self._resetMovieMetadataForFile(videoFile)
-                    stats[outcome] += 1
+        movieGroups = [
+            item
+            for movieDir in movieDirs
+            for item in self._iterResetMovieFiles(movieDir)
+        ]
+        progress = _ResetScanProgress(len(movieGroups), "Scanning movie library")
+        reservedDestinations: set[Path] = set()
+        try:
+            for completed, (movieFolder, videoFiles) in enumerate(movieGroups):
+                progress.render(completed, movieFolder.name)
+                with self._bufferResetItemLogs() as itemLogs:
+                    resolvedMovieInfo = self._resolveResetMovieInfo(videoFiles[0])
+                    movieFolder, videoFiles = self._maybeRenameResetMovieFolder(
+                        movieFolder, videoFiles, resolvedMovieInfo
+                    )
+                    for videoFile in videoFiles:
+                        outcome = self._resetMovieMetadataForFile(
+                            videoFile, reservedDestinations, resolvedMovieInfo
+                        )
+                        stats[outcome] += 1
+                progress.render(completed + 1, movieFolder.name)
+                self._flushResetItemLogs(progress, itemLogs)
+        finally:
+            progress.finish()
 
         return stats
 
-    def resetLibraryMetadata(self, target: str = "both") -> dict:
-        """Repair stored movie metadata, TV metadata, or both."""
+    def resetLibraryMetadata(
+        self,
+        target: str = "both",
+        *,
+        showFilter: Optional[str] = None,
+        deepScan: bool = True,
+    ) -> dict:
+        """Repair stored media, optionally limiting TV work or using a lightweight scan."""
         target = (target or "both").casefold()
         if target == "movie":
             target = "movies"
@@ -1055,14 +1573,18 @@ class VideoRescanMixin:
             movieDirs, videoDirs = self.scanStorageLocations()
             metadataMovieDirs = movieDirs if target in {"both", "movies"} else []
             metadataVideoDirs = videoDirs if target in {"both", "tv"} else []
-            self._prepareMetadataLibrary(metadataMovieDirs, metadataVideoDirs)
+            if showFilter:
+                self._loadMetadataLibrary()
+            else:
+                self._prepareMetadataLibrary(metadataMovieDirs, metadataVideoDirs)
 
-        self._mediaCatalogueReplace(
-            movieDirs,
-            videoDirs,
-            replaceMovies=target in {"both", "movies"},
-            replaceTv=target in {"both", "tv"},
-        )
+        if deepScan and not showFilter:
+            self._mediaCatalogueReplace(
+                movieDirs,
+                videoDirs,
+                replaceMovies=target in {"both", "movies"},
+                replaceTv=target in {"both", "tv"},
+            )
 
         emptyStats = {"renamed": 0, "skipped": 0, "errors": 0}
         movieStats = dict(emptyStats)
@@ -1073,7 +1595,11 @@ class VideoRescanMixin:
 
         if target in {"both", "tv"}:
             if videoDirs:
-                tvStats = self.resetTvEpisodeTitles(videoDirs)
+                tvStats = self.resetTvEpisodeTitles(
+                    videoDirs,
+                    showFilter=showFilter,
+                    deepScan=deepScan,
+                )
             else:
                 logger.error("No TV storage locations found!")
                 self._writeSummaryReport()

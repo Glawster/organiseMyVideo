@@ -80,6 +80,33 @@ def testCrossFilesystemMoveVerifiesBeforeRemovingSource(tmp_path: Path):
     assert destination.read_bytes() == b"video"
 
 
+def testCrossFilesystemMoveReportsByteProgress(tmp_path: Path):
+    source = tmp_path / "source.mp4"
+    destination = tmp_path / "archive" / "source.mp4"
+    source.write_bytes(b"x" * (2 * 1024 * 1024 + 123))
+    filesystem = FilesystemOperations(dryRun=False)
+    originalRename = Path.rename
+    progress = []
+
+    def raiseExdevForSource(path: Path, target: Path):
+        if path == source:
+            raise OSError(errno.EXDEV, "cross-device link")
+        return originalRename(path, target)
+
+    with patch.object(Path, "rename", autospec=True, side_effect=raiseExdevForSource):
+        filesystem.move(
+            source,
+            destination,
+            progressCallback=lambda copied, total: progress.append((copied, total)),
+        )
+
+    assert progress
+    assert progress[-1] == (destination.stat().st_size, destination.stat().st_size)
+    assert len(progress) >= 3
+    assert not source.exists()
+    assert destination.exists()
+
+
 def testCrossFilesystemVerificationFailureKeepsSource(tmp_path: Path):
     source = tmp_path / "source.mp4"
     destination = tmp_path / "archive" / "source.mp4"

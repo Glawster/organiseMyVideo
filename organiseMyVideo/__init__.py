@@ -32,13 +32,14 @@ from .constants import (
 )
 from .metadata import MetadataMixin
 from .filesystemOperations import FilesystemOperations
+from .rescanMergeCleanup import RescanMergeCleanupMixin
 from .torrent import TorrentMixin
 from .video import VideoMixin
 
 logger = getLogger()
 
 
-class VideoOrganizer(MetadataMixin, VideoMixin, TorrentMixin):
+class VideoOrganizer(RescanMergeCleanupMixin, MetadataMixin, VideoMixin, TorrentMixin):
     """Organise video files into structured movie and TV show directories.
 
     Combines all domain-specific mixins into a single class:
@@ -89,3 +90,11 @@ class VideoOrganizer(MetadataMixin, VideoMixin, TorrentMixin):
         self._summaryCleanupTasks = []
         self._summaryDuplicateTvShows = []
         self._resetIgnoredDuplicateTvShowGroups = None
+
+    def _resetTvShowMatchesFilter(self, showName: str, showFilter: str | None) -> bool:
+        """Return True when a normalized TV show name contains the target filter."""
+        if not showFilter:
+            return True
+        showKey = self._buildResetTvShowDuplicateKey(showName)
+        filterKey = self._buildResetTvShowDuplicateKey(showFilter)
+        return bool(filterKey and filterKey in showKey)

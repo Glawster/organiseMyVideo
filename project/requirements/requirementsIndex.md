@@ -1,6 +1,6 @@
 # Requirements
 
-Next available number: 020
+Next available number: 021
 
 Requirements created after adoption of the managed process are recorded here.
 Historical behaviour is not assigned invented retrospective requirements.
@@ -25,7 +25,7 @@ Historical behaviour is not assigned invented retrospective requirements.
 | 016 | [Catalogue media identities](features/016-catalogueMediaIdentities.md) | Prepare external identities, home-video rows, and removable-volume kinds with safe schema upgrades. | Completed | [Prompt](prompt/016-catalogueMediaIdentities.md) | [ADR-008](../adr/008-sqliteMediaCatalogue.md), [ADR-009](../adr/009-numberedRemovableVolumes.md) |
 | 017 | [Merge duplicate TV and movie folders](features/017-mergeDuplicateTvFolders.md) | Merge provider-identified duplicate TV and movie folders into the most complete existing folder. | Completed | [Prompt](prompt/017-mergeDuplicateTvFolders.md) | Not required |
 | 018 | [TV show folder leading articles](features/018-tvShowFolderArticles.md) | Store ``The Show`` folders as ``Show, The`` and repair existing library folders. | Completed | [Prompt](prompt/018-tvShowFolderArticles.md) | Not required |
-| 019 | [Catalogue metadata resolution](features/019-catalogueMetadataResolution.md) | Resolve the best already-known movie, series and episode metadata offline while preserving durable provider IDs. | In progress | [Prompt](prompt/019-catalogueMetadataResolution.md) | [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
+| 019 | [Catalogue metadata resolution](features/019-catalogueMetadataResolution.md) | Resolve the best already-known movie, series and episode metadata offline while preserving durable provider IDs. | In progress | [Prompt](prompt/019-catalogueMetadataResolution.md) | [ADR-008](../adr/008-sqliteMediaCatalogue.md) |\n| 020 | [Combined media scan command](features/020-combinedMediaScan.md) | Expose the original movie/TV scan as `media scan`, using configured source by default with a `--source` override. | In progress | [Prompt](prompt/020-combinedMediaScan.md) | Not required |
 
 ## Prompt index
 

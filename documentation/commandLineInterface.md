@@ -22,6 +22,7 @@ New scripts and documentation should use the object/action hierarchy:
 organiseMyVideo media organise [SOURCE]
 organiseMyVideo media organise --merge
 organiseMyVideo media clean [SOURCE]
+organiseMyVideo media scan [--source SOURCE] [--show NAME] [--all]
 organiseMyVideo library rescan [SOURCE] [--target both|movies|tv]
 organiseMyVideo torrent maintain [SOURCE] [--clean-names]
 organiseMyVideo grok --import-firefox
@@ -30,6 +31,21 @@ organiseMyVideo grok --scan
 organiseMyVideo camera inventory SOURCE --card ID
 organiseMyVideo camera inventory --card ID
 ```
+
+`media scan` scans both the existing movie and TV libraries in one pass. It is
+the canonical command for the original combined rescan workflow; callers do not
+need to select movie or TV separately. With no `--source`, it reads `source`
+from `~/.config/organiseMyVideo/config.json`, falling back to the historical
+`/mnt/video2/toFile` default when that setting is absent. `--source SOURCE`
+overrides the configured value for that invocation. The normal canonical scan keeps
+TV work lightweight by checking show-level identity metadata first and only descending
+into shows that need repair. `--show NAME` limits TV repair to matching show folders
+across all configured TV roots; this is intended for focused repairs such as
+`--show Farscape`. `--all` performs the exhaustive integrity pass, including every TV
+episode and a full catalogue refresh. `library rescan --target ...` remains a
+compatibility path for scripts that still request a single legacy target and retains
+the exhaustive behaviour. During a terminal run, the command reports `mode: scan` and
+shows progress for movie folders and TV shows.
 
 Every command level supports `--help`. A source supplied to a canonical command
 must exist and be a directory before domain services are constructed.
@@ -84,9 +100,12 @@ as `Name, The (Year)`. Titles and media filenames keep `The Name`. Season
 folders are rewritten to unpadded `Season N`. Organise, merge, and clean
 all run that folder cleanup.
 
-`library rescan` also refreshes movie and TV rows in that catalogue from
-current storage. The Qt browser is expected to query the catalogue rather
-than walk disks.
+`media scan` repairs movie naming/metadata and performs lightweight TV show-level
+integrity checks. Use `media scan --show NAME` for a focused TV repair without walking
+unrelated shows, or `media scan --all` for the exhaustive episode-by-episode scan and
+full catalogue refresh. The older `library rescan` command can still target one side
+independently for compatibility and retains exhaustive behaviour. The Qt browser is
+expected to query the catalogue rather than walk disks.
 
 ## Compatibility interface
 
