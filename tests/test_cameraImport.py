@@ -91,7 +91,7 @@ def testConfirmedCameraImportCopiesVerifiesAndWritesManifest(tmp_path: Path):
         / "archive"
         / "GoPro"
         / "2024"
-        / "04-Apr"
+        / "04"
         / "20"
         / "GH010111.MP4"
     )
@@ -161,7 +161,7 @@ def testConfirmedCameraImportFailureLeavesNoFinalOrTemporaryFile(
 
     result = importerCreate(tmp_path, dryRun=False).importMedia(source)
 
-    destinationDirectory = tmp_path / "archive" / "GoPro" / "2024" / "04-Apr" / "20"
+    destinationDirectory = tmp_path / "archive" / "GoPro" / "2024" / "04" / "20"
     destination = destinationDirectory / "GH010111.MP4"
     assert result.copied == 0
     assert result.failed == 1
@@ -180,7 +180,7 @@ def testConfirmedCameraImportIncrementsDifferentExistingDestination(tmp_path: Pa
         / "archive"
         / "GoPro"
         / "2024"
-        / "04-Apr"
+        / "04"
         / "20"
         / media.name
     )

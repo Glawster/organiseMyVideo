@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from .cameraDetect import cameraMediaSuffixCounts
 from .cameraInventory import CameraInventory, CardInventoryRecord
 from .cardLocation import cardLocationGet
 from .constants import CAMERA_INVENTORY_DATABASE, applicationStateDirectory
@@ -220,10 +221,27 @@ def cameraInventoryFullSummary(entry: CardInventoryListEntry) -> str:
         + f"  Camera:             {camera}\n"
         + f"  Videos:             {counts.get('video', 0)}\n"
         + f"  Photos:             {counts.get('photo', 0)}\n"
+        + _fullSuffixCountLines(record)
         + f"  Thumbnails:         {counts.get('thumbnail', 0)}\n"
         + f"  Other files:        {otherSummary}\n"
         + f"  Content:            {record.contentSummary or '-'}\n"
         + f"  Keywords:           {keywords}\n"
+    )
+
+
+def _fullSuffixCountLines(record: CardInventoryRecord) -> str:
+    """Return aligned CR3/JPEG/MP4 counts for the detailed card report."""
+
+    mediaPaths = tuple(
+        item.relativePath for item in record.files if item.kind in {"photo", "video"}
+    )
+    counts = cameraMediaSuffixCounts(mediaPaths)
+    if "slr" not in record.cameraKinds and counts["cr3"] == 0:
+        return ""
+    return (
+        f"  CR3:                {counts['cr3']}\n"
+        f"  JPEG:               {counts['jpeg']}\n"
+        f"  MP4:                {counts['mp4']}\n"
     )
 
 

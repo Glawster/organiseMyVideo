@@ -62,17 +62,17 @@ def testImportPlanRoutesCameraFamiliesAndReportsFallback(tmp_path: Path):
     byName = {operation.asset.sourcePath.name: operation for operation in plan.operations}
 
     assert byName["GH010111.MP4"].asset.destinationPath == (
-        tmp_path / "archive" / "GoPro" / "2025" / "05-May" / "06" / "GH010111.MP4"
+        tmp_path / "archive" / "GoPro" / "2025" / "05" / "06" / "GH010111.MP4"
     )
     assert byName["GH010111.MP4"].asset.dateSource == "filesystem"
     assert byName["DJI_0021.MP4"].asset.destinationPath.parent == (
-        tmp_path / "archive" / "Drone" / "2025" / "05-May" / "06"
+        tmp_path / "archive" / "Drone" / "2025" / "05" / "06"
     )
     assert byName["DJI_0021.SRT"].asset.destinationPath.parent == (
-        tmp_path / "archive" / "Drone" / "2025" / "05-May" / "06"
+        tmp_path / "archive" / "Drone" / "2025" / "05" / "06"
     )
     assert byName["2024_0418_090000_0001F.MP4"].asset.destinationPath.parent == (
-        tmp_path / "archive" / "Dashcam" / "2024" / "04-Apr" / "18"
+        tmp_path / "archive" / "Dashcam" / "2024" / "04" / "18"
     )
     assert byName["2024_0418_090000_0001F.MP4"].asset.dateSource == "filename"
 
@@ -111,7 +111,7 @@ def testPlannerClassifiesIdenticalAndIncrementsDifferentDestinations(tmp_path: P
     fileMtimeSet(identical, captured)
     fileMtimeSet(different, captured)
 
-    destination = tmp_path / "archive" / "Drone" / "2024" / "04-Apr" / "20"
+    destination = tmp_path / "archive" / "Drone" / "2024" / "04" / "20"
     destination.mkdir(parents=True)
     (destination / identical.name).write_bytes(b"same")
     (destination / different.name).write_bytes(b"different")

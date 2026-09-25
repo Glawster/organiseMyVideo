@@ -80,6 +80,39 @@ The importer ignores operating-system, synchronization, and camera database
 content such as `._*`, `_gsdata_`, `MISC`, `LOST.DIR`, `System Volume
 Information`, database files, and log files.
 
+## SLR cards
+
+Canon-style SLR cards are mixed-media sources. The card is not classified as
+only a photo card or only a video card. Detection recognises trees such as
+`DCIM/100CANON` and archive-worthy files named `IMG_*.CR3`, `IMG_*.JPG`, and
+`MVI_*.MP4`.
+
+Routing is decided per asset, using a numeric month folder rather than
+`MM-MMM`:
+
+```text
+DCIM/100CANON/IMG_0154.CR3  ->  <photo-root>/By Date/YYYY/MM/DD/IMG_0154.CR3
+DCIM/100CANON/IMG_0154.JPG  ->  <photo-root>/By Date/YYYY/MM/DD/IMG_0154.JPG
+DCIM/100CANON/MVI_0204.MP4  ->  <video-root>/By Date/YYYY/MM/DD/MVI_0204.MP4
+```
+
+The photo root defaults to `/mnt/myPictures` and the video root defaults to
+`/mnt/myVideo/Video`. Both may be overridden through `storage_locations.photos`
+and `storage_locations.homeVideo`. Original filenames are preserved. Same-stem
+RAW/JPEG pairs stay in the same capture-date directory, preferring embedded
+CR3/JPEG capture metadata. When capture metadata is missing, the documented
+filename or filesystem fallback is recorded as `dateSource`.
+
+Canon control and catalogue files such as `CANONMSC/*.CTG` and `comstate.to3`
+are not imported. Identical destination content is reported as already present.
+A same-name destination with different content is a conflict; SLR import does
+not invent names such as `IMG_0154 (2).JPG`. Confirmed import copies through
+the existing filesystem-safety boundary, leaves the source card unchanged, and
+shows terminal progress for large cards. Inventory and import summaries include
+CR3, JPEG, and MP4 counts plus the capture-date range. Durable `cardId`,
+`snapshotId`, `importId`, manifest, and verification behaviour is the same as
+for other camera cards.
+
 ## Python module boundary
 
 Camera import is a pure Python application feature. Planning, metadata
@@ -269,7 +302,9 @@ The existing application configuration may be extended as follows:
   "storage_locations": {
     "gopro": "/mnt/myVideo/Video/GoPro",
     "drone": "/mnt/myVideo/Video/Drone",
-    "dashcam": "/mnt/myVideo/Video/Dashcam"
+    "dashcam": "/mnt/myVideo/Video/Dashcam",
+    "photos": "/mnt/myPictures",
+    "homeVideo": "/mnt/myVideo/Video"
   },
   "camera_import": {
     "include_gopro_companions": false,
@@ -317,6 +352,11 @@ GoPro chapter and helper association, DJI SRT association, ignored artifacts,
 duplicate content, conflicting content, dry-run immutability, successful
 verified copy, interrupted-copy cleanup, manifest output, and execution through
 `python -m organiseMyVideo camera import`.
+
+SLR tests use synthetic `DCIM/100CANON` trees covering CR3/JPEG pairs, MP4
+clips, ignored Canon control files, mixed capture dates, duplicate content,
+same-name/different-content conflicts, dry-run, confirmed import, progress
+output, and mixed photo/video routing. They must not mount a real SLR card.
 
 Migration tests additionally cover conversion from `YYYY-MM-DD`, dating flat
 DJI media, mixed-date legacy directories, companion moves, ambiguous dates,

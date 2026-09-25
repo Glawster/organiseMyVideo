@@ -9,7 +9,6 @@ from typing import Optional
 
 from .cameraImport import CameraImportHistoryRecord
 
-_HISTORY_OUTPUT_WIDTH = 50
 
 
 def cameraImportHistoryFullSummary(
@@ -60,8 +59,7 @@ def cameraImportHistoryFullSummary(
             elif outcome == "failed":
                 failedCount += 1
 
-            outputDisplay = _leftTruncate(destination, _HISTORY_OUTPUT_WIDTH)
-            rows.append((_outcomeDisplay(outcome), outputDisplay, error))
+            rows.append((_outcomeDisplay(outcome), destination, error))
 
         resultWidth = max(len("Result"), *(len(row[0]) for row in rows))
         lines.append(
@@ -131,16 +129,6 @@ def _relativeDisplay(pathValue: str, root: Optional[Path]) -> str:
     except ValueError:
         return str(path)
 
-
-def _leftTruncate(value: str, width: int) -> str:
-    """Keep the end of a path visible, truncating from the left when necessary."""
-
-    text = str(value)
-    if len(text) <= width:
-        return text
-    if width <= 1:
-        return "…"[:width]
-    return "…" + text[-(width - 1):]
 
 
 def _resultDisplay(record: CameraImportHistoryRecord) -> str:

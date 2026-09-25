@@ -81,9 +81,13 @@ class CameraImporter:
         plan = self.planner.importPlan(source)
         _plannedDestinationCollisionsRaise(plan)
         conflicts = [item for item in plan.operations if item.outcome == "conflict"]
-        if conflicts:
-            destinations = ", ".join(str(item.asset.destinationPath) for item in conflicts)
-            raise RuntimeError(f"camera import has destination conflicts: {destinations}")
+        if conflicts and not self.dryRun:
+            destinations = ", ".join(
+                str(item.asset.destinationPath) for item in conflicts
+            )
+            raise RuntimeError(
+                f"camera import has destination conflicts: {destinations}"
+            )
 
         alreadyPresent = sum(
             1 for item in plan.operations if item.outcome == "alreadyPresent"
@@ -288,6 +292,8 @@ def cameraImportRun(
     expectedCardId: Optional[int] = None,
     progressCallback: Optional[CameraImportProgress] = None,
     inventoryDatabase: Optional[Path] = None,
+    photoDestination: Optional[Path] = None,
+    videoDestination: Optional[Path] = None,
 ) -> CameraImportResult:
     """Run camera import through the public application-service boundary."""
 
@@ -306,6 +312,8 @@ def cameraImportRun(
         goproDestination=Path(goproDestination),
         droneDestination=Path(droneDestination),
         dashcamDestination=Path(dashcamDestination),
+        photoDestination=Path(photoDestination) if photoDestination else None,
+        videoDestination=Path(videoDestination) if videoDestination else None,
         includeGoproCompanions=includeGoproCompanions,
     )
     importer = CameraImporter(
@@ -336,7 +344,9 @@ def cameraImportHistory(
         if cardId is not None and record.cardId != cardId:
             continue
         records.append(record)
-    records.sort(key=lambda item: (item.createdAt, item.manifestPath.name), reverse=True)
+    records.sort(
+        key=lambda item: (item.createdAt, item.manifestPath.name), reverse=True
+    )
     return tuple(records)
 
 
@@ -345,6 +355,9 @@ def cameraImportSummary(result: CameraImportResult) -> str:
 
     plannedCopies = sum(
         1 for operation in result.plan.operations if operation.outcome == "copy"
+    )
+    conflicts = sum(
+        1 for operation in result.plan.operations if operation.outcome == "conflict"
     )
     card = _cardDisplay(result.cardId)
     mode = "CONFIRMED" if result.confirmed else "DRY-RUN"
@@ -361,6 +374,8 @@ def cameraImportSummary(result: CameraImportResult) -> str:
     ]
     if result.alreadyPresent:
         lines.append(f"  Already present     {result.alreadyPresent}")
+    if conflicts:
+        lines.append(f"  Conflicts           {conflicts}")
     if result.failed:
         lines.append(f"  Failed              {result.failed}")
     excluded = len(result.plan.excludedPaths)
@@ -369,11 +384,17 @@ def cameraImportSummary(result: CameraImportResult) -> str:
         lines.append(f"  Excluded            {excluded}")
     if unknown:
         lines.append(f"  Unknown             {unknown}")
+    lines.extend(_importContentLines(result.plan))
 
     lines.extend(["", "Result"])
     if not result.confirmed:
+        conflictNote = (
+            f"; {conflicts} conflict{'s' if conflicts != 1 else ''} must be resolved"
+            if conflicts
+            else ""
+        )
         lines.append(
-            f"  Dry-run — {plannedCopies} file{'s' if plannedCopies != 1 else ''} would be copied"
+            f"  Dry-run — {plannedCopies} file{'s' if plannedCopies != 1 else ''} would be copied{conflictNote}"
         )
     elif result.failed:
         lines.append(
@@ -437,6 +458,51 @@ def cameraImportHistorySummary(
     return "\n".join(lines) + "\n"
 
 
+def _naiveCapture(value: datetime) -> datetime:
+    """Return a naive UTC datetime so mixed JPEG/MP4 timestamps can be ordered."""
+
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _importContentLines(plan: ImportPlan) -> list[str]:
+    """Return CR3/JPEG/MP4 counts and capture-date provenance for a plan."""
+
+    from .cameraDetect import cameraMediaSuffixCounts
+
+    relativePaths = tuple(operation.asset.relativePath for operation in plan.operations)
+    counts = cameraMediaSuffixCounts(relativePaths)
+    slrPresent = any(
+        operation.asset.cameraKind == "slr" for operation in plan.operations
+    )
+    if not slrPresent and counts["cr3"] == 0:
+        return []
+
+    captures = [
+        _naiveCapture(operation.asset.captureAt) for operation in plan.operations
+    ]
+    fallbacks = [
+        operation.asset.dateSource
+        for operation in plan.operations
+        if operation.asset.dateSource != "metadata"
+    ]
+    lines = [
+        f"  CR3                 {counts['cr3']}",
+        f"  JPEG                {counts['jpeg']}",
+        f"  MP4                 {counts['mp4']}",
+    ]
+    if captures:
+        start = min(captures).date().isoformat()
+        end = max(captures).date().isoformat()
+        dateRange = start if start == end else f"{start} to {end}"
+        lines.append(f"  Date range          {dateRange}")
+    if fallbacks:
+        unique = ", ".join(sorted(set(fallbacks)))
+        lines.append(f"  Fallback dates      {len(fallbacks)} ({unique})")
+    return lines
+
+
 def _plannedDestinationCollisionsRaise(plan: ImportPlan) -> None:
     """Reject multiple planned copies targeting the same final archive path."""
 
@@ -491,7 +557,9 @@ def _destinationSpaceValidate(copyOperations: list[ImportOperation]) -> None:
             )
     if failures:
         raise RuntimeError(
-            "insufficient destination disk space; " + "; ".join(failures) + "; import not started"
+            "insufficient destination disk space; "
+            + "; ".join(failures)
+            + "; import not started"
         )
 
 

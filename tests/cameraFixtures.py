@@ -12,6 +12,40 @@ from pathlib import Path
 def jpegWithExif(capture: datetime) -> bytes:
     """Return a minimal JPEG whose EXIF DateTimeOriginal is *capture*."""
 
+    app1Payload = b"Exif\x00\x00" + _exifTiff(capture)
+    return (
+        b"\xff\xd8"
+        + b"\xff\xe1"
+        + struct.pack(">H", 2 + len(app1Payload))
+        + app1Payload
+        + b"\xff\xd9"
+    )
+
+
+def cr3WithExif(capture: datetime) -> bytes:
+    """Return a tiny CR3-like ISO-BMFF file with Canon CMT1 EXIF."""
+
+    uuid = bytes.fromhex("85c0b387820f11e08119604bd59e9d40")
+    return _bmffBox(b"ftyp", b"crx " + struct.pack(">I", 0) + b"crx ") + _bmffBox(
+        b"moov", _bmffBox(b"uuid", uuid + b"CMT1" + _exifTiff(capture))
+    )
+
+
+def cr3WithoutExif() -> bytes:
+    """Return a CR3-like file with no embedded capture timestamp."""
+
+    return _bmffBox(b"ftyp", b"crx " + struct.pack(">I", 0) + b"crx ") + _bmffBox(
+        b"mdat", b""
+    )
+
+
+def _bmffBox(boxType: bytes, payload: bytes) -> bytes:
+    return struct.pack(">I", 8 + len(payload)) + boxType + payload
+
+
+def _exifTiff(capture: datetime) -> bytes:
+    """Return TIFF bytes whose Exif IFD DateTimeOriginal is *capture*."""
+
     stamp = capture.strftime("%Y:%m:%d %H:%M:%S") + "\x00"
     ifd0Offset = 8
     exifIfdOffset = 26
@@ -27,14 +61,7 @@ def jpegWithExif(capture: datetime) -> bytes:
     tiff += struct.pack("<I", stringOffset)
     tiff += struct.pack("<I", 0)
     tiff += stamp.encode("ascii")
-    app1Payload = b"Exif\x00\x00" + bytes(tiff)
-    return (
-        b"\xff\xd8"
-        + b"\xff\xe1"
-        + struct.pack(">H", 2 + len(app1Payload))
-        + app1Payload
-        + b"\xff\xd9"
-    )
+    return bytes(tiff)
 
 
 def jpegWithoutExif() -> bytes:
@@ -199,4 +226,34 @@ def dashcamTreeBuild(root: Path, layout: str = "viofo") -> Path:
     (movie / "2024_0418_090000_0001F.MP4").write_bytes(b"front")
     (movie / "2024_0418_090000_0001R.MP4").write_bytes(b"rear")
     (parking / "2024_0418_100000_0002F.MP4").write_bytes(b"park")
+    return root
+
+
+def slrTreeBuild(
+    root: Path,
+    *,
+    jpegCapture: datetime | None = None,
+    cr3Capture: datetime | None = None,
+    mp4Capture: datetime | None = None,
+    extraPair: bool = False,
+    extraPairCapture: datetime | None = None,
+) -> Path:
+    """Create a synthetic Canon-style ``DCIM/100CANON`` card under *root*."""
+
+    jpegCapture = jpegCapture or datetime(2026, 9, 17, 10, 15, 0)
+    cr3Capture = cr3Capture or jpegCapture
+    mp4Capture = mp4Capture or datetime(2026, 9, 17, 11, 20, 0, tzinfo=timezone.utc)
+    extraPairCapture = extraPairCapture or datetime(2026, 9, 16, 8, 0, 0)
+    canon = root / "DCIM" / "100CANON"
+    canon.mkdir(parents=True)
+    (canon / "IMG_0154.CR3").write_bytes(cr3WithExif(cr3Capture))
+    (canon / "IMG_0154.JPG").write_bytes(jpegWithExif(jpegCapture))
+    videoWithCreationWrite(canon / "MVI_0204.MP4", mp4Capture)
+    if extraPair:
+        (canon / "IMG_0155.CR3").write_bytes(cr3WithExif(extraPairCapture))
+        (canon / "IMG_0155.JPG").write_bytes(jpegWithExif(extraPairCapture))
+    catalogue = root / "CANONMSC"
+    catalogue.mkdir()
+    (catalogue / "DCIM.CTG").write_bytes(b"canon-catalog")
+    (root / "comstate.to3").write_bytes(b"canon-state")
     return root
