@@ -1,9 +1,11 @@
-"""Tests for JPEG EXIF and MP4 movie-header capture-time readers."""
+"""Tests for JPEG EXIF and shared video capture-time readers."""
 
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
-from cameraFixtures import jpegWithExif, jpegWithoutExif, mp4WithCreation
+from cameraFixtures import jpegWithExif, jpegWithoutExif
+from organiseMediaStudio.video.errors import VideoProcessingError
 from organiseMyVideo.cameraMetadata import (
     metadataCaptureRead,
     metadataFilenameCaptureRead,
@@ -28,30 +30,51 @@ def testJpegWithoutExifReturnsNone(tmp_path: Path):
     assert metadataJpegCaptureRead(path) is None
 
 
-def testMp4MovieHeaderCreationTimeIsRead(tmp_path: Path):
+def testMp4CreationTimeUsesSharedVideoProbe(tmp_path: Path, monkeypatch):
     path = tmp_path / "GH010111.MP4"
     capture = datetime(2024, 4, 18, 9, 0, 0, tzinfo=timezone.utc)
-    path.write_bytes(mp4WithCreation(capture))
+    path.write_bytes(b"video handled by shared probe")
+    calls = []
+
+    def probe(candidate):
+        calls.append(candidate)
+        return SimpleNamespace(creationAt=capture)
+
+    monkeypatch.setattr("organiseMyVideo.cameraMetadata.videoProbe", probe)
 
     captured = metadataMp4CaptureRead(path)
 
     assert captured == capture
+    assert calls == [path]
 
 
-def testCaptureReadDispatchesBySuffix(tmp_path: Path):
+def testMp4ProbeFailureReturnsNone(tmp_path: Path, monkeypatch):
+    path = tmp_path / "broken.mp4"
+    path.write_bytes(b"broken")
+
+    def fail(candidate):
+        raise VideoProcessingError(f"cannot probe {candidate}")
+
+    monkeypatch.setattr("organiseMyVideo.cameraMetadata.videoProbe", fail)
+
+    assert metadataMp4CaptureRead(path) is None
+
+
+def testCaptureReadDispatchesBySuffix(tmp_path: Path, monkeypatch):
     jpegPath = tmp_path / "still.jpg"
     mp4Path = tmp_path / "movie.mp4"
     otherPath = tmp_path / "notes.txt"
+    capture = datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
     jpegPath.write_bytes(jpegWithExif(datetime(2024, 1, 2, 3, 4, 5)))
-    mp4Path.write_bytes(
-        mp4WithCreation(datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc))
-    )
+    mp4Path.write_bytes(b"video handled by shared probe")
     otherPath.write_text("nope", encoding="utf-8")
+    monkeypatch.setattr(
+        "organiseMyVideo.cameraMetadata.videoProbe",
+        lambda path: SimpleNamespace(creationAt=capture),
+    )
 
     assert metadataCaptureRead(jpegPath) == datetime(2024, 1, 2, 3, 4, 5)
-    assert metadataCaptureRead(mp4Path) == datetime(
-        2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc
-    )
+    assert metadataCaptureRead(mp4Path) == capture
     assert metadataCaptureRead(otherPath) is None
 
 
@@ -77,8 +100,13 @@ def testFilenameCaptureReadsBlackvueAndViofoNames(tmp_path: Path):
     assert metadataFilenameCaptureRead(prefixed) == datetime(2015, 11, 10, 12, 45, 0)
 
 
-def testCaptureReadFallsBackToDashcamFilename(tmp_path: Path):
+def testCaptureReadFallsBackToDashcamFilename(tmp_path: Path, monkeypatch):
     path = tmp_path / "20250722_110221_NF.mp4"
     path.write_bytes(b"not-an-mp4")
+
+    def fail(candidate):
+        raise VideoProcessingError(f"cannot probe {candidate}")
+
+    monkeypatch.setattr("organiseMyVideo.cameraMetadata.videoProbe", fail)
 
     assert metadataCaptureRead(path) == datetime(2025, 7, 22, 11, 2, 21)

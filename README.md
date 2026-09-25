@@ -20,6 +20,7 @@ The README is the canonical entry point for repository documentation. The living
 - [Imagine API archive](documentation/imagineArchive.md)
 - [Camera media import development plan](documentation/cameraImport.md)
 - [Camera card inventory](documentation/cameraInventory.md)
+- [Removable media user guide](documentation/removableMediaUserGuide.md)
 - [Media catalogue](documentation/mediaCatalogue.md)
 - [Home video archive](documentation/homeVideo.md)
 - [Command-line interface](documentation/commandLineInterface.md)
@@ -53,9 +54,18 @@ organiseMyVideo torrent maintain /path/to/staging --clean-names
 organiseMyVideo grok --import-firefox --confirm
 organiseMyVideo grok --scan --confirm
 organiseMyVideo grok --reset --confirm
-organiseMyVideo camera inventory /media/card --card 12
-organiseMyVideo camera inventory /media/card --card 12 --confirm
-organiseMyVideo camera inventory --card 12
+
+organiseMyVideo camera list
+organiseMyVideo camera show --card 12
+organiseMyVideo camera scan -s /media/card --card 12
+organiseMyVideo camera scan -s /media/card --card 12 --confirm
+organiseMyVideo camera archive -s /media/card --card 12
+organiseMyVideo camera archive -s /media/card --card 12 --confirm
+organiseMyVideo camera history --card 12
+organiseMyVideo camera location --card 12
+organiseMyVideo camera location --card 12 --set CarBMW
+organiseMyVideo camera format --card 12
+organiseMyVideo camera format --card 12 --confirm
 ```
 
 Run `organiseMyVideo --help` or append `--help` at any command level. See the
@@ -131,102 +141,3 @@ python -m organiseMyVideo --torrent --clean --confirm
 | `--quiet` | Show errors only |
 | `--version` | Display the installed package version |
 | `grok --import-firefox` | Import grok.com cookies from Firefox after logging in |
-| `grok --scan` | Scan and download your generated Imagine media to `~/Downloads/Grok` |
-| `grok --reset` | Quarantine saved grok.com session files so the next scan logs in again |
-
-### Download generated grok.com Imagine media
-
-This retrieves **your** Imagine library (workspace assets and Imagine
-conversations). It does not download the public explore feed.
-
-```bash
-# 1. Log into grok.com in Firefox
-organiseMyVideo grok --import-firefox --confirm
-# 2. Download your generated images and videos into ~/Downloads/Grok
-organiseMyVideo grok --scan
-organiseMyVideo grok --scan --confirm
-# Reset the saved session when required
-organiseMyVideo grok --reset --confirm
-```
-
-Dry-run is the default. Exactly one Grok action is required per invocation.
-
-The metadata library is saved in `~/.config/organiseMyVideo/metadataLibrary.json` and reused on later runs. Use `--refresh` when you want to rescan the existing movie and TV storage roots and rebuild that cache.
-
-`--auto` reuses the normal organiser logic without prompts and appends a plain-text summary in `~/.config/organiseMyVideo/summary.yyyymmdd.txt`, including whether each entry was a dry-run or an actual run plus any file moves, renames, cleanup tasks, and possible duplicate TV show folders found that day.
-
-`media scan` is the canonical combined scan of the existing movie and TV library roots. The legacy `--rescan`, `--rescan --movie`, `--rescan --video`, and `library rescan --target ...` forms remain available for compatibility. For movies it refreshes or creates MCM-style `movie.xml` and `mcm_id__*.dvdid.xml` files when metadata is available, fetches missing artwork from configured providers, and renames stored movie files/folders to the canonical `Title (Year)` shape when safe. For TV it normalises retitled episodes to the newer space-style show/title fragments, capitalises lowercase TV show folders when needed, and only falls back to scraper lookups when the current filename suffix still looks like release noise or is missing. It also warns when multiple show folders share the same stored SeriesID so likely duplicates are easier to spot, and interactive runs can prompt to merge those duplicate folders while choosing which one remains the master. If you answer that a prompted group is not a duplicate, that choice is saved in `~/.config/organiseMyVideo/config.json` and future runs suppress the same warning. When an episode is retitled, matching same-stem `.xml` and `.jpg` companion files are renamed with it. Console output is otherwise limited to `rescanning: ...` lines plus any actual rescan rename lines.
-
----
-
-## Interactive prompts
-
-When processing each file the tool shows the detected name and asks for confirmation.
-
-### Main confirmation prompt
-
-```
-TV Show detected: 'Breaking Bad'
-Episode Title: Pilot
-Is this correct?  (y/n/q/t/m or enter new name):
-```
-
-| Input | Action |
-|-------|--------|
-| `y` / `yes` / Enter | Accept the detected name and move the file |
-| `n` / `no` | Open the rename sub-prompt |
-| `q` / `quit` | Exit the program |
-| `t` | Switch type to **TV show** and prompt for show name |
-| `m` | Switch type to **Movie** and prompt for title |
-| Any other text | Use that text as the name directly |
-
-The main menu choices (`y`, `n`, `t`, `m`, `q`, and Enter to confirm) are
-handled as single key presses with curses. Text entry prompts such as rename,
-show title, movie title, season, and year use normal line input. Use `--auto`
-for unattended organisation.
-
-### Rename sub-prompt
-
-```
-Enter new name (blank for default, enter 'quit' to skip):
-```
-
-| Input | Action |
-|-------|--------|
-| Enter (empty) | Use the default detected name |
-| Whitespace only | Use the default detected name |
-| `quit` | Skip this file and leave it in staging |
-| Any other text | Use that text as the new name |
-
----
-
-## Requirements
-
-Python 3.10 or newer and Conda are required for the primary development setup.
-
-### Conda development environment
-
-```bash
-conda env create -f environment.yml
-conda activate application
-```
-
-The environment installs this repository in editable mode with its development
-extra. If the environment already exists, refresh the editable installation:
-
-```bash
-python -m pip install -e ".[dev]"
-```
-
-`pyproject.toml` is the authoritative package and dependency definition.
-`requirements.txt` and `dev-requirements.txt` are retained as compatibility
-exports for tools that still consume requirements files.
-
-### Running the installed command
-
-Both supported entry points call `organiseMyVideo.__main__:main`:
-
-```bash
-python -m organiseMyVideo --help
-organiseMyVideo --help
-```
