@@ -26,14 +26,15 @@ Historical behaviour is not assigned invented retrospective requirements.
 | 017 | [Merge duplicate TV and movie folders](features/017-mergeDuplicateTvFolders.md) | Merge provider-identified duplicate TV and movie folders into the most complete existing folder. | Completed | [Prompt](prompt/017-mergeDuplicateTvFolders.md) | Not required |
 | 018 | [TV show folder leading articles](features/018-tvShowFolderArticles.md) | Store ``The Show`` folders as ``Show, The`` and repair existing library folders. | Completed | [Prompt](prompt/018-tvShowFolderArticles.md) | Not required |
 | 019 | [Catalogue metadata resolution](features/019-catalogueMetadataResolution.md) | Resolve the best already-known movie, series and episode metadata offline while preserving durable provider IDs. | In progress | [Prompt](prompt/019-catalogueMetadataResolution.md) | [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
-| 020 | [Combined media scan command](features/020-combinedMediaScan.md) | ... |
-| 021 | [Removable media discovery and lifecycle](features/021-removableMediaDiscovery.md) | ... |
-| 022 | [Shared media processing platform](features/022-sharedMediaProcessing.md) | ... |
-| 023 | [Removable media format and recycle](features/023-removableMediaFormat.md) | ... |
-| 024 | [Camera capture-time correction](features/024-cameraCaptureTimeCorrection.md) | ... |
-| 025 | [Media keywords and tagging](features/025-mediaKeywords.md) | ... |
-| 026 | [Camera archive normalisation](features/026-cameraArchiveNormalisation.md) | ... |
-| 027 | [SLR card import](features/027-slrCardImport.md) | ... |
+| 020 | [Combined media scan command](features/020-combinedMediaScan.md) | Expose the original movie/TV scan as `media scan`, using the configured source by default with a `--source` override. | In progress | [Prompt](prompt/020-combinedMediaScan.md) | Not required |
+| 021 | [Removable media discovery and lifecycle](features/021-removableMediaDiscovery.md) | Search numbered SD/USB volumes, recommend suitable cards, and derive safe-to-recycle status from inventory and verified import evidence. | ToDo | [Prompt](prompt/020-removableMediaDiscovery.md) | [ADR-008](../adr/008-sqliteMediaCatalogue.md), [ADR-009](../adr/009-numberedRemovableVolumes.md) |
+| 022 | [Shared media processing platform](features/022-sharedMediaProcessing.md) | Use `organiseMediaStudio` as the shared headless image/video processing platform for `organiseMyVideo` and `organiseMyPhotos`. | In progress | [Prompt](prompt/021-sharedMediaProcessing.md) | [ADR-010](../adr/010-sharedMediaProcessingBoundary.md) |
+| 023 | [Removable media format and recycle](features/023-removableMediaFormat.md) | Safely format only archived numbered media, recreate its identity, and persist a fresh empty snapshot. | In progress | Not required | [ADR-003](../adr/003-filesystemSafetyBoundary.md), [ADR-009](../adr/009-numberedRemovableVolumes.md) |
+| 024 | [Camera capture-time correction](features/024-cameraCaptureTimeCorrection.md) | Correct known camera-clock errors while preserving original timestamp evidence and elapsed-time relationships. | Planned | Not required | [ADR-006](../adr/006-cameraImportArchitecture.md) |
+| 025 | [Media keywords and tagging](features/025-mediaKeywords.md) | Add descriptive keywords to media without changing date-based filesystem organisation. | Planned | Not required | [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
+| 026 | [Camera archive normalisation](features/026-cameraArchiveNormalisation.md) | Normalise legacy GoPro, Drone, and Dashcam archive layouts into the canonical numeric date hierarchy. | Planned | Not required | [ADR-003](../adr/003-filesystemSafetyBoundary.md), [ADR-006](../adr/006-cameraImportArchitecture.md) |
+| 027 | [SLR card import](features/026-slrCardImport.md) | Import mixed SLR photo/video cards by media type beneath `By Date/YYYY/MM/DD`. | Completed | [Prompt](prompt/027-slrCardImport.md) | [ADR-003](../adr/003-filesystemSafetyBoundary.md), [ADR-006](../adr/006-cameraImportArchitecture.md), [ADR-007](../adr/007-cameraInventoryPersistence.md) |\n| 027 | [Camera history reconciliation](features/027-cameraHistoryReconciliation.md) | Verify import history against the current archive and reconcile moved files without losing original destination evidence. | Planned | [Prompt](prompt/027-cameraHistoryReconciliation.md) | [ADR-003](../adr/003-filesystemSafetyBoundary.md), [ADR-006](../adr/006-cameraImportArchitecture.md), [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
+
 
 ## Prompt index
 
