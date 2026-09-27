@@ -1,3 +1,5 @@
+# Qt media-library browser prompt
+
 Requirement: 002 — project/requirements/features/002-qtMediaLibraryBrowser.md
 Role: refine and design
 

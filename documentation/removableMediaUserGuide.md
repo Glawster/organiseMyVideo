@@ -21,7 +21,7 @@ They mean:
 - `camera inventory --list` — compact register of all known cards;
 - `camera inventory --card ID` — all useful current and historical details for one card;
 - `camera import --list` — summary of all recorded import runs;
-- `camera import --card ID` — full per-file import manifest history for one card.
+- `camera history --card ID` — full per-file import manifest history for one card.
 
 `--full` is no longer part of the normal user workflow. Older combined forms remain
 accepted where practical for compatibility, but should not be used in new examples.
@@ -188,17 +188,37 @@ snapshot where possible.
 
 ## View import history
 
-All imports, summary form:
-
-```bash
-organiseMyVideo camera import --list
-```
-
 Full manifest history for one card:
 
 ```bash
-organiseMyVideo camera import --card 4
+organiseMyVideo camera history --card 4
 ```
+
+Verify recorded destinations, for all cards or one card:
+
+```bash
+organiseMyVideo camera history --check
+organiseMyVideo camera history --card 4 --check
+```
+
+Checks preserve manifests and archive files. `ok` means the recorded path matches
+its digest (legacy records without a digest can only establish presence).
+`changed` means that path contains different content. If the recorded path is
+absent, SHA-256 identity establishes `moved` for one match, `ambiguous` for multiple
+matches, or `missing` for none. Legacy digests can reconcile without `sizeBytes`.
+The current location is reported alongside the original destination; `moved`
+describes a discovery, not an operation performed by this command.
+
+`unreadable` means a destination could not be checked or the archive search was
+incomplete because of permissions, disappearing files, or other I/O errors.
+Restore access and rerun before drawing conclusions about missing or moved files.
+Searches use the GoPro, Drone, Dashcam or By Date roots inferred from manifests.
+
+Progress is shown during checking and archive indexing. A completed index caches
+only its file count in `$XDG_STATE_HOME/organiseMyVideo/cameraHistoryProgress.json`
+(default `~/.local/state/organiseMyVideo/`). Subsequent totals are estimates;
+no cached digest is used as evidence. A missing, corrupt or unwritable cache does
+not prevent checking. Incomplete scans do not replace the previous estimate.
 
 The per-card manifest avoids repeating the same long path prefixes on every line.
 Each import shows its source root and deepest common archive root once, then renders

@@ -175,3 +175,9 @@ def applicationStateIsolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     for pathName, pathValue in applicationPaths.items():
         for module in modulesByPath[pathName]:
             monkeypatch.setattr(module, pathName, pathValue)
+
+
+@pytest.fixture(autouse=True)
+def historyProgressStateIsolate(tmp_path, monkeypatch):
+    """Keep progress estimates and CLI history reads away from operator state."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg-state"))

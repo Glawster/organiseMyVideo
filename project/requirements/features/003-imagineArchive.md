@@ -61,7 +61,6 @@ not retrieve media previously created in the grok.com consumer gallery.
 `--grok` gallery download was restored separately: it is the path for media
 already created on grok.com.
 
-
 ## Dependencies and decisions
 
 - [ADR-001: Preserve the packaged CLI layout](../../adr/001-packagedCliLayout.md)

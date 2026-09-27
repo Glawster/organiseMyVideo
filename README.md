@@ -62,6 +62,8 @@ organiseMyVideo camera scan -s /media/card --card 12 --confirm
 organiseMyVideo camera archive -s /media/card --card 12
 organiseMyVideo camera archive -s /media/card --card 12 --confirm
 organiseMyVideo camera history --card 12
+organiseMyVideo camera history --check
+organiseMyVideo camera history --card 12 --check
 organiseMyVideo camera location --card 12
 organiseMyVideo camera location --card 12 --set CarBMW
 organiseMyVideo camera format --card 12
