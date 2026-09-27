@@ -111,15 +111,26 @@ def testCameraArchiveHelpOnlyShowsOperationalArguments():
         assert removed not in helpText
 
 
-def testCameraHistoryRequiresCard():
+def testCameraHistoryAcceptsOptionalCard():
     parser = _cameraParserBuild()
-    args = parser.parse_args(["history", "--card", "18"])
 
+    args = parser.parse_args(["history"])
+    assert args.cameraAction == "history"
+    assert args.card is None
+    assert args.check is False
+
+    args = parser.parse_args(["history", "--card", "18"])
     assert args.cameraAction == "history"
     assert args.card == 18
 
-    with pytest.raises(SystemExit):
-        parser.parse_args(["history"])
+    args = parser.parse_args(["history", "--check"])
+    assert args.cameraAction == "history"
+    assert args.card is None
+    assert args.check is True
+
+    args = parser.parse_args(["history", "--check", "--card", "18"])
+    assert args.card == 18
+    assert args.check is True
 
 
 def testRemovedCameraOptionsAreRejected():

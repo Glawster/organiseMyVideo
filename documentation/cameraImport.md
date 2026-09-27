@@ -155,8 +155,8 @@ does not write that catalogue, and inventory does not copy archive files.
 The canonical interface uses nested object/action subcommands:
 
 ```bash
-$ python -m organiseMyVideo camera import /media/andy/7000-8000
-$ python -m organiseMyVideo camera import /media/andy/7000-8000 --confirm
+python -m organiseMyVideo camera import /media/andy/7000-8000
+python -m organiseMyVideo camera import /media/andy/7000-8000 --confirm
 ```
 
 The first form builds and displays a dry-run plan. The second form copies and
@@ -165,8 +165,8 @@ verifies the planned media.
 Existing archives use a separate action:
 
 ```bash
-$ python -m organiseMyVideo camera migrate
-$ python -m organiseMyVideo camera migrate --confirm
+python -m organiseMyVideo camera migrate
+python -m organiseMyVideo camera migrate --confirm
 ```
 
 Migration defaults to a dry-run plan covering the configured GoPro and Drone
