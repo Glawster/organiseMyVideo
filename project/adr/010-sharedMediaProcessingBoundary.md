@@ -52,6 +52,14 @@ interpretation remains application-owned: for example, rugby team and final
 score interpretation belongs in `organiseMyVideo`, even if it consumes shared
 OCR observations.
 
+### Capture timestamp evidence
+
+QuickTime integer-clock decoding and separation from ffprobe's assumed UTC
+rendering belong in organiseMediaStudio (shared ADR-002). OMV consumes the
+returned timestamp state, stores correction provenance and enforces a common
+clock basis. It must not add or remove offsets merely to satisfy correction
+validation. See [capture correction](../../documentation/cameraCaptureCorrection.md).
+
 ## Consequences
 
 - Generic media behaviour can be tested once and reused by both applications.

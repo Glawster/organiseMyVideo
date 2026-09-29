@@ -62,8 +62,10 @@ from pathlib import Path
 from typing import Iterable
 
 from mutagen.mp4 import MP4, MP4FreeForm  # type: ignore
+from organiseMyProjects.logUtils import getLogger, line, runStart, setApplication
 
-logger = logging.getLogger("mp4MatchAudit")
+setApplication("rugbyAudit")
+logger = getLogger(includeConsole=False)
 SUPPORTED_SUFFIXES = {".mp4", ".m4v", ".mov"}
 FREEFORM_PREFIX = "----:com.apple.iTunes:"
 
@@ -592,9 +594,13 @@ class TeamPicker:
             return response
 
 
-def configureLogging(verbose: bool) -> None:
-    logging.basicConfig(
-        level=logging.DEBUG if verbose else logging.INFO, format="%(message)s"
+def configureLogging(verbose: bool, dryRun: bool = True) -> None:
+    """Configure the shared application logger for this audit run."""
+    global logger
+    logger = getLogger(
+        level=logging.DEBUG if verbose else logging.INFO,
+        includeConsole=True,
+        dryRun=dryRun,
     )
 
 
@@ -737,12 +743,12 @@ def promptForFile(
     defaultComment = getDefaultText(tags, "comment")
 
     logger.info("")
-    logger.info("file: %s", filePath)
+    logger.value("file", filePath)
     if seasonInfo:
-        logger.info("season: %s", seasonInfo.seasonLabel)
+        logger.value("season", seasonInfo.seasonLabel)
     if episode is not None:
-        logger.info("episode: %s", episode)
-    logger.info("score: %s", defaultComment or "")
+        logger.value("episode", episode)
+    logger.value("score", defaultComment or "")
 
     if defaultComment:
         logger.info("skipping file with existing score")
@@ -860,8 +866,11 @@ def writeCsv(outputPath: Path, rows: list[dict[str, object]]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = parseArgs(argv or sys.argv[1:])
-    configureLogging(args.verbose)
     dryRun = not args.confirm
+    configureLogging(args.verbose, dryRun)
+    runStart()
+    logger.doing("rugby audit starting")
+    line()
 
     inputRoot = Path(args.source).expanduser().resolve()
     if not inputRoot.exists() or not inputRoot.is_dir():
@@ -876,7 +885,7 @@ def main(argv: list[str] | None = None) -> int:
 
     logger.info("building known teams from existing tags")
     knownTeams = buildKnownTeams(inputRoot, tagHelper, parser)
-    logger.info("found %d known team(s)", len(knownTeams))
+    logger.value("known teams", len(knownTeams))
 
     rows: list[dict[str, object]] = []
     try:
@@ -901,9 +910,9 @@ def main(argv: list[str] | None = None) -> int:
     writeCsv(outputCsv, rows)
 
     logger.info("")
-    logger.info("files processed: %s", len(rows))
-    logger.info("csv report: %s", outputCsv)
-    logger.info("mode: %s", "write" if not dryRun else "dry-run")
+    logger.value("files processed", len(rows))
+    logger.value("csv report", outputCsv)
+    logger.value("mode", "write" if not dryRun else "dry-run")
     return 0
 
 

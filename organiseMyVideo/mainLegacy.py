@@ -179,7 +179,7 @@ def _buildSharedFlags(suppressDefaults: bool = False) -> argparse.ArgumentParser
     return shared
 
 
-def buildParser() -> argparse.ArgumentParser:
+def buildParser(*, internalCamera: bool = False) -> argparse.ArgumentParser:
     """Return the public CLI parser, including the grok subcommand."""
     parser = argparse.ArgumentParser(
         description="Organize video files into movies and TV show directories",
@@ -243,6 +243,10 @@ def buildParser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
     mediaParser = subparsers.add_parser("media", help="organise or clean staged media")
     mediaSub = mediaParser.add_subparsers(dest="mediaAction", required=True)
+    mediaLocate = mediaSub.add_parser(
+        "locate", parents=[_buildSharedFlags(True)], help="locate catalogued TV shows"
+    )
+    mediaLocate.add_argument("--show", required=True)
     mediaOrganise = mediaSub.add_parser(
         "organise", parents=[_buildSharedFlags(True)], help="organise staged media"
     )
@@ -316,78 +320,89 @@ def buildParser() -> argparse.ArgumentParser:
     )
     torrentMaintain.add_argument("--clean-names", action="store_true")
 
-    cameraParser = subparsers.add_parser(
-        "camera",
-        help="inventory camera SD cards or import camera media",
-    )
-    cameraSub = cameraParser.add_subparsers(dest="cameraAction", required=True)
-    cameraInventory = cameraSub.add_parser(
-        "inventory",
-        parents=[_buildSharedFlags(True)],
-        help="catalogue a numbered camera SD card",
-    )
-    cameraInventory.add_argument(
-        "inventorySource",
-        nargs="?",
-        metavar="SOURCE",
-        help="mounted card or copied card directory",
-    )
-    cameraInventory.add_argument(
-        "--card",
-        type=int,
-        help="numeric ID assigned to this SD card (required on first scan)",
-    )
-    cameraInventory.add_argument(
-        "--reassign",
-        action="store_true",
-        help="allow --card to replace an existing on-card ID (requires --confirm)",
-    )
-    cameraInventory.add_argument(
-        "--brand",
-        help="SD card brand to store on the card, for example SanDisk",
-    )
-    cameraImport = cameraSub.add_parser(
-        "import",
-        parents=[_buildSharedFlags(True)],
-        help="plan or import supported camera media",
-    )
-    cameraImport.add_argument(
-        "-s",
-        "--source",
-        dest="importSource",
-        required=True,
-        metavar="SOURCE",
-        help="mounted card or copied card directory",
-    )
-    cameraImport.add_argument(
-        "--gopro-destination",
-        help="override the configured GoPro archive destination",
-    )
-    cameraImport.add_argument(
-        "--drone-destination",
-        help="override the configured Drone archive destination",
-    )
-    cameraImport.add_argument(
-        "--dashcam-destination",
-        help="override the configured Dashcam archive destination",
-    )
-    cameraImport.add_argument(
-        "--photo-destination",
-        help="override the configured photo archive root for SLR stills",
-    )
-    cameraImport.add_argument(
-        "--video-destination",
-        help="override the configured home-video root for SLR clips",
-    )
-    cameraImport.add_argument(
-        "--manifest-directory",
-        help="override the camera-import manifest directory",
-    )
-    cameraImport.add_argument(
-        "--include-gopro-companions",
-        action="store_true",
-        help="retain GoPro LRV and THM helper files",
-    )
+    if internalCamera:
+        cameraParser = subparsers.add_parser(
+            "camera",
+            help="inventory camera SD cards or import camera media",
+        )
+        cameraSub = cameraParser.add_subparsers(dest="cameraAction", required=True)
+        cameraInventory = cameraSub.add_parser(
+            "inventory",
+            parents=[_buildSharedFlags(True)],
+            help="catalogue a numbered camera SD card",
+        )
+        cameraInventory.add_argument(
+            "inventorySource",
+            nargs="?",
+            metavar="SOURCE",
+            help="mounted card or copied card directory",
+        )
+        cameraInventory.add_argument(
+            "--card",
+            type=int,
+            help="numeric ID assigned to this SD card (required on first scan)",
+        )
+        cameraInventory.add_argument(
+            "--reassign",
+            action="store_true",
+            help="allow --card to replace an existing on-card ID (requires --confirm)",
+        )
+        cameraInventory.add_argument(
+            "--brand",
+            help="SD card brand to store on the card, for example SanDisk",
+        )
+        cameraImport = cameraSub.add_parser(
+            "import",
+            parents=[_buildSharedFlags(True)],
+            help="plan or import supported camera media",
+        )
+        cameraImport.add_argument(
+            "-s",
+            "--source",
+            dest="importSource",
+            required=True,
+            metavar="SOURCE",
+            help="mounted card or copied card directory",
+        )
+        cameraImport.add_argument(
+            "--gopro-destination",
+            help="override the configured GoPro archive destination",
+        )
+        cameraImport.add_argument(
+            "--drone-destination",
+            help="override the configured Drone archive destination",
+        )
+        cameraImport.add_argument(
+            "--dashcam-destination",
+            help="override the configured Dashcam archive destination",
+        )
+        cameraImport.add_argument(
+            "--photo-destination",
+            help="override the configured photo archive root for SLR stills",
+        )
+        cameraImport.add_argument(
+            "--video-destination",
+            help="override the configured home-video root for SLR clips",
+        )
+        cameraImport.add_argument(
+            "--manifest-directory",
+            help="override the camera-import manifest directory",
+        )
+        cameraImport.add_argument(
+            "--include-gopro-companions",
+            action="store_true",
+            help="retain GoPro LRV and THM helper files",
+        )
+
+    else:
+        from .cameraCli import _cameraParserBuild
+
+        subparsers.add_parser(
+            "camera",
+            parents=[_cameraParserBuild(inheritedGlobals=True)],
+            add_help=False,
+            help="manage camera cards and capture times",
+        )
 
     grokParser = subparsers.add_parser(
         "grok",
@@ -495,6 +510,8 @@ def _validateArguments(
         and not args.source
     ):
         args.source = _configuredSource(_getAppConfigPath())
+    if args.command == "media" and args.mediaAction == "locate":
+        return
     if args.command in {"media", "library", "torrent"}:
         sourcePath = Path(args.source).expanduser()
         if not sourcePath.is_dir():
@@ -816,9 +833,11 @@ Folder errors:   {cleanStats['errors']}
         target = (
             "tv"
             if showFilter
-            else "movies"
-            if args.movie and not args.video
-            else "tv" if args.video and not args.movie else "both"
+            else (
+                "movies"
+                if args.movie and not args.video
+                else "tv" if args.video and not args.movie else "both"
+            )
         )
         deepScan = bool(getattr(args, "scan_all", False)) if canonicalScan else True
         logger.doing(f"running scan mode ({target})")
@@ -877,14 +896,22 @@ Folder errors:   {cleanStats['errors']}
     return 0
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Optional[Sequence[str]] = None, *, internalCamera: bool = False) -> int:
     """Run the command-line application and return a process status."""
-    parser = buildParser()
+    parser = buildParser(internalCamera=internalCamera)
     args = _normalizeArguments(parser.parse_args(argv))
     _validateArguments(parser, args)
 
     dryRun = not args.confirm
     _configureLogging(args, dryRun)
+    if getattr(args, "command", None) == "camera" and not internalCamera:
+        from .cameraCli import cameraCliExecute
+
+        return cameraCliExecute(args)
+    if getattr(args, "command", None) == "media" and args.mediaAction == "locate":
+        from .cli import _runMediaLocate
+
+        return _runMediaLocate(["--show", args.show])
     runStart()
     logger.doing("organiseMyVideo starting")
     line()

@@ -7,11 +7,11 @@ import json
 import os
 import stat
 import tempfile
-
-from organiseMyProjects.logUtils import getLogger
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
+
+from organiseMyProjects.logUtils import getLogger
 
 from .cameraImport import cameraImportHistory
 from .constants import applicationStateDirectory
@@ -51,6 +51,7 @@ def cameraHistoryCheck(
         if archiveRoots is not None
         else _archiveRootsInfer(manifests)
     )
+    corrections = _historyCorrectionsRead(Path(manifestDirectory))
     digestIndex: Optional[dict[tuple[int, str], list[Path]]] = None
     indexComplete = True
     results: list[CameraHistoryAsset] = []
@@ -67,7 +68,20 @@ def cameraHistoryCheck(
 
             # Absence permits reconciliation; read/stat failures do not prove absence.
             status = _recordedPathCheck(recordedPath, digest)
-            if status is not None:
+            corrected = _historyCorrectionFind(recordedPath, digest, corrections)
+            if corrected is not None and status in {None, "changed"}:
+                results.append(
+                    CameraHistoryAsset(
+                        manifestPath,
+                        manifestCardId,
+                        recordedPath,
+                        corrected,
+                        "moved",
+                        digest,
+                        (corrected,),
+                    )
+                )
+            elif status is not None:
                 results.append(
                     CameraHistoryAsset(
                         manifestPath,
@@ -389,3 +403,42 @@ def _fileSha256(path: Path) -> str:
         ):
             raise OSError(f"File changed while hashing: {path}")
     return digest.hexdigest()
+
+
+def _historyCorrectionsRead(directory: Path) -> list[dict]:
+    """Use exported correction provenance to bridge intentionally changed hashes."""
+    records = []
+    for path in directory.glob("camera-correction-*.json"):
+        payload = _manifestRead(path)
+        if payload:
+            records.extend(
+                item
+                for item in payload.get("assets", [])
+                if item.get("outcome") in {"verified", "applied"}
+                and item.get("destinationSha256")
+            )
+    return records
+
+
+def _historyCorrectionFind(
+    path: Path, digest: str | None, corrections: list[dict]
+) -> Path | None:
+    # Follow every recorded byte transition; intermediate destinations may have
+    # moved or been rewritten by later corrections. Cycles/zero offsets terminate.
+    pending = [(str(path), digest)]
+    visited = set()
+    matches = set()
+    while pending:
+        identity = pending.pop()
+        if identity in visited:
+            continue
+        visited.add(identity)
+        for asset in corrections:
+            if (asset.get("sourcePath"), asset.get("originalSha256")) != identity:
+                continue
+            destination = Path(asset["destinationPath"])
+            successor = (str(destination), asset["destinationSha256"])
+            if _recordedPathCheck(destination, successor[1]) == "ok":
+                matches.add(destination)
+            pending.append(successor)
+    return next(iter(matches)) if len(matches) == 1 else None

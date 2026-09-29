@@ -6,6 +6,7 @@ Moves video files from a staging directory to organised storage locations and ca
 
 The README is the canonical entry point for repository documentation. The living guides are:
 
+- [Camera capture-time correction](documentation/cameraCaptureCorrection.md): preview and confirm clock offsets for imports or existing folders.
 - [Project coding guidelines](documentation/projectGuidelines.md)
 - [Master agent instructions](.github/agent-instructions.md)
 - [Copilot compatibility instructions](.github/copilot-instructions.md)
@@ -147,3 +148,17 @@ python -m organiseMyVideo --torrent --clean --confirm
 | `--quiet` | Show errors only |
 | `--version` | Display the installed package version |
 | `grok --import-firefox` | Import grok.com cookies from Firefox after logging in |
+
+For capture-time correction, QuickTime movie-header clock values have no stored
+UTC offset: supply a naive `--actual` when the reference evidence is naive.
+Explicit timezone-bearing metadata still requires a matching offset. Global
+`--debug` enables logging without changing the camera command hierarchy. See
+[capture-time correction](documentation/cameraCaptureCorrection.md).
+
+Confirmed capture-time correction writes and verifies embedded JPEG/MP4 dates on
+copies before removing originals. The journal retains original/corrected tags
+and pre/post SHA-256 hashes. Resulting media can be corrected again from its
+current state; each transformation preserves earlier immutable audit records.
+Filesystem mtime receives the same offset only when
+it is earlier than corrected capture time; later modification times are
+preserved. This workflow requires ExifTool (included in the Conda environment).

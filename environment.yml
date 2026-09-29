@@ -5,6 +5,8 @@ dependencies:
   # OMP-MANAGED-BEGIN
   - python>=3.10
   # OMP-MANAGED-END
+  - exiftool
+  - ffmpeg
   - pip
   - pip:
       - -e .[dev]

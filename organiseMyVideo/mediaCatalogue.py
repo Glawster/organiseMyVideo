@@ -57,6 +57,7 @@ def _flushCatalogueDiagnostics(events: list) -> None:
     for original, args, kwargs in events:
         original(*args, **kwargs)
 
+
 CATALOGUE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS cardInventory (
     inventoryId INTEGER PRIMARY KEY,
@@ -105,6 +106,23 @@ CREATE TABLE IF NOT EXISTS cardInventoryFile (
     cameraKind TEXT NOT NULL,
     FOREIGN KEY (inventoryId) REFERENCES cardInventory(inventoryId)
 );
+CREATE TABLE IF NOT EXISTS cameraCaptureCorrection (
+    ruleId TEXT PRIMARY KEY,
+    importId TEXT NOT NULL,
+    payload TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS cameraCaptureTime (
+    importId TEXT NOT NULL,
+    relativePath TEXT NOT NULL,
+    ruleId TEXT NOT NULL,
+    filePath TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    rawCaptureAt TEXT NOT NULL,
+    correctedCaptureAt TEXT NOT NULL,
+    dateSource TEXT NOT NULL,
+    PRIMARY KEY (importId, relativePath)
+);
+CREATE INDEX IF NOT EXISTS cameraCaptureTimePathIndex ON cameraCaptureTime(filePath);
 CREATE TABLE IF NOT EXISTS homeVideoItem (
     homeVideoId INTEGER PRIMARY KEY,
     kind TEXT NOT NULL,
@@ -240,8 +258,7 @@ class MediaCatalogue:
             return []
         with self._databaseConnect() as connection:
             catalogueSchemaApply(connection)
-            rows = connection.execute(
-                """
+            rows = connection.execute("""
                 SELECT c.cardId, c.inventoriedAt, c.cardRatedGigabytes,
                        c.cardSizeBytes, c.freeBytes, c.usedBytes, c.contentBytes,
                        c.cameraKinds, c.dateStart, c.dateEnd, c.volumeKind
@@ -252,8 +269,7 @@ class MediaCatalogue:
                     GROUP BY cardId
                 ) latest ON c.inventoryId = latest.inventoryId
                 ORDER BY c.cardId
-                """
-            ).fetchall()
+                """).fetchall()
         return [
             CardCatalogueRecord(
                 cardId=row["cardId"],
@@ -280,13 +296,11 @@ class MediaCatalogue:
             return []
         with self._databaseConnect() as connection:
             catalogueSchemaApply(connection)
-            rows = connection.execute(
-                """
+            rows = connection.execute("""
                 SELECT title, year, folderPath, videoPath, xmlPath, imdbId, tmdbId
                 FROM movieItem
                 ORDER BY title, year
-                """
-            ).fetchall()
+                """).fetchall()
         return [
             MovieCatalogueRecord(
                 title=row["title"],
@@ -345,14 +359,12 @@ class MediaCatalogue:
             return []
         with self._databaseConnect() as connection:
             catalogueSchemaApply(connection)
-            rows = connection.execute(
-                """
+            rows = connection.execute("""
                 SELECT showName, seriesFolderPath, season, episode, episodeTitle,
                        filePath, tvdbEpisodeId, tmdbEpisodeId, imdbId
                 FROM tvEpisode
                 ORDER BY showName, season, episode, filePath
-                """
-            ).fetchall()
+                """).fetchall()
         return [
             TvEpisodeCatalogueRecord(
                 showName=row["showName"],
@@ -375,13 +387,11 @@ class MediaCatalogue:
             return []
         with self._databaseConnect() as connection:
             catalogueSchemaApply(connection)
-            rows = connection.execute(
-                """
+            rows = connection.execute("""
                 SELECT showName, folderPath, tvdbId, tmdbId, imdbId
                 FROM tvSeries
                 ORDER BY showName, folderPath
-                """
-            ).fetchall()
+                """).fetchall()
         return [
             TvSeriesCatalogueRecord(
                 showName=row["showName"],
@@ -450,7 +460,9 @@ def _moviesCollect(movieDirs: list[Path], identity) -> list[MovieCatalogueRecord
         if not root.is_dir():
             continue
         try:
-            folders.extend(folder for folder in sorted(root.iterdir()) if folder.is_dir())
+            folders.extend(
+                folder for folder in sorted(root.iterdir()) if folder.is_dir()
+            )
         except OSError:
             continue
 
@@ -585,7 +597,9 @@ def _tvCollect(
                 folderPath = str(showDir)
                 seriesByFolder[folderPath] = _tvSeriesFromFolder(showDir, identity)
                 for dirPath, dirNames, fileNames in os.walk(showDir):
-                    dirNames[:] = [name for name in dirNames if not name.startswith(".")]
+                    dirNames[:] = [
+                        name for name in dirNames if not name.startswith(".")
+                    ]
                     current = Path(dirPath)
                     seasonHint = identity._inferSeasonFromPath(current)
                     for fileName in fileNames:

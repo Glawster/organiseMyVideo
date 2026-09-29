@@ -144,3 +144,23 @@ Camera snapshots also retain nullable TEXT `manufacturer`, `cameraModel`,
 These columns use the same additive migration mechanism. The camera inventory
 service restores them when showing a saved snapshot; the GoPro card token does
 not replace the numeric card ID. See [Camera card inventory](cameraInventory.md).
+
+## Camera capture corrections
+
+`cameraCaptureCorrection` stores the import-scoped correction journal as JSON,
+including the trusted reference pair, exact integer offset in microseconds,
+selected files, attempts and per-file outcomes. `cameraCaptureTime` stores raw
+and effective capture timestamps, their original source, rule ID, archive path
+and SHA-256. Both are additive tables; inventory and import evidence is retained.
+Read-only correction planning does not initialise or migrate the database.
+
+Effective timestamps require matching archive path and content; card ID alone
+never selects a correction. Existing Home Video rows follow verified corrected
+paths and dates. See [Camera capture-time correction](cameraCaptureCorrection.md)
+and [ADR-011](../project/adr/011-cameraCaptureCorrectionJournal.md).
+
+Folder corrections from `camera correct-time --source` reuse these tables. Their
+journal declares `scopeType=folder` and a namespaced `scopeId`; no import history
+is invented. The legacy SQL `importId` column stores that scope key for folder
+rows, while public payloads and timestamp lookup expose a null import identity.
+The saved `folderEvidence` is the frozen observed selection used for safe retry.

@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "mutagen",
-    "organiseMediaStudio @ git+ssh://git@github.com/Glawster/organiseMediaStudio.git@feature/shared-media-primitives",
+    "organiseMediaStudio @ git+ssh://git@github.com/Glawster/organiseMediaStudio.git@e9df4a21c0a7e5f1454f177aabe254f3e5b54040",
     "organiseMyProjects @ git+https://github.com/Glawster/organiseMyProjects.git@0aa24c1ca875c12919c14fab939ab24e0d82a24c",
     "playwright>=1.50.0",
     "xai-sdk",
@@ -36,19 +36,3 @@ target-version = ["py310"]
 
 [tool.ruff]
 target-version = "py310"
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_[a-z]*.py"]
-python_functions = ["test*"]
-python_classes = ["Test*"]
-addopts = [
-    "-v",
-    "--tb=short",
-    "--strict-markers",
-    "--disable-warnings",
-]
-filterwarnings = [
-    "ignore::DeprecationWarning",
-    "ignore::PendingDeprecationWarning",
-]

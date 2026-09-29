@@ -41,9 +41,7 @@ def _runMediaLocate(argv: Sequence[str]) -> int:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    """Run the public CLI, handling catalogue queries before legacy dispatch."""
+    """Run the public CLI through the canonical parser."""
 
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if len(arguments) >= 2 and arguments[:2] == ["media", "locate"]:
-        return _runMediaLocate(arguments[2:])
     return legacyCli.main(arguments)

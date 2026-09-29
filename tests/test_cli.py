@@ -15,7 +15,11 @@ import organiseMyVideo.__main__ as applicationMain
     [
         (["--source", "/tmp"], ["media", "organise", "/tmp"], "process"),
         (["--source", "/tmp", "--clean"], ["media", "clean", "/tmp"], "clean"),
-        (["--source", "/tmp", "--rescan"], ["media", "scan", "--source", "/tmp"], "rescan"),
+        (
+            ["--source", "/tmp", "--rescan"],
+            ["media", "scan", "--source", "/tmp"],
+            "rescan",
+        ),
         (
             ["--source", "/tmp", "--rescan", "--movie"],
             ["library", "rescan", "/tmp", "--target", "movies"],
@@ -256,6 +260,7 @@ def testCameraScanDryRunDoesNotWriteDatabase(
     monkeypatch: pytest.MonkeyPatch,
 ):
     from cameraFixtures import cardTreeBuild
+
     from organiseMyVideo import constants
 
     databasePath = tmp_path / "mediaCatalogue.sqlite"
@@ -273,6 +278,7 @@ def testCameraScanConfirmPersistsAndShowReadsLatest(
     monkeypatch: pytest.MonkeyPatch,
 ):
     from cameraFixtures import cardTreeBuild
+
     from organiseMyVideo import constants
     from organiseMyVideo.cameraInventory import CameraInventory
     from organiseMyVideo.constants import cameraCardLabelFilename
@@ -325,8 +331,9 @@ def testVerboseOptionIsRejected(prefix):
 
 def testCameraLabelPermissionFailurePreservesInventory(tmp_path, monkeypatch, capsys):
     from cameraFixtures import cardTreeBuild
-    from organiseMyVideo.filesystemOperations import FilesystemOperations
+
     from organiseMyVideo import constants
+    from organiseMyVideo.filesystemOperations import FilesystemOperations
 
     card = cardTreeBuild(tmp_path / "card")
 
@@ -344,3 +351,60 @@ def testCameraLabelPermissionFailurePreservesInventory(tmp_path, monkeypatch, ca
     assert "inventory snapshot was stored in the database" in output
     assert constants.CAMERA_INVENTORY_DATABASE.exists()
     assert not (card / "organiseMyVideo.002").exists()
+
+
+@pytest.mark.parametrize(
+    "entrypoint", ["organiseMyVideo.cli", "organiseMyVideo.__main__"]
+)
+def testDebugPreservesCameraHelp(entrypoint, capsys):
+    run = importlib.import_module(entrypoint).main
+    outputs = []
+    for arguments in (["camera", "-h"], ["--debug", "camera", "-h"]):
+        with pytest.raises(SystemExit) as error:
+            run(arguments)
+        assert error.value.code == 0
+        outputs.append(capsys.readouterr().out)
+    assert outputs[0] == outputs[1]
+    assert "correct-time" in outputs[0]
+    assert "inventory" not in outputs[0]
+
+
+@pytest.mark.parametrize("prefix", [[], ["--debug"]])
+@pytest.mark.parametrize("obsolete", ["inventory", "import"])
+def testObsoleteCameraCommandsAreNotPublic(prefix, obsolete):
+    with pytest.raises(SystemExit) as error:
+        applicationMain.main(prefix + ["camera", obsolete])
+    assert error.value.code == 2
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--debug", "camera", "list"],
+        ["camera", "--debug", "list"],
+        ["camera", "list", "--debug"],
+    ],
+)
+def testCameraDebugOnlyChangesLogging(arguments):
+    import logging
+
+    with patch("organiseMyVideo.cameraCli._cameraListRun", return_value=0) as action:
+        with patch.object(applicationMain, "getLogger") as logger:
+            assert applicationMain.main(arguments) == 0
+    action.assert_called_once_with()
+    assert logger.call_args.kwargs["level"] == logging.DEBUG
+
+
+def testGlobalConfirmationSurvivesCameraSubparser():
+    args = applicationMain.buildParser().parse_args(
+        ["--confirm", "camera", "scan", "--source", "/tmp"]
+    )
+    assert args.confirm is True
+
+
+def testDebugPreservesMediaLocateDispatch():
+    from organiseMyVideo.cli import main
+
+    with patch("organiseMyVideo.cli.locateTvShow", return_value=[]) as locate:
+        assert main(["--debug", "media", "locate", "--show", "Example"]) == 1
+    locate.assert_called_once_with("Example")

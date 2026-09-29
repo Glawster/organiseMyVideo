@@ -37,17 +37,39 @@ _TAG_DATETIME_DIGITIZED = 0x9004
 def metadataCaptureRead(path: Path) -> Optional[datetime]:
     """Return capture time from metadata, then dated dash-cam filenames."""
 
+    return metadataCaptureEvidenceRead(path)[0]
+
+
+def metadataCaptureEvidenceRead(path: Path) -> tuple[Optional[datetime], str]:
+    """Return capture time and its source, without a filesystem-time fallback."""
+    captured, source, _details = metadataCaptureDetailsRead(path)
+    return captured, source
+
+
+def metadataCaptureDetailsRead(path: Path) -> tuple[Optional[datetime], str, dict]:
+    """Return capture evidence with backend and stored timestamp provenance."""
     suffix = path.suffix.lower()
     captured = None
+    details = {}
     if suffix in _JPEG_SUFFIXES:
         captured = metadataJpegCaptureRead(path)
     elif suffix in _MP4_SUFFIXES:
-        captured = metadataMp4CaptureRead(path)
+        try:
+            result = videoProbe(path)
+            captured = result.creationAt
+            details = {
+                "source": getattr(result, "creationSource", None),
+                "raw": getattr(result, "creationRaw", None),
+                "backendRaw": getattr(result, "backendCreationRaw", None),
+            }
+        except VideoProcessingError:
+            pass
     elif suffix in _CR3_SUFFIXES:
         captured = metadataCr3CaptureRead(path)
     if captured is not None:
-        return captured
-    return metadataFilenameCaptureRead(path)
+        return captured, "metadata", details
+    captured = metadataFilenameCaptureRead(path)
+    return captured, "filename" if captured is not None else "unavailable", {}
 
 
 def metadataFilenameCaptureRead(path: Path) -> Optional[datetime]:

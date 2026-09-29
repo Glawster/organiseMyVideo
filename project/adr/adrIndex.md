@@ -15,6 +15,8 @@ in place and link to their replacements.
 | 007 | [Persist camera-card inventory in SQLite under local state](007-cameraInventoryPersistence.md) | Accepted | [REQ-009](../requirements/features/009-cameraCardInventory.md) |
 | 008 | [Use one SQLite catalogue as the UI record](008-sqliteMediaCatalogue.md) | Accepted | [REQ-002](../requirements/features/002-qtMediaLibraryBrowser.md), [REQ-010](../requirements/features/010-sqliteMediaCatalogue.md), [REQ-011](../requirements/features/011-dashcamCardSupport.md), [REQ-014](../requirements/features/014-homeVideoCatalogue.md) |
 | 009 | [Numbered removable volumes share one inventory](009-numberedRemovableVolumes.md) | Accepted | [REQ-009](../requirements/features/009-cameraCardInventory.md), [REQ-015](../requirements/features/015-usbVolumeInventory.md) |
+| 010 | [Shared media-processing boundary](010-sharedMediaProcessingBoundary.md) | Accepted | [REQ-022](../requirements/features/022-sharedMediaProcessing.md) |
+| 011 | [Journal bounded capture corrections](011-cameraCaptureCorrectionJournal.md) | Accepted | [REQ-024](../requirements/features/024-cameraCaptureTimeCorrection.md), [REQ-033](../requirements/features/033-cameraFolderCaptureCorrection.md) |
 
 Use `Proposed`, `Accepted`, `Rejected`, `Deprecated`, or `Superseded` as the
 status. Accept a proposed ADR before implementation becomes costly to unwind.
