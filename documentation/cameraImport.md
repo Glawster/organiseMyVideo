@@ -365,3 +365,12 @@ and execution through `python -m organiseMyVideo camera migrate`.
 
 The Python application service must also be tested directly to demonstrate
 that camera import works independently of the command-line adapter.
+
+## Correcting a wrong camera clock
+
+Use `camera correct-time` to review and apply a fixed offset to one confirmed
+import or an explicitly selected subset. See [Camera capture-time correction](cameraCaptureCorrection.md)
+for trusted anchors, preserved raw metadata, canonical `YYYY/MM/DD` relocation,
+confirmation and recovery. The current public ingestion command is
+`camera archive -s SOURCE`; earlier import command examples above describe the
+original design interface.

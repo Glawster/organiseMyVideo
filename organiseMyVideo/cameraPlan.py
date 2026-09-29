@@ -36,6 +36,9 @@ class CameraAsset:
     captureAt: datetime
     dateSource: str
     destinationPath: Path
+    rawCaptureAt: Optional[datetime] = None
+    rawDateSource: Optional[str] = None
+    correctionRuleId: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -71,7 +74,9 @@ class CameraImportPlanner:
         photoDestination: Optional[Path] = None,
         videoDestination: Optional[Path] = None,
         includeGoproCompanions: bool = False,
+        databasePath: Optional[Path] = None,
     ):
+        self.databasePath = databasePath
         self.goproDestination = Path(goproDestination)
         self.droneDestination = Path(droneDestination)
         self.dashcamDestination = Path(dashcamDestination)
@@ -118,6 +123,19 @@ class CameraImportPlanner:
                 excluded.append(item.relativePath)
                 continue
 
+            # Application corrections override raw metadata only for verified
+            # archive paths/content, never by reusable physical card identity.
+            from .cameraCorrectionStore import correctionTimestampRead
+
+            correction = correctionTimestampRead(
+                captureItem.path, databasePath=self.databasePath
+            )
+            rawCaptureAt, rawDateSource = captureAt, dateSource
+            if correction:
+                captureAt = datetime.fromisoformat(correction["correctedCaptureAt"])
+                rawCaptureAt = datetime.fromisoformat(correction["rawCaptureAt"])
+                rawDateSource = correction["dateSource"]
+                dateSource = "correction"
             destination = self._destinationFor(item, captureAt)
             asset = CameraAsset(
                 sourcePath=item.path,
@@ -127,6 +145,9 @@ class CameraImportPlanner:
                 captureAt=captureAt,
                 dateSource=dateSource,
                 destinationPath=destination,
+                rawCaptureAt=rawCaptureAt if correction else None,
+                rawDateSource=rawDateSource if correction else None,
+                correctionRuleId=correction["ruleId"] if correction else None,
             )
             operation = _operationBuild(
                 asset,

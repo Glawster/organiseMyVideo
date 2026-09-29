@@ -208,6 +208,13 @@ class CameraImporter:
             "companion": asset.fileKind in {"sidecar", "preview", "thumbnail"},
             "outcome": outcome,
         }
+        if asset.correctionRuleId is not None:
+            record.update(
+                rawCaptureAt=asset.rawCaptureAt.isoformat(),
+                rawDateSource=asset.rawDateSource,
+                correctedCaptureAt=asset.captureAt.isoformat(),
+                correctionRuleId=asset.correctionRuleId,
+            )
         if error is not None:
             record["error"] = error
         return record
@@ -245,6 +252,9 @@ class CameraImporter:
             encoding="utf-8",
             stateKind="camera-import-manifest",
         )
+        from .cameraCorrectionStore import correctionImportRecord
+
+        correctionImportRecord(self.planner.databasePath, importId, records)
         return manifestPath, importId
 
 

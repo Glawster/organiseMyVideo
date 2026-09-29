@@ -1,30 +1,41 @@
 # Current increment
 
-## Requirement
+## Objective and status
 
-[REQ-028: Camera history reconciliation](requirements/features/028-cameraHistoryReconciliation.md)
-on `feature/028-camera-history-reconciliation`.
+REQ-024 camera capture-time correction is complete, including the REQ-033 folder
+workflow, embedded timestamp correction and repeatable transformation audit.
+The requirement specifications and requirements index record both as Completed.
 
-## Objective and scope
+## Accepted scope
 
-Finish read-only reconciliation with race/unreadable-file handling, best-effort
-progress caching, legacy digest compatibility, isolated tests, CLI execution
-coverage, operator documentation and requirements-index repairs.
+- Preview and confirmed execution for import and folder selections with the
+  final short/long CLI options and an explicit audit reason.
+- Verified JPEG/MP4 metadata writes, conditional mtime correction, companions,
+  catalogue updates and preservation of original import evidence.
+- Subsequent corrections from current media state with distinct immutable audit
+  records, predecessor links and history reconciliation across transformations.
+- Interrupted-operation recovery, stale-preview rejection, source-path reuse,
+  same-path publication and cleanup before sealing completed records.
 
-## Acceptance and verification
+## Final verification
 
-Failure cases and the real CLI dispatch path are covered with temporary media.
+Verified in the `mediaStudio` Conda environment:
 
-- Full pytest: 639 passed using the `mediaStudio` Conda environment.
-- `python -m organiseMyProjects.runLinter .`: changed code passes; 10 existing
-  findings remain in the unrelated standard-logging script `rugbyAudit.py`.
-- `python -m organiseMyProjects.runLinter --markup`: passed after documentation fixes.
-- `git diff --check`: passed.
-- Requirements 029, 030 and existing 031 retained; next ID is 032 by agreement.
+- Full `pytest` suite: 757 passed.
+- `runLinter .`: no findings.
+- `runLinter --markup`: no remaining issues.
+- `manageProject --check`: zero failures and zero warnings.
+- Black checks for changed Python files and `git diff --check`: passed.
 
-The system launchers lack required package metadata/dependencies; validation uses
-`/home/andy/miniconda3/envs/mediaStudio/bin/python`.
+Resolved the stale blocked-correction assertion, blocked-file wording, duplicate
+requirement heading and standalone rugby-audit logging findings. A subprocess
+smoke test verifies the audit tool with the real shared logging adapter. Removed
+the ignored duplicate pytest configuration from `pyproject.toml`; `pytest.ini`
+retains the same effective settings, with 757 tests collected and no configuration
+warning.
 
-## Immediate next action
+## Remaining work and immediate next action
 
-Squash the verified branch and open the REQ-028 pull request for review.
+REQ-024 verification and documentation are complete. No implementation or
+verification work remains for this increment. Select the next increment through
+the requirements index when further work is requested.

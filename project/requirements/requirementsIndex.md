@@ -1,6 +1,6 @@
 # Requirements
 
-Next available number: 032
+Next available number: 034
 
 Requirements created after adoption of the managed process are recorded here.
 Historical behaviour is not assigned invented retrospective requirements.
@@ -30,14 +30,16 @@ Historical behaviour is not assigned invented retrospective requirements.
 | 021 | [Removable media discovery and lifecycle](features/021-removableMediaDiscovery.md) | Search numbered SD/USB volumes, recommend suitable cards, and derive safe-to-recycle status from inventory and verified import evidence. | ToDo | [Prompt](prompt/021-removableMediaDiscovery.md) | [ADR-008](../adr/008-sqliteMediaCatalogue.md), [ADR-009](../adr/009-numberedRemovableVolumes.md) |
 | 022 | [Shared media processing platform](features/022-sharedMediaProcessing.md) | Use `organiseMediaStudio` as the shared headless image/video processing platform for `organiseMyVideo` and `organiseMyPhotos`. | InProgress | [Prompt](prompt/022-sharedMediaProcessing.md) | [ADR-010](../adr/010-sharedMediaProcessingBoundary.md) |
 | 023 | [Removable media format and recycle](features/023-removableMediaFormat.md) | Safely format only archived numbered media, recreate its identity, and persist a fresh empty snapshot. | InProgress | Not required | [ADR-003](../adr/003-filesystemSafetyBoundary.md), [ADR-009](../adr/009-numberedRemovableVolumes.md) |
-| 024 | [Camera capture-time correction](features/024-cameraCaptureTimeCorrection.md) | Correct known camera-clock errors while preserving original timestamp evidence and elapsed-time relationships. | ToDo | Not required | [ADR-006](../adr/006-cameraImportArchitecture.md) |
+| 024 | [Camera capture-time correction](features/024-cameraCaptureTimeCorrection.md) | Correct current media capture times through repeatable transformations with immutable audit history and recoverable execution. | Completed | Not required | [ADR-006](../adr/006-cameraImportArchitecture.md), [ADR-011](../adr/011-cameraCaptureCorrectionJournal.md) |
 | 025 | [Media keywords and tagging](features/025-mediaKeywords.md) | Add descriptive keywords to media without changing date-based filesystem organisation. | ToDo | Not required | [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
 | 026 | [Camera archive normalisation](features/026-cameraArchiveNormalisation.md) | Normalise legacy GoPro, Drone, and Dashcam archive layouts into the canonical numeric date hierarchy. | ToDo | Not required | [ADR-003](../adr/003-filesystemSafetyBoundary.md), [ADR-006](../adr/006-cameraImportArchitecture.md) |
-| 027 | [SLR card import](features/027-slrCardImport.md) | Import mixed SLR photo/video cards by media type beneath `By Date/YYYY/MM/DD`. | ToDo | [Prompt](prompt/027-slrCardImport.md) | [ADR-003](../adr/003-filesystemSafetyBoundary.md), [ADR-006](../adr/006-cameraImportArchitecture.md), [ADR-007](../adr/007-cameraInventoryPersistence.md) |
+| 027 | [SLR card import](features/027-slrCardImport.md) | Import mixed SLR photo/video cards by media type beneath `By Date/YYYY/MM/DD`. | Completed | [Prompt](prompt/027-slrCardImport.md) | [ADR-003](../adr/003-filesystemSafetyBoundary.md), [ADR-006](../adr/006-cameraImportArchitecture.md), [ADR-007](../adr/007-cameraInventoryPersistence.md) |
 | 028 | [Camera history reconciliation](features/028-cameraHistoryReconciliation.md) | Verify import history against the current archive and reconcile moved files without losing original destination evidence. | Completed | [Prompt](prompt/028-cameraHistoryReconciliation.md) | [ADR-003](../adr/003-filesystemSafetyBoundary.md), [ADR-006](../adr/006-cameraImportArchitecture.md), [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
 | 029 | [Non-destructive media scan](features/029-nonDestructiveMediaScan.md) | Make `media scan` observational only; move renames/moves/merges to `media organise` and deletions to `media clean`. | ToDo | [Prompt](prompt/029-nonDestructiveMediaScan.md) | [ADR-003](../adr/003-filesystemSafetyBoundary.md), [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
 | 030 | [Operational run audit](features/030-operationalRunAudit.md) | Retain verification evidence and per-run reports. | ToDo | Not required | Not required |
 | 031 | [Media structure discovery](features/031-mediaStructureDiscovery.md) | Discover and review media-library structures. | ToDo | Not required | Not required |
+| 032 | [Application-wide CLI Tab completion](features/032-cliTabCompletion.md) | Complete commands, options, paths and contextual local values consistently across the public CLI. | ToDo | [Prompt](prompt/032-cliTabCompletion.md) | Pending |
+| 033 | [Camera folder capture-time correction](features/033-cameraFolderCaptureCorrection.md) | Correct existing camera folders without prior import history using frozen folder evidence and verified relocation. | Completed | [Prompt](prompt/033-cameraFolderCaptureCorrection.md) | [ADR-011](../adr/011-cameraCaptureCorrectionJournal.md) |
 
 ## Prompt index
 
@@ -67,4 +69,6 @@ Historical behaviour is not assigned invented retrospective requirements.
 - [027-slrCardImport](prompt/027-slrCardImport.md)
 - [028-cameraHistoryReconciliation](prompt/028-cameraHistoryReconciliation.md)
 - [029-nonDestructiveMediaScan](prompt/029-nonDestructiveMediaScan.md)
+- [032-cliTabCompletion](prompt/032-cliTabCompletion.md)
+- [033-cameraFolderCaptureCorrection](prompt/033-cameraFolderCaptureCorrection.md)
 <!-- OMP-PROMPT-INDEX-END -->

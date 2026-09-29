@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import errno
 import hashlib
 import os
@@ -103,10 +104,11 @@ class FilesystemOperations:
         destination: Path,
         *,
         preserveMetadata: bool = True,
+        exclusivePublish: bool = False,
         stateKind: str = "media",
         progressCallback: Optional[Callable[[int, int], None]] = None,
     ) -> Path:
-        """Plan or copy a file through a verified temporary destination."""
+        """Copy through a verified temporary; exclusive publication requires hard links."""
         source = Path(source)
         destination = Path(destination)
         self._validateTransfer(source, destination)
@@ -123,8 +125,14 @@ class FilesystemOperations:
                 progressCallback=progressCallback,
             )
             self._verifyFiles(source, temporary)
-            temporary.rename(destination)
-        except Exception:
+            # A hard-link publish is atomic and refuses a destination created
+            # after validation; rename() could silently overwrite that file.
+            if exclusivePublish:
+                os.link(temporary, destination)
+                temporary.unlink()
+            else:
+                temporary.rename(destination)
+        except BaseException:
             temporary.unlink(missing_ok=True)
             raise
         return destination
@@ -140,7 +148,10 @@ class FilesystemOperations:
         """Stream one file to *destination* while optionally reporting bytes."""
         totalBytes = source.stat().st_size
         copiedBytes = 0
-        with source.open("rb") as sourceStream, destination.open("xb") as destinationStream:
+        with (
+            source.open("rb") as sourceStream,
+            destination.open("xb") as destinationStream,
+        ):
             while True:
                 chunk = sourceStream.read(1024 * 1024)
                 if not chunk:
@@ -149,10 +160,115 @@ class FilesystemOperations:
                 copiedBytes += len(chunk)
                 if progressCallback is not None:
                     progressCallback(copiedBytes, totalBytes)
+            destinationStream.flush()
+            os.fsync(destinationStream.fileno())
         if preserveMetadata:
             shutil.copystat(source, destination)
         if progressCallback is not None and copiedBytes == 0:
             progressCallback(0, totalBytes)
+
+    def setModificationTime(self, path: Path, nanoseconds: int) -> None:
+        """Set only mtime; Linux UTIME_OMIT leaves atime untouched.
+
+        Inode ctime is maintained by the kernel and cannot be preserved across
+        writes. Do not attempt to set it or round-trip atime through os.utime.
+        """
+        path = Path(path)
+        self._record("set-mtime", destination=path, stateKind="camera-correction")
+        if self.dryRun:
+            return
+
+        class Timespec(ctypes.Structure):
+            _fields_ = [("seconds", ctypes.c_long), ("nanoseconds", ctypes.c_long)]
+
+        seconds, remainder = divmod(nanoseconds, 1_000_000_000)
+        times = (Timespec * 2)(Timespec(0, (1 << 30) - 2), Timespec(seconds, remainder))
+        library = ctypes.CDLL(None, use_errno=True)
+        function = library.utimensat
+        function.argtypes = [
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.POINTER(Timespec),
+            ctypes.c_int,
+        ]
+        function.restype = ctypes.c_int
+        if function(-100, os.fsencode(path), times, 0x100) != 0:
+            code = ctypes.get_errno()
+            raise OSError(code, os.strerror(code), str(path))
+        descriptor = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        if path.stat().st_mtime_ns != nanoseconds:
+            raise ValueError(
+                f"filesystem cannot preserve requested mtime precision: {path}"
+            )
+
+    def publishVerifiedCopy(
+        self,
+        source: Path,
+        destination: Path,
+        *,
+        correctedDigest: str,
+        originalDigest: str,
+        backup: Path,
+        correctedMtimeNs: int,
+    ) -> None:
+        """Publish a verified correction, retaining any original destination.
+
+        Exclusive hard-link publication cannot overwrite a concurrent arrival.
+        A pre-existing original is linked to a journalled recovery path before
+        vacating its name, including when source and final archive names match.
+        """
+        source, destination, backup = Path(source), Path(destination), Path(backup)
+        self._record("publish", source, destination, "camera-correction")
+        if self.dryRun:
+            return
+
+        def digest(path: Path) -> str:
+            if path.is_symlink() or not path.is_file():
+                raise ValueError(f"non-regular correction file: {path}")
+            with path.open("rb") as stream:
+                value = hashlib.sha256()
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    value.update(chunk)
+                return value.hexdigest()
+
+        if digest(source) != correctedDigest:
+            raise ValueError("corrected copy changed before publication")
+        if destination.exists():
+            observed = digest(destination)
+            if (
+                observed == correctedDigest
+                and destination.stat().st_mtime_ns == correctedMtimeNs
+            ):
+                return
+            if observed != originalDigest:
+                raise ValueError("destination changed before correction publication")
+            if backup.exists():
+                if digest(backup) != originalDigest:
+                    raise ValueError("original recovery copy has changed")
+            else:
+                os.link(destination, backup)
+            if (
+                digest(destination) != originalDigest
+                or digest(backup) != originalDigest
+            ):
+                raise ValueError("original changed while preserving recovery copy")
+            # Persist the recovery link before vacating an original pathname.
+            descriptor = os.open(destination.parent, os.O_RDONLY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            self.removeFile(destination, stateKind="camera-correction-publication")
+        os.link(source, destination)
+        descriptor = os.open(destination.parent, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
 
     def move(
         self,
@@ -263,7 +379,10 @@ class FilesystemOperations:
             else:
                 totalBytes = source.stat().st_size
                 copiedBytes = 0
-                with source.open("rb") as sourceStream, temporary.open("wb") as destStream:
+                with (
+                    source.open("rb") as sourceStream,
+                    temporary.open("wb") as destStream,
+                ):
                     for chunk in iter(lambda: sourceStream.read(1024 * 1024), b""):
                         destStream.write(chunk)
                         copiedBytes += len(chunk)

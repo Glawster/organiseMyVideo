@@ -378,7 +378,7 @@ def _cameraImportPlainSummaryRun(
     _legacy.drawBox = lambda text: print(text, end="" if text.endswith("\n") else "\n")
     try:
         _legacyGlobalsSync()
-        return _legacy.main(arguments)
+        return _legacy.main(arguments, internalCamera=True)
     finally:
         cameraImportModule.cameraImportRun = originalRun
         _legacy.drawBox = originalDrawBox
@@ -396,7 +396,7 @@ def _cameraImportConfirmedRun(
     _legacy.drawBox = lambda text: print(text, end="" if text.endswith("\n") else "\n")
     try:
         _legacyGlobalsSync()
-        return _legacy.main(arguments)
+        return _legacy.main(arguments, internalCamera=True)
     finally:
         cameraImportModule.cameraImportRun = originalRun
         _legacy.drawBox = originalDrawBox
@@ -423,11 +423,6 @@ def _inventoryCardQuery(arguments: Sequence[str]) -> bool:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
-
-    if arguments and arguments[0] == "camera":
-        from .cameraCli import cameraCliRun
-
-        return cameraCliRun(arguments[1:])
 
     _legacyGlobalsSync()
     return _legacy.main(arguments)

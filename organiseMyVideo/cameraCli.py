@@ -22,6 +22,13 @@ def cameraCliRun(arguments: Sequence[str]) -> int:
     parser = _cameraParserBuild()
     args = parser.parse_args(list(arguments))
 
+    _legacy._configureLogging(args, not args.confirm)
+    return cameraCliExecute(args)
+
+
+def cameraCliExecute(args: argparse.Namespace) -> int:
+    """Execute a parsed public camera action."""
+
     if args.cameraAction == "list":
         return _cameraListRun()
     if args.cameraAction == "show":
@@ -32,6 +39,10 @@ def cameraCliRun(arguments: Sequence[str]) -> int:
         return _cameraArchiveRun(args)
     if args.cameraAction == "history":
         return _cameraHistoryRun(args.card, check=args.check)
+    if args.cameraAction == "correct-time":
+        from .cameraCorrectionCli import cameraCorrectionCliRun
+
+        return cameraCorrectionCliRun(args)
     if args.cameraAction == "migrate":
         return _cameraMigrateRun(args)
     if args.cameraAction == "format":
@@ -39,11 +50,11 @@ def cameraCliRun(arguments: Sequence[str]) -> int:
     if args.cameraAction == "location":
         return _cameraLocationRun(args)
 
-    parser.error("camera action is required")
+    raise ValueError("camera action is required")
     return 2
 
 
-def _cameraParserBuild() -> argparse.ArgumentParser:
+def _cameraParserBuild(*, inheritedGlobals: bool = False) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="organiseMyVideo camera",
         description="Manage numbered removable media, archive camera footage, inspect history, and maintain the camera archive.",
@@ -131,6 +142,18 @@ def _cameraParserBuild() -> argparse.ArgumentParser:
     )
     _confirmArgumentAdd(migrateParser)
 
+    from .cameraCorrectionCli import cameraCorrectionArgumentsAdd
+
+    correctionParser = subparsers.add_parser(
+        "correct-time",
+        help="preview or apply a session-scoped camera clock correction",
+        description="Correct a selected import or existing --source folder using a reference file and trusted actual time. "
+        "Preview original/corrected timestamps and YYYY/MM/DD paths; --confirm verifies and "
+        "writes and verifies embedded capture timestamps on copies before relocating files, preserving original evidence in the correction journal.",
+    )
+    cameraCorrectionArgumentsAdd(correctionParser)
+    _confirmArgumentAdd(correctionParser)
+
     formatParser = subparsers.add_parser(
         "format",
         help="format an archived card and record it as empty",
@@ -152,6 +175,21 @@ def _cameraParserBuild() -> argparse.ArgumentParser:
         help="set the current physical location",
     )
 
+    if not inheritedGlobals:
+        parser.set_defaults(confirm=False, debug=False, quiet=False)
+    for target in (parser, *subparsers.choices.values()):
+        target.add_argument(
+            "--debug",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help="enable diagnostic logging",
+        )
+        target.add_argument(
+            "--quiet",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help="only log errors",
+        )
     return parser
 
 
@@ -162,6 +200,7 @@ def _confirmArgumentAdd(parser: argparse.ArgumentParser) -> None:
         "--y",
         dest="confirm",
         action="store_true",
+        default=argparse.SUPPRESS,
         help="confirm execution; default is dry-run",
     )
 
@@ -170,7 +209,9 @@ def _positiveCardId(value: str) -> int:
     try:
         cardId = int(value)
     except ValueError as error:
-        raise argparse.ArgumentTypeError("card ID must be a positive integer") from error
+        raise argparse.ArgumentTypeError(
+            "card ID must be a positive integer"
+        ) from error
     if cardId < 1:
         raise argparse.ArgumentTypeError("card ID must be a positive integer")
     return cardId
@@ -215,7 +256,9 @@ def _cameraHistoryRun(cardId: int | None, *, check: bool = False) -> int:
         return 0
 
     if cardId is None:
-        print("organiseMyVideo camera history: error: --card is required unless --check is used")
+        print(
+            "organiseMyVideo camera history: error: --card is required unless --check is used"
+        )
         return 2
 
     from .cameraImport import cameraImportHistory
@@ -238,9 +281,15 @@ def _cameraMigrateProgressRenderer() -> Callable[[int, int, str], None]:
         isTty = getattr(sys.stderr, "isatty", None)
         if not callable(isTty) or not isTty():
             if completed == 0:
-                print(f"Scanning legacy camera archive: {total} file(s) to inspect...", file=sys.stderr)
+                print(
+                    f"Scanning legacy camera archive: {total} file(s) to inspect...",
+                    file=sys.stderr,
+                )
             elif total and completed == total:
-                print(f"Scanning legacy camera archive: {completed}/{total} complete.", file=sys.stderr)
+                print(
+                    f"Scanning legacy camera archive: {completed}/{total} complete.",
+                    file=sys.stderr,
+                )
                 finished = True
             return
         if total <= 0:
@@ -314,7 +363,9 @@ def _marketedGigabytesResolve(totalBytes: int | None, stored: int | None) -> int
     return stored
 
 
-def _markerWriteFailure(error: OSError, sourcePath: Path, markerPath: str | None) -> bool:
+def _markerWriteFailure(
+    error: OSError, sourcePath: Path, markerPath: str | None
+) -> bool:
     """Return True when persistence failed only because the mounted volume is read-only."""
 
     if error.errno == errno.EROFS:
@@ -417,6 +468,9 @@ def _cameraArchiveRun(args: argparse.Namespace) -> int:
         "-s",
         str(Path(args.source).expanduser().resolve()),
     ]
+    for flag in ("debug", "quiet"):
+        if getattr(args, flag, False):
+            legacyArguments.append("--" + flag)
     if args.confirm:
         legacyArguments.append("--confirm")
 

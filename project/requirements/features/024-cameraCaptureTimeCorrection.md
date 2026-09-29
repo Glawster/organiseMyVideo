@@ -2,7 +2,7 @@
 
 ## Status
 
-ToDo
+Completed
 
 ## Outcome
 
@@ -44,7 +44,8 @@ operator workflow around that shared primitive.
   all selected files in the bounded correction scope.
 - Preserve each file's original/raw capture timestamp and timestamp source.
 - Record the corrected capture timestamp separately; never replace the raw
-  evidence in application history/catalogue records.
+  evidence in historical import/correction records. The effective catalogue
+  index may advance to a later transformation.
 - Preserve exact elapsed intervals between files when applying a fixed offset.
 - Scope a correction to an explicit import, snapshot, session/range, or selected
   file set; do not apply it automatically to every historical/future use of the
@@ -68,9 +69,10 @@ operator workflow around that shared primitive.
 - Write an auditable correction/migration manifest containing the original and
   corrected timestamps, correction rule/provenance, old/new paths, file hashes,
   results, and enough information for a checked rollback plan.
-- Keep embedded EXIF/MP4 metadata unchanged initially. The application-level
-  corrected timestamp is authoritative for catalogue/path policy, while media
-  metadata rewriting remains a separate future decision.
+- Confirmed correction must write corrected embedded capture metadata on a
+  verified destination copy. Independent readers must see corrected dates
+  without access to the OMV catalogue. Preserve the original embedded values in
+  the journal, not as the active capture metadata of the corrected media.
 - Provide visible progress for scans/hashing/correction planning so large
   sessions do not appear stalled.
 
@@ -108,7 +110,7 @@ offset to the rest of the selected session.
 - Applying one correction across unrelated imports/snapshots without explicit
   operator selection.
 - Overwriting different-content destination files.
-- Rewriting embedded EXIF, QuickTime, or MP4 timestamps in this requirement.
+- Transcoding or changing audiovisual/image content to correct timestamps.
 - Deleting source media merely because a corrected destination path can be
   calculated.
 
@@ -144,12 +146,61 @@ offset to the rest of the selected session.
     have been successfully handled and the directory is genuinely empty.
 12. The correction workflow reports visible progress during potentially long
     scanning and hashing operations.
-13. Embedded EXIF/MP4 timestamps remain unchanged by this requirement.
+13. Confirmed execution writes JPEG DateTimeOriginal, CreateDate and ModifyDate,
+    and MP4 QuickTime CreateDate/ModifyDate plus every present track/media
+    creation/modification timestamp. Independent metadata readback verifies
+    absolute corrected values before any source removal.
 14. Tests cover positive and negative offsets, leap years, day/month/year
     rollover, multi-day sessions, duplicate destinations, differing-content
     conflicts, and correction-scope isolation across reuse of one `cardId`.
 
+15. Global `--debug` changes logging only; camera help and command dispatch use
+    the same public hierarchy with or without the flag.
+16. GoPro QuickTime integer clock evidence remains timezone-naive even when
+    ffprobe renders it with `Z`. Explicit stored timezone evidence is preserved;
+    genuine naive/aware mismatches remain errors and report both reference
+    timestamps with their timezone/offset states. Filesystem mtime is not used
+    to derive the correction.
+
+## Real-world GoPro acceptance
+
+`GOPR4150.MP4`: raw `2015-01-04T07:42:46`, actual `2018-08-22T18:00:00`,
+exact offset **+1326 days, 10:17:14**. QuickTime CreateDate/ModifyDate and all
+Track1/2/3 TrackCreateDate, TrackModifyDate, MediaCreateDate and MediaModifyDate
+start at that raw value and must read `2018:08:22 18:00:00` after confirmation.
+`G0044159.JPG` starts at `2015:01:04 09:48:48`; its three EXIF date fields must
+read `2018:08:22 20:06:02`. Media essence must remain unchanged.
+
+Before mutation, persist original embedded timestamps, corrected values,
+original SHA-256, offset, reason, anchor and rule ID. Copy the
+original, verify byte identity, write metadata on the copy only, read every
+expected field back, verify, calculate and journal destination SHA-256, then
+publish and remove the original only after all selected destinations verify.
+Original and corrected hashes are distinct identities; equality is not required.
+A write or verification failure retains originals. Retries distinguish untouched
+originals, verified raw copies and metadata-verified corrected copies. Absolute
+writes and frozen input evidence prevent an accidental second offset application
+when resuming the same operation; later operations use new current evidence.
+
+Filesystem mtime follows the final operator rule: if original mtime is earlier
+than corrected capture time, apply the same signed correction offset to mtime;
+otherwise preserve it. Record changed original/resulting mtime pairs when
+OMV changes it; retain observed before/after filesystem state for transformation
+audit and stale-preview validation. This moves an old 2015 camera-clock mtime while retaining a
+genuine later 2026 edit. Preserve sub-second filesystem precision and never
+replace mtime with capture time. Naive capture times use the host local zone
+only when comparing with a POSIX filesystem instant; explicit offsets define
+their instant. Do not deliberately set atime or inode ctime. Normal kernel
+updates caused by reads/writes are unavoidable and are not camera-time correction
+operations.
+
+Tests must independently inspect JPEG and three-track MP4 output, exercise
+write/readback failures, copied/verified/published recovery, dual-hash journalling,
+repeat idempotency, conditional mtime shifting/preservation and no explicit atime/ctime writes.
+
 ## Dependencies and decisions
+
+- [REQ-033: Folder correction without import history](033-cameraFolderCaptureCorrection.md) extends this workflow to observed folder evidence.
 
 - [REQ-004: Camera media import](004-cameraMediaImport.md)
 - [REQ-009: Camera card inventory](009-cameraCardInventory.md)
@@ -172,15 +223,100 @@ offset to the rest of the selected session.
 - `pytest`
 - `git diff --check`
 
+## Operator contract and acceptance detail
+
+- `camera correct-time --import-manifest PATH --root ROOT --reference RELATIVE_PATH
+  --actual ISO_DATETIME --reason TEXT` previews the selected import.
+- Repeat `--file RELATIVE_PATH` for a subset, including the reference; recorded
+  same-stem companions are included. Unknown companion evidence blocks a move.
+- Initial import evidence must match verified media. Later transformations
+  follow completed output identities and read the current reference metadata.
+  Camera metadata or a precise filename timestamp and verified SHA-256 are required;
+  filesystem fallback timestamps are reported as unusable evidence.
+- Require a common clock basis (naive wall times or the same fixed UTC offset).
+  Do not silently convert timezones or mix naive and aware timestamps.
+- Any missing evidence or conflict blocks all selected files. Confirmation
+  copies/verifies the entire scope before old paths are removed.
+- Repeating an identical completed rule performs no writes. Partial attempts
+  can resume; only unfinished overlapping transformations block new corrections.
+- Persist provenance and effective timestamps in the existing media catalogue;
+  export the correction journal under the existing `cameraImports` directory.
+- Automated rollback is out of scope. Subsequent corrections are new transformations
+  of current media and do not overwrite earlier audit records.
+
+## Test plan
+
+| Production behaviour | Unit | Integration | Golden | UI | Clean-room |
+| --- | --- | --- | --- | --- | --- |
+| Exact offset and interval preservation | Yes (shared) | Yes | Card-2 values | | Yes |
+| Import evidence through correction and organisation | | Yes | JPEG/MP4 fixtures | CLI | Yes |
+| Catalogue, manifests and corrected media | Yes | Yes | Independent ExifTool readback and dual hashes | CLI | Yes |
+| Conflicts, companions, interrupted copies and recovery | Yes | Yes | | CLI | Yes |
+
 ## Traceability
 
-- Shared implementation: pending in `organiseMediaStudio`.
-- OMV correction planning/execution: pending.
-- Card 2 production correction: pending implementation and dry-run review.
-- Pull request: pending.
+- Shared implementation: `organiseMediaStudio.metadata.captureCorrection`.
+- OMV implementation: `cameraCorrection.py`, `cameraCorrectionExecution.py`,
+  `cameraCorrectionFolder.py`, `cameraCorrectionHistory.py`,
+  `cameraCorrectionMetadata.py`, `cameraCorrectionStore.py`,
+  `cameraCorrectionCli.py`, `cameraHistory.py`, `cameraPlan.py` and
+  `cameraImport.py` under the application package.
+- Tests: `tests/test_cameraCorrection.py`, `tests/test_cameraCorrectionFolder.py`,
+  `tests/test_cameraCorrectionEmbedded.py`, `tests/test_cameraCli.py`,
+  `tests/test_cameraHistory.py` and shared `tests/test_captureCorrection.py`.
+- User guide: [Camera capture-time correction](../../../documentation/cameraCaptureCorrection.md).
+- Decisions: [ADR-006](../../adr/006-cameraImportArchitecture.md),
+  [ADR-011](../../adr/011-cameraCaptureCorrectionJournal.md).
 
 ## Change history
 
 - 2026-09-17: created — define fixed-offset camera-clock correction and the
   card 2 default-clock use case, preserving raw timestamps and relative timing
   while correcting the session to the user-confirmed 2018 timeline.
+
+- 2026-09-28: clarified the explicit import/subset CLI, matching clock basis,
+  SHA-256 evidence requirements and journalled recovery contract.
+
+## Correction CLI contract
+
+The correction interface uses `-s/--source`, `-r/--root`, `-R/--reference`,
+`-a/--actual`, repeatable `-f/--file`, `--reason` and `--import-manifest`.
+Exactly one scope selector is required. Keep `--reason` explicit and required
+for the correction audit record. Reject obsolete `--reference-file` and
+`--actual-at` options; they are not aliases.
+
+Help describes `-R, --reference FILE` as “file whose recorded capture time
+provides the correction anchor” and `-a, --actual DATETIME` as “actual capture
+date/time of the reference file”. Existing preview and confirmation rules apply.
+
+## Repeatable, auditable transformations
+
+Capture-time corrections are repeatable, auditable transformations. A completed
+correction SHALL NOT prevent a subsequent correction of the resulting media.
+Each correction SHALL operate on the media's current metadata and filesystem
+state and SHALL create a new immutable audit record containing sufficient
+before-and-after evidence to reconstruct the transformation history. Persistent
+correction records SHALL provide provenance and recovery information, not
+permanently reserve a source path or prevent future correction.
+
+### Acceptance criteria for subsequent corrections
+
+- After completion, another correction may change the resulting media again,
+  including in place, backwards in time, or to another archive day. Calculate
+  its offset from current capture metadata, not the first correction's anchor.
+- Every new transformation has a distinct operation/rule identity and retains
+  input/output paths, hashes, embedded tags, capture times, filesystem evidence,
+  offset, reason, reference evidence and links to verified predecessor outputs.
+  Earlier completed database records and exported manifests remain unchanged.
+- Import-scoped corrections follow recorded transformation identities to current
+  media and read that media afresh. Import manifests remain historical evidence.
+- Folder scopes may be reused for new media after completion. A fresh preview
+  snapshots current files; a path alone neither applies an old offset nor blocks
+  a new correction.
+- Identical retries with unchanged verified output remain no-ops. Interrupted
+  transformations retain frozen evidence and resume the same operation; new
+  overlapping operations wait for recovery. Stale previews, changed input state,
+  and different-content destination collisions remain blocked.
+- Regression tests cover successive folder/import corrections, same-path updates,
+  immutable history, reused sources, current effective catalogue values and
+  interruption/recovery during a second correction.
