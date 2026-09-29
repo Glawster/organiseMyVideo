@@ -27,6 +27,18 @@ Existing TV libraries also contain season-folder variants such as
 
 - Add `--merge` to `media organise` while retaining dry-run by default and
   `--confirm` for filesystem changes.
+- Commands that can meaningfully operate either across all TV shows or on one
+  TV show shall use optional `--show <name>` consistently. When supplied, the
+  operation is restricted to the matching catalogued show; when omitted, the
+  operation applies to all applicable TV shows. Commands with no meaningful
+  show scope shall not expose `--show`.
+- `media organise --merge` shall accept optional `--show <name>`. When supplied,
+  duplicate discovery and merge planning are restricted to that show's
+  provider-identified folders across configured media roots. When omitted,
+  existing all-show merge discovery behaviour is retained.
+- Show matching shall use catalogue/provider identity where available rather
+  than relying solely on folder names. Partial or ambiguous matches shall be
+  reported clearly and shall not permit destructive work on an unintended show.
 - Detect duplicate TV folders from shared catalogue provider identity, not
   from title text alone.
 - Detect duplicate movie folders from shared IMDb or TMDB identity, not from
@@ -114,6 +126,15 @@ Existing TV libraries also contain season-folder variants such as
     rebuilt from current configured storage roots.
 15. Given focused merge/season tests and the existing suite, when they run,
     then they pass.
+16. Given `media organise --merge --show "Grimm"`, when merge discovery runs,
+    then only provider-identified folders for the matching Grimm catalogue
+    identity are considered, including matching folders on other configured
+    media roots.
+17. Given `media organise --merge` without `--show`, when merge discovery runs,
+    then all applicable TV shows retain the existing all-show behaviour.
+18. Given an ambiguous `--show` value, when a filesystem-changing operation is
+    requested, then the command reports the ambiguity and does not modify any
+    candidate show.
 
 ## Dependencies and decisions
 
@@ -147,3 +168,6 @@ source cleanup. Run `pytest` and `git diff --check`.
   destination already has one.
 - 2026-09-07: completed — movie-folder merging added with IMDb/TMDB
   identity, feature-video collision handling, and regenerable `movie.xml`.
+- 2026-09-29: changed — established optional `--show <name>` TV-show scoping;
+  merge targets one catalogued show when supplied and all applicable shows
+  when omitted.
