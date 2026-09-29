@@ -32,6 +32,15 @@ The catalogue path and table split are recorded in
   without argparse or Qt.
 - Keep camelCase SQLite identifiers.
 - Leave `metadataLibrary.json` as the organiser lookup cache.
+- Catalogue-facing TV commands that can meaningfully operate on either one
+  show or all shows shall use optional `--show <name>` consistently. Supplying
+  `--show` restricts the operation to the matching catalogue identity;
+  omitting it means all applicable TV shows.
+- `media locate` shall therefore accept optional `--show <name>`: with a show
+  it reports matching catalogue locations, and without a show it reports all
+  catalogued TV-show locations. Partial matches may be supported for discovery,
+  but ambiguous matches must be shown clearly and must not be silently resolved
+  for a destructive operation.
 
 ## Out of scope
 
@@ -63,6 +72,11 @@ The catalogue path and table split are recorded in
 6. Given dry-run library rescan, when it indexes storage, then the catalogue
    movie/TV tables are still updated because that is application state, while
    media files are not renamed.
+7. Given `media locate --show "Grimm"`, when the catalogue is queried, then it
+   reports locations for matching Grimm catalogue rows without walking the
+   library solely to rediscover them.
+8. Given `media locate` without `--show`, when the catalogue is queried, then it
+   reports locations for all catalogued TV shows.
 
 ## Dependencies and decisions
 
@@ -101,3 +115,6 @@ The catalogue path and table split are recorded in
   records first; filename and folder names are fallbacks only.
 - 2026-09-04: changed — TV series and episode tables keep TVDB, TMDB, and
   IMDb IDs so identified programmes stay identified.
+- 2026-09-29: changed — catalogue-facing TV operations use optional
+  `--show <name>` consistently; omission means all applicable shows, including
+  `media locate`.
