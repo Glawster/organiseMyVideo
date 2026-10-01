@@ -6770,7 +6770,7 @@ def testMainAutoModeDisablesPromptsAndSetsSummaryPath():
         useCurses=True,
     )
     assert organizerInstance.summaryReportPath == (
-        omv_main.APP_CONFIG_FILE.parent
+        omv_main.applicationStateDirectory()
         / f"summary.{omv_main.datetime.now().strftime('%Y%m%d')}.txt"
     )
     assert organizerInstance.summaryReportMode == "process"
@@ -6807,7 +6807,7 @@ def testMainRescanModeCallsResetLibraryMetadataAndSetsSummaryPath():
         useCurses=True,
     )
     assert organizerInstance.summaryReportPath == (
-        omv_main.APP_CONFIG_FILE.parent
+        omv_main.applicationStateDirectory()
         / f"summary.{omv_main.datetime.now().strftime('%Y%m%d')}.txt"
     )
     assert organizerInstance.summaryReportMode == "rescan"
