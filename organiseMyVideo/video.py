@@ -1454,7 +1454,7 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         """
         if movieInfo.get("identityConflict"):
             if not movieInfo.get("identityConflictReported"):
-                self._reportMovieIdentityConflict(movieInfo)
+                self._reportMovieIdentityConflict(movieInfo, *paths)
                 movieInfo["identityConflictReported"] = True
             return True
 
@@ -1472,15 +1472,15 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         )
         if decision.kind == MOVIE_IDENTITY_CONFLICT:
             movieInfo["identityConflict"] = decision
-            self._reportMovieIdentityConflict(movieInfo)
+            self._reportMovieIdentityConflict(movieInfo, *paths)
             movieInfo["identityConflictReported"] = True
             return True
         if decision.kind == MOVIE_IDENTITY_PRESERVE_CASE and decision.retainedTitle:
             movieInfo["identityNamingTitle"] = decision.retainedTitle
         return False
 
-    def _reportMovieIdentityConflict(self, movieInfo: dict) -> None:
-        """Warn with the current identity, the proposal, and local evidence."""
+    def _reportMovieIdentityConflict(self, movieInfo: dict, *paths: Path) -> None:
+        """Warn with the current identity, proposal, location, and local evidence."""
         report = movieIdentityReport(
             movieInfo["identityConflict"],
             evidence=movieIdentityEvidence(movieInfo),
@@ -1489,9 +1489,19 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
             runtime=movieInfo.get("runtime"),
         )
         logger.warning("%s", report)
+        location = next(
+            (
+                path if path.is_dir() else path.parent
+                for path in (Path(path) for path in paths)
+            ),
+            None,
+        )
+        details = list(report.splitlines()[1:])
+        if location is not None:
+            details.insert(0, f"folder: {location}")
         self._recordSummaryInvestigation(
             "movie identity conflict",
-            *report.splitlines()[1:],
+            *details,
         )
 
     def _applyTvMcmHints(
