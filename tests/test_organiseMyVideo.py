@@ -6959,8 +6959,16 @@ def testWriteSummaryReportAppendsTransfersRenamesAndCleanup(
     assert reportText.count("organiseMyVideo") == 2
     assert "organiseMyVideo DRY-RUN process summary" in reportText
     assert "organiseMyVideo ACTUAL-RUN rescan summary" in reportText
-    assert "Transfers:\n- /tmp/source/movie.mkv -> /library/movie.mkv" in reportText
-    assert "Renames:\n- /tmp/source/Extras -> /tmp/source/Featurettes" in reportText
+    assert (
+        "Transfers:\n"
+        "- from: /tmp/source/movie.mkv\n"
+        "  to:   /library/movie.mkv"
+    ) in reportText
+    assert (
+        "Renames:\n"
+        "- from: /tmp/source/Extras\n"
+        "  to:   /tmp/source/Featurettes"
+    ) in reportText
     assert "Cleanup:\n- remove empty folder: /tmp/source/old" in reportText
     assert (
         "Possible duplicate TV shows:\n"
@@ -6969,6 +6977,32 @@ def testWriteSummaryReportAppendsTransfersRenamesAndCleanup(
         "  - Grimm (2011)"
     ) in reportText
     assert "- cleanup needed: /tmp/source/duplicate" in reportText
+
+
+def testWriteSummaryReportSeparatesPathPairs(tmp_path: Path, organizer: VideoOrganizer):
+    reportPath = tmp_path / "summary.txt"
+    organizer.summaryReportPath = reportPath
+    organizer.summaryReportMode = "rescan"
+    organizer._recordSummaryRename(
+        Path("/mnt/movie1/Movies/First Movie (2020)"),
+        Path("/mnt/movie1/Movies/First Movie (2021)"),
+    )
+    organizer._recordSummaryRename(
+        Path("/mnt/movie2/Movies/Second Movie (2022)"),
+        Path("/mnt/movie2/Movies/Second Movie (2023)"),
+    )
+
+    organizer._writeSummaryReport()
+
+    reportText = reportPath.read_text(encoding="utf-8")
+    assert (
+        "Renames:\n"
+        "- from: /mnt/movie1/Movies/First Movie (2020)\n"
+        "  to:   /mnt/movie1/Movies/First Movie (2021)\n"
+        "\n"
+        "- from: /mnt/movie2/Movies/Second Movie (2022)\n"
+        "  to:   /mnt/movie2/Movies/Second Movie (2023)"
+    ) in reportText
 
 
 def testMainConfiguresConsoleTimestampWithoutMilliseconds():
