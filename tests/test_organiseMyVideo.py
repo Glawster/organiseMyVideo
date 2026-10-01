@@ -6966,8 +6966,8 @@ def testWriteSummaryReportAppendsTransfersRenamesAndCleanup(
     ) in reportText
     assert (
         "Renames:\n"
-        "- from: /tmp/source/Extras\n"
-        "  to:   /tmp/source/Featurettes"
+        "- folder: /tmp/source/Extras\n"
+        "     to:   /tmp/source/Featurettes"
     ) in reportText
     assert "Cleanup:\n- remove empty folder: /tmp/source/old" in reportText
     assert (
@@ -6979,17 +6979,23 @@ def testWriteSummaryReportAppendsTransfersRenamesAndCleanup(
     assert "- cleanup needed: /tmp/source/duplicate" in reportText
 
 
-def testWriteSummaryReportSeparatesPathPairs(tmp_path: Path, organizer: VideoOrganizer):
+def testWriteSummaryReportGroupsMovieFolderAndFileRenames(
+    tmp_path: Path, organizer: VideoOrganizer
+):
     reportPath = tmp_path / "summary.txt"
     organizer.summaryReportPath = reportPath
     organizer.summaryReportMode = "rescan"
     organizer._recordSummaryRename(
+        Path("/mnt/movie1/Movies/First Movie? (2020)"),
         Path("/mnt/movie1/Movies/First Movie (2020)"),
-        Path("/mnt/movie1/Movies/First Movie (2021)"),
     )
     organizer._recordSummaryRename(
+        Path("/mnt/movie1/Movies/First Movie (2020)/First Movie? (2020).mkv"),
+        Path("/mnt/movie1/Movies/First Movie (2020)/First Movie (2020).mkv"),
+    )
+    organizer._recordSummaryRename(
+        Path("/mnt/movie2/Movies/Second Movie? (2022)"),
         Path("/mnt/movie2/Movies/Second Movie (2022)"),
-        Path("/mnt/movie2/Movies/Second Movie (2023)"),
     )
 
     organizer._writeSummaryReport()
@@ -6997,11 +7003,13 @@ def testWriteSummaryReportSeparatesPathPairs(tmp_path: Path, organizer: VideoOrg
     reportText = reportPath.read_text(encoding="utf-8")
     assert (
         "Renames:\n"
-        "- from: /mnt/movie1/Movies/First Movie (2020)\n"
-        "  to:   /mnt/movie1/Movies/First Movie (2021)\n"
+        "- folder: /mnt/movie1/Movies/First Movie? (2020)\n"
+        "     to:   /mnt/movie1/Movies/First Movie (2020)\n"
+        "  - movie: /mnt/movie1/Movies/First Movie (2020)/First Movie? (2020).mkv\n"
+        "     to:   /mnt/movie1/Movies/First Movie (2020)/First Movie (2020).mkv\n"
         "\n"
-        "- from: /mnt/movie2/Movies/Second Movie (2022)\n"
-        "  to:   /mnt/movie2/Movies/Second Movie (2023)"
+        "- folder: /mnt/movie2/Movies/Second Movie? (2022)\n"
+        "     to:   /mnt/movie2/Movies/Second Movie (2022)"
     ) in reportText
 
 
