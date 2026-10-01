@@ -911,6 +911,12 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         """Record cleanup work performed or still needed for the optional summary."""
         self._summaryCleanupTasks.append(task)
 
+    def _recordSummaryInvestigation(self, category: str, *details: str) -> None:
+        """Record one item that needs operator investigation after the scan."""
+        entry = (str(category), tuple(str(detail) for detail in details if detail))
+        if entry not in self._summaryInvestigations:
+            self._summaryInvestigations.append(entry)
+
     def _recordSummaryDuplicateTvShow(
         self, label: str, showNames: Iterable[str]
     ) -> None:
@@ -976,14 +982,21 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
                 if not groupedMovie and lines[-1] != "Renames:":
                     lines.append("")
 
-                label = "movie" if isMovie else "folder"
-                prefix = "  - " if groupedMovie else "- "
-                lines.extend(
-                    [
-                        f"{prefix}{label}: {sourcePath}",
-                        f"     to:   {destPath}",
-                    ]
-                )
+                if groupedMovie:
+                    lines.extend(
+                        [
+                            f"  movie:   {sourcePath}",
+                            f"  to:      {destPath}",
+                        ]
+                    )
+                else:
+                    label = "movie" if isMovie else "folder"
+                    lines.extend(
+                        [
+                            f"- {label}:  {sourcePath}",
+                            f"  to:      {destPath}",
+                        ]
+                    )
                 previousWasFolder = not isMovie
                 previousDestination = destination if not isMovie else None
         else:
@@ -1000,6 +1013,15 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
                 lines.extend(f"  - {showName}" for showName in showNames)
         else:
             lines.append("- none")
+
+        lines.extend(["", "Needs further investigation:"])
+        if self._summaryInvestigations:
+            for category, details in self._summaryInvestigations:
+                lines.append(f"- {category}")
+                lines.extend(f"  {detail}" for detail in details)
+        else:
+            lines.append("- none")
+
         lines.append("")
         previous = reportPath.read_text(encoding="utf-8") if reportPath.exists() else ""
         separator = "\n\n" if previous else ""
@@ -1459,15 +1481,17 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
 
     def _reportMovieIdentityConflict(self, movieInfo: dict) -> None:
         """Warn with the current identity, the proposal, and local evidence."""
-        logger.warning(
-            "%s",
-            movieIdentityReport(
-                movieInfo["identityConflict"],
-                evidence=movieIdentityEvidence(movieInfo),
-                imdbId=movieInfo.get("imdbId"),
-                tmdbId=movieInfo.get("tmdbId"),
-                runtime=movieInfo.get("runtime"),
-            ),
+        report = movieIdentityReport(
+            movieInfo["identityConflict"],
+            evidence=movieIdentityEvidence(movieInfo),
+            imdbId=movieInfo.get("imdbId"),
+            tmdbId=movieInfo.get("tmdbId"),
+            runtime=movieInfo.get("runtime"),
+        )
+        logger.warning("%s", report)
+        self._recordSummaryInvestigation(
+            "movie identity conflict",
+            *report.splitlines()[1:],
         )
 
     def _applyTvMcmHints(
