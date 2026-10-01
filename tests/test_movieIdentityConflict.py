@@ -8,6 +8,8 @@ from unittest.mock import patch
 import pytest
 
 from organiseMyVideo import VideoOrganizer
+from organiseMyVideo.showFolders import movieFilesystemSafeTitle
+
 from organiseMyVideo.movieIdentity import (
     MOVIE_IDENTITY_AGREE,
     MOVIE_IDENTITY_CONFLICT,
@@ -63,6 +65,29 @@ def _storedMovie(
     metadata = folder / "movie.xml"
     metadata.write_text(xml, encoding="utf-8")
     return folder, video, metadata
+
+
+def testFilesystemSafeMovieTitlePreservesValidPunctuationSpacing():
+    assert movieFilesystemSafeTitle("Battlestar Galactica - Blood & Chrome") == (
+        "Battlestar Galactica - Blood & Chrome"
+    )
+    assert movieFilesystemSafeTitle("Black '47") == "Black '47"
+    assert movieFilesystemSafeTitle("Highlander - The Source (Movie 2007)") == (
+        "Highlander - The Source (Movie 2007)"
+    )
+    assert movieFilesystemSafeTitle("Mr. & Mrs. Smith") == "Mr. & Mrs. Smith"
+    assert movieFilesystemSafeTitle("Planes, Trains & Automobiles") == (
+        "Planes, Trains & Automobiles"
+    )
+
+
+def testFilesystemSafeMovieTitleRemovesOnlyUnsupportedCharacters():
+    assert movieFilesystemSafeTitle("Why Him?") == "Why Him"
+    assert movieFilesystemSafeTitle("Casual Sex?") == "Casual Sex"
+    assert movieFilesystemSafeTitle("Thunderbolts*") == "Thunderbolts"
+    assert movieFilesystemSafeTitle("Nativity 3 - Dude, Where's My Donkey?!") == (
+        "Nativity 3 - Dude, Where's My Donkey!"
+    )
 
 
 def testMovieTitleIdentityIgnoresPunctuationArticlesAndCase():
