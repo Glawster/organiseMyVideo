@@ -70,6 +70,9 @@ must not be proposed.
   removed rather than passed through to `rename()`.
 - Apply the same filesystem-safe naming rule to both movie folders and movie
   files while preserving an unambiguous movie identity.
+- Valid punctuation and its existing spacing must be preserved. In particular,
+  sanitisation must not collapse spaces around `&`, apostrophes, or opening
+  parentheses merely because other unsupported characters are being removed.
 - Ignore known non-feature media such as `Sample.mkv` during canonical feature
   filename reconciliation; these files must not be renamed to the feature's
   canonical movie filename.
@@ -149,6 +152,10 @@ must not be proposed.
 15. Given a canonical movie file target that already exists, when the source is
    not recognised ancillary media, then OMV reports a possible duplicate or
    unresolved file collision and does not overwrite either file.
+16. Given valid titles such as `Blood & Chrome`, `Black '47`,
+   `The Source (Movie 2007)`, or `Mr. & Mrs. Smith`, when filesystem-safe naming
+   is applied, then the valid punctuation and surrounding spacing are preserved
+   unchanged.
 
 ## Dependencies and decisions
 
@@ -173,6 +180,8 @@ must not be proposed.
 - Tests proving punctuation-only and filesystem-safe normalisation still works.
 - Regression tests for unsupported filename characters in canonical movie
   metadata, proving both folder and filename destinations are safe before rename.
+- Regression tests proving valid punctuation spacing is preserved for `&`,
+  apostrophes, and parentheses while unsupported characters are removed.
 - Regression test proving `Sample.mkv` is ignored during canonical feature-file
   reconciliation.
 - Regression fixture for `Inside Out 2 (2024)_` plus `Inside Out 2 (2024)`,
@@ -214,6 +223,8 @@ must not be proposed.
   files can be mistaken for the feature, and same-identity folder/file targets
   can collide. REQ-035 now requires collision classification and safe merge/
   duplicate-candidate reporting rather than generic rename failures.
+- 2026-10-01: corrected sanitizer behaviour after dry-run testing showed valid
+  spacing around `&`, apostrophes, and `(` being removed.
 - 2026-10-01: completed the filesystem-safe naming and collision classification
   extension — canonical folder and file names drop unsupported characters
   before rename planning, `Sample.mkv` is not treated as the feature, and an
