@@ -2,7 +2,7 @@
 
 ## Status
 
-Completed
+In progress
 
 ## Outcome
 
@@ -65,6 +65,12 @@ must not be proposed.
   MCM metadata, provider IDs and runtime/duration where useful.
 - Preserve title-style capitalisation when the existing and resolved title
   differ only by case.
+- Produce a filesystem-safe canonical movie folder and filename before rename
+  planning. Metadata punctuation that is invalid on the target filesystem must
+  be mapped deterministically rather than passed through to `rename()`.
+- Apply filesystem-safe naming consistently to both movie folders and movie
+  files, including Windows/NTFS-invalid characters such as `:`, `|`, `?`, `*`,
+  `<`, `>`, and `"`, while preserving the movie identity.
 - Do not lower-case words in an already capitalised movie title solely to match
   metadata. In particular, `Anyone But You` must not be changed to
   `Anyone but You`.
@@ -108,6 +114,16 @@ must not be proposed.
 8. Given an identity conflict during a confirmed workflow, when the operation
    reaches that movie, then the conflicting rename remains blocked unless a
    separately defined explicit review/override workflow authorises it.
+9. Given canonical metadata containing filesystem-invalid punctuation, when a
+   movie rename is planned, then OMV derives the filesystem-safe folder and
+   filename before checking destinations or executing the rename.
+10. Given `Nativity 3 - Dude, Where's My Donkey?!`, `TAYLOR SWIFT | THE ERAS TOUR`,
+   or `Thunderbolts*`, when canonical naming is applied on an NTFS-compatible
+   library, then no invalid-character `EINVAL` rename failure occurs and the
+   mapped title remains recognisably the same movie identity.
+11. Given filesystem-safe punctuation mapping, when identity comparison is
+   performed, then that mapping must not make a substantive title or year
+   disagreement appear safe.
 
 ## Dependencies and decisions
 
@@ -130,6 +146,8 @@ must not be proposed.
   examples captured in this requirement.
 - Test proving `Anyone But You` is not changed to `Anyone but You`.
 - Tests proving punctuation-only and filesystem-safe normalisation still works.
+- Regression tests for `?`, `|`, `*`, `:`, `<`, `>`, and `"` in canonical movie
+  metadata, proving both folder and filename destinations are safe before rename.
 - Tests proving conflict output identifies the relevant evidence source.
 - Tests proving dry-run and confirmed workflows both block an unresolved
   identity-changing rename.
@@ -155,5 +173,9 @@ must not be proposed.
 
 - 2026-10-01: created — real-library testing exposed incorrect title and year
   rename proposals and an unwanted title-casing downgrade.
-- 2026-10-01: completed — a different title or release year is reported and
-  left in place on both dry-run and confirmed movie scan and move.
+- 2026-10-01: completed initial identity-conflict implementation — a different
+  title or release year is reported and left in place on both dry-run and
+  confirmed movie scan and move.
+- 2026-10-01: reopened/extended — real-library verification exposed canonical
+  metadata punctuation (`?`, `|`, `*`) reaching the filesystem unchanged;
+  filesystem-safe canonical naming is now part of REQ-035.
