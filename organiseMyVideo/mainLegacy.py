@@ -246,7 +246,13 @@ def buildParser(*, internalCamera: bool = False) -> argparse.ArgumentParser:
     mediaLocate = mediaSub.add_parser(
         "locate", parents=[_buildSharedFlags(True)], help="locate catalogued TV shows"
     )
-    mediaLocate.add_argument("--show", required=True)
+    mediaLocate.add_argument(
+        "--show",
+        help=(
+            "TV show to locate (case-insensitive exact or partial match); "
+            "omit to list every catalogued show"
+        ),
+    )
     mediaOrganise = mediaSub.add_parser(
         "organise", parents=[_buildSharedFlags(True)], help="organise staged media"
     )
@@ -872,15 +878,16 @@ Folder errors:   {cleanStats['errors']}
             dryRun=dryRun,
         )
         drawBox(_mergeSummary(movieStats, label="MOVIE"))
-        if not dryRun and (tvStats.groupsMerged or movieStats.groupsMerged):
-            logger.doing("refreshing media catalogue after merge")
-            movieDirs, videoDirs = organizer.scanStorageLocations()
-            catalogue.catalogueReplaceFromStorage(
-                movieDirs,
-                videoDirs,
-                replaceMovies=True,
-                replaceTv=True,
-            )
+        # Location state is application data. Reconcile it even when dry-run
+        # changed no media and even when no duplicate group was merged.
+        logger.doing("reconciling media catalogue")
+        movieDirs, videoDirs = organizer.scanStorageLocations()
+        catalogue.catalogueReplaceFromStorage(
+            movieDirs,
+            videoDirs,
+            replaceMovies=True,
+            replaceTv=True,
+        )
         return 1 if tvStats.errors or movieStats.errors or seasonStats.errors else 0
     else:
         logger.doing("running file organisation mode")
@@ -911,7 +918,8 @@ def main(argv: Optional[Sequence[str]] = None, *, internalCamera: bool = False) 
     if getattr(args, "command", None) == "media" and args.mediaAction == "locate":
         from .cli import _runMediaLocate
 
-        return _runMediaLocate(["--show", args.show])
+        show = getattr(args, "show", None)
+        return _runMediaLocate(["--show", show] if show else [])
     runStart()
     logger.doing("organiseMyVideo starting")
     line()

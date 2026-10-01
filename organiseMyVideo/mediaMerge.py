@@ -16,6 +16,7 @@ from .mediaCatalogue import (
     MovieCatalogueRecord,
     TvEpisodeCatalogueRecord,
     TvSeriesCatalogueRecord,
+    catalogueRecordMove,
 )
 
 logger = getLogger()
@@ -471,6 +472,7 @@ class TvLibraryMerger:
             if progress is not None:
                 progress.advance(1, source.name)
             self.filesystem.move(source, destination)
+            catalogueRecordMove(source, destination, dryRun=self.dryRun)
             self.stats.filesMoved += 1
             movedAny = True
             if episode is not None:
@@ -501,6 +503,7 @@ class TvLibraryMerger:
         if progress is not None:
             progress.advance(entryCount, source.name)
         self.filesystem.move(source, destination)
+        catalogueRecordMove(source, destination, dryRun=self.dryRun)
         self.stats.directoriesMoved += 1
 
     def _discardRegenerableSeriesMetadata(

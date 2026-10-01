@@ -83,3 +83,6 @@ were applied before final verification.
 - 2026-09-07: completed after final verification on the combined post-merge tree;
   pytest is green and diff check is clean, with only unrelated pre-existing lint
   findings remaining.
+- 2026-09-30: narrowed — REQ-034 carries provider IDs when organiseMyVideo
+  itself moves a catalogued folder or file. External renames still do not
+  inherit IDs.

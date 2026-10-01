@@ -171,3 +171,6 @@ source cleanup. Run `pytest` and `git diff --check`.
 - 2026-09-29: changed — established optional `--show <name>` TV-show scoping;
   merge targets one catalogued show when supplied and all applicable shows
   when omitted.
+- 2026-09-30: narrowed — REQ-034 reconciles catalogue location state after
+  every merge scan, including a dry-run and a run that merges nothing.
+  Confirmed moves retarget the affected catalogue rows.

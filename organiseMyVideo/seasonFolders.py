@@ -98,6 +98,7 @@ def _normaliseShowSeasonFolders(
         try:
             if not destination.exists():
                 filesystem.move(source, destination)
+                _recordCatalogueMove(source, destination, dryRun=dryRun)
                 stats.renamed += 1
                 continue
             if not destination.is_dir():
@@ -133,6 +134,7 @@ def _mergeDirectory(
         if source.is_dir():
             if not destination.exists():
                 filesystem.move(source, destination)
+                _recordCatalogueMove(source, destination, dryRun=dryRun)
                 movedAny = True
                 continue
             if not destination.is_dir():
@@ -163,9 +165,18 @@ def _mergeDirectory(
                 logger.warning("season merge conflict: %s -> %s", source, destination)
             continue
         filesystem.move(source, destination)
+        _recordCatalogueMove(source, destination, dryRun=dryRun)
         stats.filesMoved += 1
         movedAny = True
     return movedAny
+
+
+def _recordCatalogueMove(source: Path, destination: Path, *, dryRun: bool) -> None:
+    """Tell the catalogue about one season-folder move after it succeeds."""
+
+    from .mediaCatalogue import catalogueRecordMove
+
+    catalogueRecordMove(source, destination, dryRun=dryRun)
 
 
 def _filesIdentical(left: Path, right: Path) -> bool:

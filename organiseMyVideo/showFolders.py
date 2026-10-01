@@ -89,6 +89,7 @@ def normaliseTvShowFolderNames(
             try:
                 if not destination.exists():
                     operations.move(source, destination)
+                    _recordCatalogueMove(source, destination, dryRun=dryRun)
                     stats.renamed += 1
                     continue
                 if not destination.is_dir():
@@ -144,6 +145,7 @@ def normaliseMovieFolderNames(
             try:
                 if not destination.exists():
                     operations.move(source, destination)
+                    _recordCatalogueMove(source, destination, dryRun=dryRun)
                     stats.renamed += 1
                     continue
                 if not destination.is_dir():
@@ -163,3 +165,11 @@ def normaliseMovieFolderNames(
                 stats.errors += 1
                 logger.warning("could not normalise movie folder %s: %s", source, error)
     return stats
+
+
+def _recordCatalogueMove(source: Path, destination: Path, *, dryRun: bool) -> None:
+    """Tell the catalogue about one folder move after the filesystem operation."""
+
+    from .mediaCatalogue import catalogueRecordMove
+
+    catalogueRecordMove(source, destination, dryRun=dryRun)

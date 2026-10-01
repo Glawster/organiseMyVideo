@@ -19,6 +19,12 @@ from .terminalProgress import TerminalProgress
 logger = getLogger()
 
 MOVIE_FOLDER_NAME = re.compile(r"^(?P<title>.+?)\s*\((?P<year>\d{4})\)$")
+LOCATION_CURRENT = "current"
+LOCATION_STALE = "stale"
+LOCATION_UNVERIFIED = "unverified"
+LOCATION_STATES = (LOCATION_CURRENT, LOCATION_STALE, LOCATION_UNVERIFIED)
+# Stale rows stay in the database but are not part of the visible library.
+VISIBLE_LOCATION_STATES = (LOCATION_CURRENT, LOCATION_UNVERIFIED)
 
 
 @contextmanager
@@ -142,7 +148,8 @@ CREATE TABLE IF NOT EXISTS movieItem (
     xmlPath TEXT,
     imdbId TEXT,
     tmdbId TEXT,
-    scannedAt TEXT NOT NULL
+    scannedAt TEXT NOT NULL,
+    locationState TEXT NOT NULL DEFAULT 'unverified'
 );
 CREATE TABLE IF NOT EXISTS tvSeries (
     seriesId INTEGER PRIMARY KEY,
@@ -151,7 +158,8 @@ CREATE TABLE IF NOT EXISTS tvSeries (
     tvdbId TEXT,
     tmdbId TEXT,
     imdbId TEXT,
-    scannedAt TEXT NOT NULL
+    scannedAt TEXT NOT NULL,
+    locationState TEXT NOT NULL DEFAULT 'unverified'
 );
 CREATE TABLE IF NOT EXISTS tvEpisode (
     episodeId INTEGER PRIMARY KEY,
@@ -164,7 +172,15 @@ CREATE TABLE IF NOT EXISTS tvEpisode (
     tvdbEpisodeId TEXT,
     tmdbEpisodeId TEXT,
     imdbId TEXT,
-    scannedAt TEXT NOT NULL
+    scannedAt TEXT NOT NULL,
+    locationState TEXT NOT NULL DEFAULT 'unverified'
+);
+CREATE TABLE IF NOT EXISTS catalogueScanRoot (
+    rootPath TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    scannedAt TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    PRIMARY KEY (rootPath, kind)
 );
 """
 
@@ -180,6 +196,16 @@ class MovieCatalogueRecord:
     xmlPath: Optional[str]
     imdbId: Optional[str]
     tmdbId: Optional[str]
+    locationState: str = LOCATION_CURRENT
+
+
+@dataclass(frozen=True)
+class CatalogueRootCoverage:
+    """Whether one storage root was listed during a catalogue reconcile."""
+
+    rootPath: str
+    kind: str
+    outcome: str
 
 
 @dataclass(frozen=True)
@@ -226,6 +252,7 @@ class TvEpisodeCatalogueRecord:
     tvdbEpisodeId: Optional[str] = None
     tmdbEpisodeId: Optional[str] = None
     imdbId: Optional[str] = None
+    locationState: str = LOCATION_CURRENT
 
 
 @dataclass(frozen=True)
@@ -237,10 +264,11 @@ class TvSeriesCatalogueRecord:
     tvdbId: Optional[str] = None
     tmdbId: Optional[str] = None
     imdbId: Optional[str] = None
+    locationState: str = LOCATION_CURRENT
 
 
 class MediaCatalogue:
-    """Replace and read the SQLite media catalogue used by the UI."""
+    """Reconcile and read the SQLite media catalogue used by the UI."""
 
     def __init__(self, databasePath: Optional[Path] = None):
         """Open the catalogue at *databasePath* or the application default."""
@@ -289,18 +317,51 @@ class MediaCatalogue:
             for row in rows
         ]
 
-    def catalogueMoviesList(self) -> list[MovieCatalogueRecord]:
-        """Return stored movie rows ordered by title and year."""
+    def catalogueCoverageList(self) -> list[CatalogueRootCoverage]:
+        """Return the latest reconcile outcome recorded for each storage root."""
 
         if not self.databasePath.is_file():
             return []
         with self._databaseConnect() as connection:
             catalogueSchemaApply(connection)
             rows = connection.execute("""
-                SELECT title, year, folderPath, videoPath, xmlPath, imdbId, tmdbId
-                FROM movieItem
-                ORDER BY title, year
+                SELECT rootPath, kind, outcome
+                FROM catalogueScanRoot
+                ORDER BY kind, rootPath
                 """).fetchall()
+        return [
+            CatalogueRootCoverage(
+                rootPath=row["rootPath"],
+                kind=row["kind"],
+                outcome=row["outcome"],
+            )
+            for row in rows
+        ]
+
+    def catalogueMoviesList(
+        self, *, states: Optional[tuple[str, ...]] = None
+    ) -> list[MovieCatalogueRecord]:
+        """Return stored movie rows ordered by title and year.
+
+        The default list is the visible library: current and not-yet-verified
+        rows. Pass ``states`` to include stale locations.
+        """
+
+        if not self.databasePath.is_file():
+            return []
+        clause, parameters = _locationStateClause(states)
+        with self._databaseConnect() as connection:
+            catalogueSchemaApply(connection)
+            rows = connection.execute(
+                f"""
+                SELECT title, year, folderPath, videoPath, xmlPath, imdbId, tmdbId,
+                       locationState
+                FROM movieItem
+                WHERE {clause}
+                ORDER BY title, year
+                """,
+                parameters,
+            ).fetchall()
         return [
             MovieCatalogueRecord(
                 title=row["title"],
@@ -310,6 +371,7 @@ class MediaCatalogue:
                 xmlPath=row["xmlPath"],
                 imdbId=row["imdbId"],
                 tmdbId=row["tmdbId"],
+                locationState=row["locationState"],
             )
             for row in rows
         ]
@@ -322,28 +384,51 @@ class MediaCatalogue:
         replaceMovies: bool = True,
         replaceTv: bool = True,
     ) -> dict[str, int]:
-        """Replace movie and/or TV tables from current storage roots."""
+        """Reconcile movie and/or TV rows from the supplied storage roots.
+
+        A root that can be listed is authoritative for the folders directly
+        beneath it. Those folders become current, and catalogued folders under
+        it that are absent become stale. A missing or unlistable root is not
+        authoritative, so rows already stored beneath it are left unchanged.
+        A directory inside a TV show that cannot be listed does not make the
+        episodes beneath it stale.
+        """
 
         scannedAt = _timestampNow()
         identity = _catalogueIdentitySource()
-        movies = _moviesCollect(movieDirs, identity) if replaceMovies else None
+        movies = None
+        movieCoverage: list[CatalogueRootCoverage] = []
         episodes = None
         series = None
+        tvCoverage: list[CatalogueRootCoverage] = []
+        incompleteDirectories: list[Path] = []
+        if replaceMovies:
+            movies, movieCoverage = _moviesCollect(movieDirs, identity)
         if replaceTv:
-            episodes, series = _tvCollect(videoDirs, identity)
+            episodes, series, tvCoverage, incompleteDirectories = _tvCollect(
+                videoDirs, identity
+            )
         self.databasePath.parent.mkdir(parents=True, exist_ok=True)
         with self._databaseConnect() as connection:
             catalogueSchemaApply(connection)
-            # Lock the replacement snapshot before reading durable identities.
+            # Lock the snapshot before reading durable identities.
             connection.execute("BEGIN IMMEDIATE")
             if movies is not None:
                 logger.doing("updating movie catalogue")
-                _moviesReplace(connection, movies, scannedAt)
+                _moviesReconcile(connection, movies, scannedAt, movieCoverage)
                 logger.value("movie rows", len(movies))
             if episodes is not None and series is not None:
                 logger.doing("updating tv catalogue")
-                _tvReplace(connection, episodes, series, scannedAt)
+                _tvReconcile(
+                    connection,
+                    episodes,
+                    series,
+                    scannedAt,
+                    tvCoverage,
+                    incompleteDirectories,
+                )
                 logger.value("tv episode rows", len(episodes))
+            _coverageStore(connection, [*movieCoverage, *tvCoverage], scannedAt)
             connection.commit()
         counts = {
             "movies": 0 if movies is None else len(movies),
@@ -352,19 +437,26 @@ class MediaCatalogue:
         logger.done("media catalogue updated")
         return counts
 
-    def catalogueTvEpisodesList(self) -> list[TvEpisodeCatalogueRecord]:
+    def catalogueTvEpisodesList(
+        self, *, states: Optional[tuple[str, ...]] = None
+    ) -> list[TvEpisodeCatalogueRecord]:
         """Return stored TV episode rows ordered by show and episode."""
 
         if not self.databasePath.is_file():
             return []
+        clause, parameters = _locationStateClause(states)
         with self._databaseConnect() as connection:
             catalogueSchemaApply(connection)
-            rows = connection.execute("""
+            rows = connection.execute(
+                f"""
                 SELECT showName, seriesFolderPath, season, episode, episodeTitle,
-                       filePath, tvdbEpisodeId, tmdbEpisodeId, imdbId
+                       filePath, tvdbEpisodeId, tmdbEpisodeId, imdbId, locationState
                 FROM tvEpisode
+                WHERE {clause}
                 ORDER BY showName, season, episode, filePath
-                """).fetchall()
+                """,
+                parameters,
+            ).fetchall()
         return [
             TvEpisodeCatalogueRecord(
                 showName=row["showName"],
@@ -376,22 +468,30 @@ class MediaCatalogue:
                 tvdbEpisodeId=row["tvdbEpisodeId"],
                 tmdbEpisodeId=row["tmdbEpisodeId"],
                 imdbId=row["imdbId"],
+                locationState=row["locationState"],
             )
             for row in rows
         ]
 
-    def catalogueTvSeriesList(self) -> list[TvSeriesCatalogueRecord]:
+    def catalogueTvSeriesList(
+        self, *, states: Optional[tuple[str, ...]] = None
+    ) -> list[TvSeriesCatalogueRecord]:
         """Return stored TV series rows ordered by show name."""
 
         if not self.databasePath.is_file():
             return []
+        clause, parameters = _locationStateClause(states)
         with self._databaseConnect() as connection:
             catalogueSchemaApply(connection)
-            rows = connection.execute("""
-                SELECT showName, folderPath, tvdbId, tmdbId, imdbId
+            rows = connection.execute(
+                f"""
+                SELECT showName, folderPath, tvdbId, tmdbId, imdbId, locationState
                 FROM tvSeries
+                WHERE {clause}
                 ORDER BY showName, folderPath
-                """).fetchall()
+                """,
+                parameters,
+            ).fetchall()
         return [
             TvSeriesCatalogueRecord(
                 showName=row["showName"],
@@ -399,9 +499,32 @@ class MediaCatalogue:
                 tvdbId=row["tvdbId"],
                 tmdbId=row["tmdbId"],
                 imdbId=row["imdbId"],
+                locationState=row["locationState"],
             )
             for row in rows
         ]
+
+    def catalogueRetargetPath(self, source: Path, destination: Path) -> None:
+        """Point catalogue rows at a folder or file this application has moved.
+
+        The destination becomes current and receives provider IDs from the
+        source when the destination does not already have them. The source row
+        stays in the catalogue as stale. A catalogue that does not exist yet
+        is left uncreated.
+        """
+
+        if source == destination or _pathIsInside(destination, source):
+            return
+        if not self.databasePath.is_file():
+            return
+        scannedAt = _timestampNow()
+        with self._databaseConnect() as connection:
+            catalogueSchemaApply(connection)
+            connection.execute("BEGIN IMMEDIATE")
+            _moviePathRetarget(connection, source, destination, scannedAt)
+            _seriesPathRetarget(connection, source, destination, scannedAt)
+            _episodePathsRetarget(connection, source, destination, scannedAt)
+            connection.commit()
 
     def _databaseConnect(self) -> sqlite3.Connection:
         """Open the catalogue with camelCase row access."""
@@ -436,6 +559,14 @@ def catalogueSchemaApply(connection: sqlite3.Connection) -> None:
     _catalogueColumnEnsure(connection, "tvEpisode", "tvdbEpisodeId", "TEXT")
     _catalogueColumnEnsure(connection, "tvEpisode", "tmdbEpisodeId", "TEXT")
     _catalogueColumnEnsure(connection, "tvEpisode", "imdbId", "TEXT")
+    # Existing libraries have not been checked against a root listing yet.
+    for table in ("movieItem", "tvSeries", "tvEpisode"):
+        _catalogueColumnEnsure(
+            connection,
+            table,
+            "locationState",
+            "TEXT NOT NULL DEFAULT 'unverified'",
+        )
 
 
 def _catalogueColumnEnsure(
@@ -451,20 +582,18 @@ def _catalogueColumnEnsure(
 ## movies
 
 
-def _moviesCollect(movieDirs: list[Path], identity) -> list[MovieCatalogueRecord]:
+def _moviesCollect(
+    movieDirs: list[Path], identity
+) -> tuple[list[MovieCatalogueRecord], list[CatalogueRootCoverage]]:
     """Walk movie storage roots and record known movie metadata."""
 
     folders: list[Path] = []
+    coverage: list[CatalogueRootCoverage] = []
     for root in movieDirs:
-        root = Path(root)
-        if not root.is_dir():
-            continue
-        try:
-            folders.extend(
-                folder for folder in sorted(root.iterdir()) if folder.is_dir()
-            )
-        except OSError:
-            continue
+        children, rootCoverage = _storageRootChildren(Path(root), "movie")
+        coverage.append(rootCoverage)
+        if children is not None:
+            folders.extend(children)
 
     progress = TerminalProgress(len(folders), "Cataloguing movie library")
     records: list[MovieCatalogueRecord] = []
@@ -486,7 +615,7 @@ def _moviesCollect(movieDirs: list[Path], identity) -> list[MovieCatalogueRecord
     records.sort(
         key=lambda item: (item.title.lower(), item.year or "", item.folderPath)
     )
-    return records
+    return records, coverage
 
 
 def _movieFromFolder(folder: Path, identity) -> Optional[MovieCatalogueRecord]:
@@ -534,22 +663,32 @@ def _movieFromFolder(folder: Path, identity) -> Optional[MovieCatalogueRecord]:
     )
 
 
-def _moviesReplace(
+def _moviesReconcile(
     connection: sqlite3.Connection,
     movies: list[MovieCatalogueRecord],
     scannedAt: str,
+    coverage: list[CatalogueRootCoverage],
 ) -> None:
-    """Replace all movie rows with the current scan."""
+    """Upsert movies from authoritative roots and mark absent ones stale."""
 
     movies = _providerIdsPreserve(
         connection, "movieItem", "folderPath", movies, ("imdbId", "tmdbId")
     )
-    connection.execute("DELETE FROM movieItem")
     connection.executemany(
         """
         INSERT INTO movieItem (
-            title, year, folderPath, videoPath, xmlPath, imdbId, tmdbId, scannedAt
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            title, year, folderPath, videoPath, xmlPath, imdbId, tmdbId, scannedAt,
+            locationState
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(folderPath) DO UPDATE SET
+            title = excluded.title,
+            year = excluded.year,
+            videoPath = excluded.videoPath,
+            xmlPath = excluded.xmlPath,
+            imdbId = excluded.imdbId,
+            tmdbId = excluded.tmdbId,
+            scannedAt = excluded.scannedAt,
+            locationState = excluded.locationState
         """,
         [
             (
@@ -561,34 +700,52 @@ def _moviesReplace(
                 item.imdbId,
                 item.tmdbId,
                 scannedAt,
+                LOCATION_CURRENT,
             )
             for item in movies
         ],
     )
+    staleCount = _markAbsentStale(
+        connection,
+        "movieItem",
+        "folderPath",
+        {item.folderPath for item in movies},
+        _authoritativeRoots(coverage),
+        scannedAt,
+    )
+    if staleCount:
+        logger.value("stale movie locations", staleCount)
 
 
 ## tv
 
 
-def _tvCollect(
-    videoDirs: list[Path], identity
-) -> tuple[list[TvEpisodeCatalogueRecord], list[TvSeriesCatalogueRecord]]:
-    """Walk TV storage roots and record known series and episode metadata."""
+def _tvCollect(videoDirs: list[Path], identity) -> tuple[
+    list[TvEpisodeCatalogueRecord],
+    list[TvSeriesCatalogueRecord],
+    list[CatalogueRootCoverage],
+    list[Path],
+]:
+    """Walk TV storage roots and record known series and episode metadata.
+
+    The fourth value lists directories whose contents could not be read.
+    ``os.walk`` hides those errors unless ``onerror`` records them, and an
+    unread directory is not evidence that the episodes inside it are gone.
+    """
 
     shows: list[Path] = []
+    coverage: list[CatalogueRootCoverage] = []
     for root in videoDirs:
-        root = Path(root)
-        if not root.is_dir():
-            continue
-        try:
-            shows.extend(path for path in sorted(root.iterdir()) if path.is_dir())
-        except OSError:
-            continue
+        children, rootCoverage = _storageRootChildren(Path(root), "tv")
+        coverage.append(rootCoverage)
+        if children is not None:
+            shows.extend(children)
 
     progress = TerminalProgress(len(shows), "Cataloguing TV library")
     episodes: list[TvEpisodeCatalogueRecord] = []
     seriesByFolder: dict[str, TvSeriesCatalogueRecord] = {}
     seen: set[str] = set()
+    incompleteDirectories: list[Path] = []
     diagnostics = []
     try:
         with _bufferCatalogueDiagnostics() as diagnostics:
@@ -596,7 +753,20 @@ def _tvCollect(
                 progress.render(completed, showDir.name)
                 folderPath = str(showDir)
                 seriesByFolder[folderPath] = _tvSeriesFromFolder(showDir, identity)
-                for dirPath, dirNames, fileNames in os.walk(showDir):
+
+                def _onShowWalkError(error: OSError, showDir: Path = showDir) -> None:
+                    filename = error.filename
+                    incompleteDirectories.append(
+                        Path(filename) if filename else showDir
+                    )
+                    logger.value(
+                        "show subtree skipped",
+                        f"{filename or showDir} ({error.strerror or error.__class__.__name__})",
+                    )
+
+                for dirPath, dirNames, fileNames in os.walk(
+                    showDir, onerror=_onShowWalkError
+                ):
                     dirNames[:] = [
                         name for name in dirNames if not name.startswith(".")
                     ]
@@ -627,7 +797,7 @@ def _tvCollect(
         seriesByFolder.values(),
         key=lambda item: (item.showName.lower(), item.folderPath),
     )
-    return episodes, series
+    return episodes, series, coverage, incompleteDirectories
 
 
 def _tvEpisodeFromFile(
@@ -691,13 +861,15 @@ def _tvEpisodeFromFile(
     )
 
 
-def _tvReplace(
+def _tvReconcile(
     connection: sqlite3.Connection,
     episodes: list[TvEpisodeCatalogueRecord],
     series: list[TvSeriesCatalogueRecord],
     scannedAt: str,
+    coverage: list[CatalogueRootCoverage],
+    incompleteDirectories: list[Path],
 ) -> None:
-    """Replace series and episode rows from the current scan."""
+    """Upsert TV rows from authoritative roots and mark absent ones stale."""
 
     series = _providerIdsPreserve(
         connection, "tvSeries", "folderPath", series, ("tvdbId", "tmdbId", "imdbId")
@@ -709,49 +881,31 @@ def _tvReplace(
         episodes,
         ("tvdbEpisodeId", "tmdbEpisodeId", "imdbId"),
     )
-    connection.execute("DELETE FROM tvEpisode")
-    connection.execute("DELETE FROM tvSeries")
-    connection.executemany(
-        """
-        INSERT INTO tvSeries (
-            showName, folderPath, tvdbId, tmdbId, imdbId, scannedAt
-        ) VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        [
-            (
-                item.showName,
-                item.folderPath,
-                item.tvdbId,
-                item.tmdbId,
-                item.imdbId,
-                scannedAt,
-            )
-            for item in series
-        ],
+    roots = _authoritativeRoots(coverage)
+    _seriesUpsert(connection, series, scannedAt)
+    _episodeUpsert(connection, episodes, scannedAt)
+    staleSeries = _markAbsentStale(
+        connection,
+        "tvSeries",
+        "folderPath",
+        {item.folderPath for item in series},
+        roots,
+        scannedAt,
     )
-    connection.executemany(
-        """
-        INSERT INTO tvEpisode (
-            seriesFolderPath, showName, season, episode, episodeTitle, filePath,
-            tvdbEpisodeId, tmdbEpisodeId, imdbId, scannedAt
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        [
-            (
-                item.seriesFolderPath,
-                item.showName,
-                item.season,
-                item.episode,
-                item.episodeTitle,
-                item.filePath,
-                item.tvdbEpisodeId,
-                item.tmdbEpisodeId,
-                item.imdbId,
-                scannedAt,
-            )
-            for item in episodes
-        ],
+    staleEpisodes = _markAbsentStale(
+        connection,
+        "tvEpisode",
+        "filePath",
+        {item.filePath for item in episodes},
+        roots,
+        scannedAt,
+        extraPathColumn="seriesFolderPath",
+        withheldRoots=incompleteDirectories,
     )
+    if staleSeries:
+        logger.value("stale tv locations", staleSeries)
+    if staleEpisodes:
+        logger.value("stale tv episodes", staleEpisodes)
 
 
 def _tvSeriesFromFolder(showDir: Path, identity) -> TvSeriesCatalogueRecord:
@@ -851,8 +1005,8 @@ def _providerIdsPreserve(
     fields: tuple[str, ...],
 ) -> list:
     """Carry durable IDs forward by stable path, never stale descriptions."""
-    # Read before deletion in the replacement transaction. SQL identifiers are
-    # internal constants; filesystem values never enter SQL text.
+    # Read before writing the snapshot. SQL identifiers are internal constants;
+    # filesystem values never enter SQL text.
     existing = {
         row[localKey]: dict(row)
         for row in connection.execute(
@@ -870,6 +1024,448 @@ def _providerIdsPreserve(
         )
         for item in records
     ]
+
+
+## locations
+
+
+def catalogueRecordMove(source: Path, destination: Path, *, dryRun: bool) -> None:
+    """Remember a confirmed media move. Dry-run leaves the catalogue unchanged."""
+
+    if dryRun:
+        return
+    MediaCatalogue().catalogueRetargetPath(source, destination)
+
+
+def _authoritativeRoots(coverage: list[CatalogueRootCoverage]) -> list[Path]:
+    """Return roots whose directories were listed successfully."""
+
+    return [Path(item.rootPath) for item in coverage if item.outcome == "authoritative"]
+
+
+def _coverageStore(
+    connection: sqlite3.Connection,
+    coverage: list[CatalogueRootCoverage],
+    scannedAt: str,
+) -> None:
+    """Record the latest outcome for each reconciled root."""
+
+    connection.executemany(
+        """
+        INSERT INTO catalogueScanRoot (rootPath, kind, scannedAt, outcome)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(rootPath, kind) DO UPDATE SET
+            scannedAt = excluded.scannedAt,
+            outcome = excluded.outcome
+        """,
+        [(item.rootPath, item.kind, scannedAt, item.outcome) for item in coverage],
+    )
+
+
+def _episodePathsRetarget(
+    connection: sqlite3.Connection,
+    source: Path,
+    destination: Path,
+    scannedAt: str,
+) -> None:
+    """Copy episode identity onto paths moved with *source* and mark the old rows stale."""
+
+    rows = connection.execute("""
+        SELECT seriesFolderPath, showName, season, episode, episodeTitle, filePath,
+               tvdbEpisodeId, tmdbEpisodeId, imdbId
+        FROM tvEpisode
+        """).fetchall()
+    for row in rows:
+        newFile = _pathWithNewPrefix(row["filePath"], source, destination)
+        if newFile is None or newFile == row["filePath"]:
+            continue
+        newSeries = _pathWithNewPrefix(row["seriesFolderPath"], source, destination)
+        if newSeries is None:
+            newSeries = row["seriesFolderPath"]
+        containing = _seriesFolderContaining(connection, newFile)
+        if containing is not None:
+            newSeries = containing
+        _episodeIdentityMove(connection, row, newFile, newSeries, scannedAt)
+
+
+def _episodeIdentityMove(
+    connection: sqlite3.Connection,
+    row: sqlite3.Row,
+    newFile: str,
+    newSeries: str,
+    scannedAt: str,
+) -> None:
+    """Insert the moved episode as current and retain the old path as stale."""
+
+    connection.execute(
+        """
+        INSERT INTO tvEpisode (
+            seriesFolderPath, showName, season, episode, episodeTitle, filePath,
+            tvdbEpisodeId, tmdbEpisodeId, imdbId, scannedAt, locationState
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(filePath) DO UPDATE SET
+            tvdbEpisodeId = COALESCE(tvEpisode.tvdbEpisodeId, excluded.tvdbEpisodeId),
+            tmdbEpisodeId = COALESCE(tvEpisode.tmdbEpisodeId, excluded.tmdbEpisodeId),
+            imdbId = COALESCE(tvEpisode.imdbId, excluded.imdbId),
+            scannedAt = excluded.scannedAt,
+            locationState = excluded.locationState
+        """,
+        (
+            newSeries,
+            row["showName"],
+            row["season"],
+            row["episode"],
+            row["episodeTitle"],
+            newFile,
+            row["tvdbEpisodeId"],
+            row["tmdbEpisodeId"],
+            row["imdbId"],
+            scannedAt,
+            LOCATION_CURRENT,
+        ),
+    )
+    connection.execute(
+        """
+        UPDATE tvEpisode
+        SET locationState = ?, scannedAt = ?
+        WHERE filePath = ?
+        """,
+        (LOCATION_STALE, scannedAt, row["filePath"]),
+    )
+
+
+def _episodeUpsert(
+    connection: sqlite3.Connection,
+    episodes: list[TvEpisodeCatalogueRecord],
+    scannedAt: str,
+) -> None:
+    """Insert or refresh episode rows found by the current scan."""
+
+    connection.executemany(
+        """
+        INSERT INTO tvEpisode (
+            seriesFolderPath, showName, season, episode, episodeTitle, filePath,
+            tvdbEpisodeId, tmdbEpisodeId, imdbId, scannedAt, locationState
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(filePath) DO UPDATE SET
+            seriesFolderPath = excluded.seriesFolderPath,
+            showName = excluded.showName,
+            season = excluded.season,
+            episode = excluded.episode,
+            episodeTitle = excluded.episodeTitle,
+            tvdbEpisodeId = excluded.tvdbEpisodeId,
+            tmdbEpisodeId = excluded.tmdbEpisodeId,
+            imdbId = excluded.imdbId,
+            scannedAt = excluded.scannedAt,
+            locationState = excluded.locationState
+        """,
+        [
+            (
+                item.seriesFolderPath,
+                item.showName,
+                item.season,
+                item.episode,
+                item.episodeTitle,
+                item.filePath,
+                item.tvdbEpisodeId,
+                item.tmdbEpisodeId,
+                item.imdbId,
+                scannedAt,
+                LOCATION_CURRENT,
+            )
+            for item in episodes
+        ],
+    )
+
+
+def _locationStateClause(
+    states: Optional[tuple[str, ...]],
+) -> tuple[str, tuple[str, ...]]:
+    """Return a parameterised filter for catalogue location states."""
+
+    selected = VISIBLE_LOCATION_STATES if states is None else states
+    if any(state not in LOCATION_STATES for state in selected):
+        raise ValueError(f"unknown location state: {selected}")
+    if not selected:
+        return "1 = 0", ()
+    marks = ", ".join("?" for _ in selected)
+    return f"locationState IN ({marks})", tuple(selected)
+
+
+def _markAbsentStale(
+    connection: sqlite3.Connection,
+    table: str,
+    pathColumn: str,
+    freshPaths: set[str],
+    roots: list[Path],
+    scannedAt: str,
+    *,
+    extraPathColumn: Optional[str] = None,
+    withheldRoots: Optional[list[Path]] = None,
+) -> int:
+    """Mark rows under listed roots stale when the scan did not see them.
+
+    *withheldRoots* are directories the scan could not read. Rows inside them
+    stay as they were, because their absence was not observed.
+    """
+
+    if not roots:
+        return 0
+    protected = withheldRoots or []
+    columns = (
+        pathColumn if extraPathColumn is None else f"{pathColumn}, {extraPathColumn}"
+    )
+    rows = connection.execute(f"SELECT {columns} FROM {table}").fetchall()
+    stalePaths = []
+    for row in rows:
+        path = row[pathColumn]
+        if path in freshPaths:
+            continue
+        if _pathWithinRoots(path, protected):
+            continue
+        if extraPathColumn is not None and _pathWithinRoots(
+            row[extraPathColumn], protected
+        ):
+            continue
+        governed = _pathWithinRoots(path, roots)
+        if not governed and extraPathColumn is not None:
+            governed = _pathWithinRoots(row[extraPathColumn], roots)
+        if governed:
+            stalePaths.append(path)
+    connection.executemany(
+        f"""
+        UPDATE {table}
+        SET locationState = ?, scannedAt = ?
+        WHERE {pathColumn} = ?
+        """,
+        [(LOCATION_STALE, scannedAt, path) for path in stalePaths],
+    )
+    return len(stalePaths)
+
+
+def _moviePathRetarget(
+    connection: sqlite3.Connection,
+    source: Path,
+    destination: Path,
+    scannedAt: str,
+) -> None:
+    """Carry a moved movie folder's identity onto its new path."""
+
+    row = connection.execute(
+        """
+        SELECT title, year, folderPath, videoPath, xmlPath, imdbId, tmdbId
+        FROM movieItem
+        WHERE folderPath = ?
+        """,
+        (str(source),),
+    ).fetchone()
+    if row is None:
+        return
+    newFolder = _pathWithNewPrefix(row["folderPath"], source, destination)
+    if newFolder is None:
+        return
+    connection.execute(
+        """
+        INSERT INTO movieItem (
+            title, year, folderPath, videoPath, xmlPath, imdbId, tmdbId, scannedAt,
+            locationState
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(folderPath) DO UPDATE SET
+            imdbId = COALESCE(movieItem.imdbId, excluded.imdbId),
+            tmdbId = COALESCE(movieItem.tmdbId, excluded.tmdbId),
+            scannedAt = excluded.scannedAt,
+            locationState = excluded.locationState
+        """,
+        (
+            row["title"],
+            row["year"],
+            newFolder,
+            (
+                _pathWithNewPrefix(row["videoPath"], source, destination)
+                if row["videoPath"]
+                else None
+            ),
+            (
+                _pathWithNewPrefix(row["xmlPath"], source, destination)
+                if row["xmlPath"]
+                else None
+            ),
+            row["imdbId"],
+            row["tmdbId"],
+            scannedAt,
+            LOCATION_CURRENT,
+        ),
+    )
+    connection.execute(
+        """
+        UPDATE movieItem
+        SET locationState = ?, scannedAt = ?
+        WHERE folderPath = ?
+        """,
+        (LOCATION_STALE, scannedAt, row["folderPath"]),
+    )
+
+
+def _pathIsInside(path: Path, parent: Path) -> bool:
+    """Return True when *path* is strictly beneath *parent*."""
+
+    try:
+        path.relative_to(parent)
+    except ValueError:
+        return False
+    return path != parent
+
+
+def _pathWithNewPrefix(
+    path: Optional[str], source: Path, destination: Path
+) -> Optional[str]:
+    """Return *path* rewritten under *destination* when it lives under *source*."""
+
+    if path is None:
+        return None
+    try:
+        relative = Path(path).relative_to(source)
+    except ValueError:
+        return None
+    return str(destination / relative)
+
+
+def _pathWithinRoots(path: Optional[str], roots: list[Path]) -> bool:
+    """Return True when *path* is a root or one of its descendants."""
+
+    if path is None:
+        return False
+    candidate = Path(path)
+    for root in roots:
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            continue
+        return True
+    return False
+
+
+def _seriesFolderContaining(connection: sqlite3.Connection, path: str) -> Optional[str]:
+    """Return the longest catalogued show folder that contains *path*."""
+
+    matches = []
+    for row in connection.execute("SELECT folderPath FROM tvSeries"):
+        folder = row["folderPath"]
+        try:
+            Path(path).relative_to(folder)
+        except ValueError:
+            continue
+        matches.append(folder)
+    if not matches:
+        return None
+    return max(matches, key=len)
+
+
+def _seriesPathRetarget(
+    connection: sqlite3.Connection,
+    source: Path,
+    destination: Path,
+    scannedAt: str,
+) -> None:
+    """Carry a moved show folder's identity onto its new path."""
+
+    row = connection.execute(
+        """
+        SELECT showName, folderPath, tvdbId, tmdbId, imdbId
+        FROM tvSeries
+        WHERE folderPath = ?
+        """,
+        (str(source),),
+    ).fetchone()
+    if row is None:
+        return
+    newFolder = _pathWithNewPrefix(row["folderPath"], source, destination)
+    if newFolder is None:
+        return
+    connection.execute(
+        """
+        INSERT INTO tvSeries (
+            showName, folderPath, tvdbId, tmdbId, imdbId, scannedAt, locationState
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(folderPath) DO UPDATE SET
+            tvdbId = COALESCE(tvSeries.tvdbId, excluded.tvdbId),
+            tmdbId = COALESCE(tvSeries.tmdbId, excluded.tmdbId),
+            imdbId = COALESCE(tvSeries.imdbId, excluded.imdbId),
+            scannedAt = excluded.scannedAt,
+            locationState = excluded.locationState
+        """,
+        (
+            row["showName"],
+            newFolder,
+            row["tvdbId"],
+            row["tmdbId"],
+            row["imdbId"],
+            scannedAt,
+            LOCATION_CURRENT,
+        ),
+    )
+    connection.execute(
+        """
+        UPDATE tvSeries
+        SET locationState = ?, scannedAt = ?
+        WHERE folderPath = ?
+        """,
+        (LOCATION_STALE, scannedAt, row["folderPath"]),
+    )
+
+
+def _seriesUpsert(
+    connection: sqlite3.Connection,
+    series: list[TvSeriesCatalogueRecord],
+    scannedAt: str,
+) -> None:
+    """Insert or refresh series rows found by the current scan."""
+
+    connection.executemany(
+        """
+        INSERT INTO tvSeries (
+            showName, folderPath, tvdbId, tmdbId, imdbId, scannedAt, locationState
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(folderPath) DO UPDATE SET
+            showName = excluded.showName,
+            tvdbId = excluded.tvdbId,
+            tmdbId = excluded.tmdbId,
+            imdbId = excluded.imdbId,
+            scannedAt = excluded.scannedAt,
+            locationState = excluded.locationState
+        """,
+        [
+            (
+                item.showName,
+                item.folderPath,
+                item.tvdbId,
+                item.tmdbId,
+                item.imdbId,
+                scannedAt,
+                LOCATION_CURRENT,
+            )
+            for item in series
+        ],
+    )
+
+
+def _storageRootChildren(
+    root: Path, kind: str
+) -> tuple[Optional[list[Path]], CatalogueRootCoverage]:
+    """List child directories, or record why this root is not authoritative."""
+
+    coverage = CatalogueRootCoverage(str(root), kind, "authoritative")
+    if not root.is_dir():
+        coverage = CatalogueRootCoverage(str(root), kind, "unavailable")
+        logger.value("storage root skipped", f"{root} ({coverage.outcome})")
+        return None, coverage
+    try:
+        children = [path for path in sorted(root.iterdir()) if path.is_dir()]
+    except OSError:
+        coverage = CatalogueRootCoverage(str(root), kind, "error")
+        logger.value("storage root skipped", f"{root} ({coverage.outcome})")
+        return None, coverage
+    return children, coverage
 
 
 ## utilities

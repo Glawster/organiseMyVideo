@@ -99,7 +99,20 @@ without IMDb/TMDB (movies) or TVDB/TMDB/IMDb (TV) are not merged. TV show
 folders that begin with `The` are stored as `Name, The`; movie folders
 as `Name, The (Year)`. Titles and media filenames keep `The Name`. Season
 folders are rewritten to unpadded `Season N`. Organise, merge, and clean
-all run that folder cleanup.
+all run that folder cleanup. Merge discovers duplicates from the current
+filesystem, then reconciles catalogue location state for every storage root
+it could list. That reconcile runs on a dry-run as well as after a confirmed
+merge, including when no duplicate group was found. A confirmed move also
+points the moved catalogue row at the new path and keeps the old path as
+`stale`.
+
+`media locate` reads catalogued TV show folders. `--show NAME` selects a
+case-insensitive exact or partial name. Omitting `--show` lists every
+catalogued show. Each folder is printed as `current`, `stale`, or
+`unverified`. `current` means an authoritative scan saw the folder and it is
+still present. `stale` means that scan's root was listed and the folder was
+absent. `unverified` means the catalogue has not confirmed the path, or the
+folder is missing and its root was not listed. Locate does not delete rows.
 
 `media scan` repairs movie naming/metadata and performs lightweight TV show-level
 integrity checks. Use `media scan --show NAME` for a focused TV repair without walking

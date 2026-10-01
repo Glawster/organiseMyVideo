@@ -57,6 +57,10 @@ rewriting the organiser in the same increment.
 - REQ-002 must query SQLite rather than implementing a second library index.
 - Catalogue refresh records known MCM and metadata-library identity; it
   must not re-identify titles by parsing filenames independently.
+- REQ-034 narrows movie and TV location updates. An authoritative listing of a
+  root marks paths that are no longer present as stale and keeps them. A root
+  that was not listed is left unchanged. The original "replace the table"
+  wording does not delete rows for an unmounted disk.
 - Dash cam, GoPro, and DJI card snapshots share `cardInventory`.
 - Tests inject the catalogue path and must not write the real user-state file.
 
@@ -66,3 +70,4 @@ rewriting the organiser in the same increment.
 - [REQ-009: Camera card inventory](../requirements/features/009-cameraCardInventory.md)
 - [REQ-010: SQLite media catalogue](../requirements/features/010-sqliteMediaCatalogue.md)
 - [REQ-011: Dash cam card support](../requirements/features/011-dashcamCardSupport.md)
+- [REQ-034: Catalogue location reconciliation](../requirements/features/034-catalogueLocationReconciliation.md)

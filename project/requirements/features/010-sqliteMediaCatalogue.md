@@ -118,3 +118,6 @@ The catalogue path and table split are recorded in
 - 2026-09-29: changed — catalogue-facing TV operations use optional
   `--show <name>` consistently; omission means all applicable shows, including
   `media locate`.
+- 2026-09-30: narrowed — REQ-034 supersedes unconditional deletion of unseen
+  movie and TV rows. Absence is stale only for an authoritatively listed root.
+  `media locate` reports that location state.

@@ -77,7 +77,7 @@ def testCatalogueKeepsNaturalTitleWhenFolderHasTrailingThe(tmp_path: Path):
     assert episodes[0].showName == "The Boys"
 
 
-def testSecondScanDropsRemovedMovieFolders(tmp_path: Path):
+def testSecondScanMarksRemovedMovieFoldersStale(tmp_path: Path):
     movieRoot, tvRoot = _libraryTree(tmp_path)
     catalogue = MediaCatalogue(databasePath=tmp_path / "mediaCatalogue.sqlite")
     catalogue.catalogueReplaceFromStorage([movieRoot], [tvRoot])
@@ -89,6 +89,9 @@ def testSecondScanDropsRemovedMovieFolders(tmp_path: Path):
     catalogue.catalogueReplaceFromStorage([movieRoot], [tvRoot])
 
     assert catalogue.catalogueMoviesList() == []
+    stale = catalogue.catalogueMoviesList(states=("stale",))
+    assert [item.folderPath for item in stale] == [str(removed)]
+    assert stale[0].locationState == "stale"
     assert len(catalogue.catalogueTvEpisodesList()) == 1
 
 
@@ -305,8 +308,7 @@ def testCatalogueFallsBackToSeasonFolderWhenFilenameHasNoNumbers(tmp_path: Path)
 def testCatalogueAddsTvProviderIdColumnsToOlderFiles(tmp_path: Path):
     databasePath = tmp_path / "mediaCatalogue.sqlite"
     connection = sqlite3.connect(databasePath)
-    connection.executescript(
-        """
+    connection.executescript("""
         CREATE TABLE tvSeries (
             seriesId INTEGER PRIMARY KEY,
             showName TEXT NOT NULL,
@@ -323,8 +325,7 @@ def testCatalogueAddsTvProviderIdColumnsToOlderFiles(tmp_path: Path):
             filePath TEXT NOT NULL UNIQUE,
             scannedAt TEXT NOT NULL
         );
-        """
-    )
+        """)
     connection.close()
     from organiseMyVideo.mediaCatalogue import catalogueSchemaApply
 

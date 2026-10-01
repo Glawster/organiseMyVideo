@@ -44,5 +44,5 @@ def scanMovieLibrary(
         if movieDirs is None
         else [Path(path) for path in movieDirs]
     )
-    movies = _moviesCollect(roots, _catalogueIdentitySource())
+    movies, _coverage = _moviesCollect(roots, _catalogueIdentitySource())
     return MovieLibrarySnapshot(movies=tuple(movies))

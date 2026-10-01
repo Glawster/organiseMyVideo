@@ -88,6 +88,14 @@ python -m organiseMyVideo --debug
 
 By default the script runs in **dry-run** mode. Add `--confirm` to actually make changes.
 
+```bash
+organiseMyVideo media locate
+organiseMyVideo media locate --show Lanterns
+```
+
+`media locate` prints catalogued TV folders as `current`, `stale`, or
+`unverified`. Omit `--show` to list every catalogued show.
+
 Use `organiseMyVideo media scan` for the normal existing-library scan. It scans
 both movie and TV libraries together; there is no movie/video selector on this
 canonical command. The normal source comes from the `source` setting in

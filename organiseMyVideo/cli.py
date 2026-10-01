@@ -7,7 +7,7 @@ import sys
 from typing import Optional, Sequence
 
 from . import __main__ as legacyCli
-from .mediaLocate import locateTvShow
+from .mediaLocate import MediaLocation, locateTvShow
 
 
 def _locateParser() -> argparse.ArgumentParser:
@@ -15,28 +15,38 @@ def _locateParser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog="organiseMyVideo media locate",
-        description="Locate canonical media folders recorded in the media catalogue",
+        description="Locate TV show folders recorded in the media catalogue",
     )
     parser.add_argument(
         "--show",
-        required=True,
-        help="TV show name to locate (case-insensitive exact or partial match)",
+        help=(
+            "TV show to locate (case-insensitive exact or partial match); "
+            "omit to list every catalogued show"
+        ),
     )
     return parser
+
+
+def _printLocatedShows(matches: list[MediaLocation]) -> None:
+    """Print each show once, with the freshness of every stored folder."""
+
+    previous = None
+    for match in matches:
+        if match.name != previous:
+            print(match.name)
+            previous = match.name
+        print(f"  {match.folderPath}    {match.state}")
 
 
 def _runMediaLocate(argv: Sequence[str]) -> int:
     """Run a catalogue-only TV show location query."""
 
-    args = _locateParser().parse_args(argv)
+    args = _locateParser().parse_args(list(argv))
     matches = locateTvShow(args.show)
-    if not matches:
+    if args.show and not matches:
         print(f"TV show not found in media catalogue: {args.show}", file=sys.stderr)
         return 1
-
-    for match in matches:
-        print(match.name)
-        print(f"  {match.folderPath}")
+    _printLocatedShows(matches)
     return 0
 
 
