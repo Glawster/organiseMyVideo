@@ -1169,6 +1169,20 @@ class VideoRescanMixin:
             lines.append(f"source bytes: {sourceFile.stat().st_size}")
             lines.append(f"target bytes: {destinationPath.stat().st_size}")
         logger.warning("%s", "\n".join(lines))
+        if not ancillary:
+            self._recordSummaryInvestigation(
+                classification,
+                f"source: {sourceFile}",
+                f"target: {destinationPath}",
+                *(
+                    [
+                        f"source bytes: {sourceFile.stat().st_size}",
+                        f"target bytes: {destinationPath.stat().st_size}",
+                    ]
+                    if sourceFile.is_file() and destinationPath.is_file()
+                    else []
+                ),
+            )
         return outcome
 
     def _movieFolderSameIdentity(self, source: Path, destination: Path) -> bool:
@@ -1208,11 +1222,22 @@ class VideoRescanMixin:
         sameIdentity = destinationDir.is_dir() and self._movieFolderSameIdentity(
             movieFolder, destinationDir
         )
-        logger.warning(
-            "%s",
-            movieFolderCollisionReport(
-                movieFolder, destinationDir, sameIdentity=sameIdentity
+        report = movieFolderCollisionReport(
+            movieFolder, destinationDir, sameIdentity=sameIdentity
+        )
+        logger.warning("%s", report)
+        reportLines = report.splitlines()
+        classification = next(
+            (
+                line.partition(":")[2].strip()
+                for line in reportLines
+                if line.startswith("classification:")
             ),
+            "movie folder collision",
+        )
+        self._recordSummaryInvestigation(
+            classification,
+            *reportLines[2:],
         )
         return True
 
