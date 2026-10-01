@@ -89,6 +89,7 @@ class VideoOrganizer(RescanMergeCleanupMixin, MetadataMixin, VideoMixin, Torrent
         self._summaryRenames = []
         self._summaryCleanupTasks = []
         self._summaryDuplicateTvShows = []
+        self._summaryInvestigations = []
         self._resetIgnoredDuplicateTvShowGroups = None
 
     def _resetTvShowMatchesFilter(self, showName: str, showFilter: str | None) -> bool:
