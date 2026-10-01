@@ -6950,6 +6950,7 @@ def testWriteSummaryReportAppendsTransfersRenamesAndCleanup(
     organizer._summaryRenames = []
     organizer._summaryCleanupTasks = []
     organizer._summaryDuplicateTvShows = []
+    organizer._summaryInvestigations = []
     organizer.dryRun = False
     organizer.summaryReportMode = "rescan"
     organizer._recordSummaryCleanup("cleanup needed: /tmp/source/duplicate")
@@ -6966,8 +6967,8 @@ def testWriteSummaryReportAppendsTransfersRenamesAndCleanup(
     ) in reportText
     assert (
         "Renames:\n"
-        "- folder: /tmp/source/Extras\n"
-        "     to:   /tmp/source/Featurettes"
+        "- folder:  /tmp/source/Extras\n"
+        "  to:      /tmp/source/Featurettes"
     ) in reportText
     assert "Cleanup:\n- remove empty folder: /tmp/source/old" in reportText
     assert (
@@ -7003,13 +7004,36 @@ def testWriteSummaryReportGroupsMovieFolderAndFileRenames(
     reportText = reportPath.read_text(encoding="utf-8")
     assert (
         "Renames:\n"
-        "- folder: /mnt/movie1/Movies/First Movie? (2020)\n"
-        "     to:   /mnt/movie1/Movies/First Movie (2020)\n"
-        "  - movie: /mnt/movie1/Movies/First Movie (2020)/First Movie? (2020).mkv\n"
-        "     to:   /mnt/movie1/Movies/First Movie (2020)/First Movie (2020).mkv\n"
+        "- folder:  /mnt/movie1/Movies/First Movie? (2020)\n"
+        "  to:      /mnt/movie1/Movies/First Movie (2020)\n"
+        "  movie:   /mnt/movie1/Movies/First Movie (2020)/First Movie? (2020).mkv\n"
+        "  to:      /mnt/movie1/Movies/First Movie (2020)/First Movie (2020).mkv\n"
         "\n"
-        "- folder: /mnt/movie2/Movies/Second Movie? (2022)\n"
-        "     to:   /mnt/movie2/Movies/Second Movie (2022)"
+        "- folder:  /mnt/movie2/Movies/Second Movie? (2022)\n"
+        "  to:      /mnt/movie2/Movies/Second Movie (2022)"
+    ) in reportText
+
+
+def testWriteSummaryReportShowsInvestigations(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    reportPath = tmp_path / "summary.txt"
+    organizer.summaryReportPath = reportPath
+    organizer.summaryReportMode = "rescan"
+    organizer._recordSummaryInvestigation(
+        "possible duplicate feature file",
+        "source: /library/Movie/Movie (1).mkv",
+        "target: /library/Movie/Movie.mkv",
+    )
+
+    organizer._writeSummaryReport()
+
+    reportText = reportPath.read_text(encoding="utf-8")
+    assert (
+        "Needs further investigation:\n"
+        "- possible duplicate feature file\n"
+        "  source: /library/Movie/Movie (1).mkv\n"
+        "  target: /library/Movie/Movie.mkv"
     ) in reportText
 
 
