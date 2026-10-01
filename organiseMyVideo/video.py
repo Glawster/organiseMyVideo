@@ -946,19 +946,29 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
             "Transfers:",
         ]
         if self._summaryTransfers:
-            lines.extend(
-                f"- {sourcePath} -> {destPath}"
-                for sourcePath, destPath in self._summaryTransfers
-            )
+            for index, (sourcePath, destPath) in enumerate(self._summaryTransfers):
+                if index:
+                    lines.append("")
+                lines.extend(
+                    [
+                        f"- from: {sourcePath}",
+                        f"  to:   {destPath}",
+                    ]
+                )
         else:
             lines.append("- none")
 
         lines.extend(["", "Renames:"])
         if self._summaryRenames:
-            lines.extend(
-                f"- {sourcePath} -> {destPath}"
-                for sourcePath, destPath in self._summaryRenames
-            )
+            for index, (sourcePath, destPath) in enumerate(self._summaryRenames):
+                if index:
+                    lines.append("")
+                lines.extend(
+                    [
+                        f"- from: {sourcePath}",
+                        f"  to:   {destPath}",
+                    ]
+                )
         else:
             lines.append("- none")
         lines.extend(["", "Cleanup:"])
