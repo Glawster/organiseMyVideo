@@ -79,6 +79,8 @@ must not be proposed.
 - When a canonical file or folder target already exists, classify the condition
   rather than reporting only a generic rename error. Distinguish at least:
   - ignored ancillary media such as samples;
+  - obvious junk/release-marker files that are not feature media;
+  - multi-part feature media (for example `-part2`);
   - same-identity folder collision / merge candidate;
   - possible duplicate feature file; and
   - unresolved collision requiring review.
@@ -138,9 +140,11 @@ must not be proposed.
 11. Given filesystem-safe punctuation normalisation, when identity comparison
    is performed, then ignoring/removing unsupported characters must not make a
    substantive title or year disagreement appear safe.
-12. Given a movie folder containing a canonical feature file and `Sample.mkv`,
-   when scanned, then the sample is ignored for feature-name reconciliation and
-   is not proposed as another copy of the movie.
+12. Given a movie folder containing a canonical feature file and ancillary
+   media whose filename clearly marks it as a sample (including names such as
+   `Sample.mkv`, `sample - includes commentary track.mkv`, or `EVO-sample.mkv`),
+   when scanned, then the ancillary file is ignored for feature-name
+   reconciliation and is not proposed as another copy of the movie.
 13. Given two folders that normalise to the same movie identity, such as
    `Inside Out 2 (2024)_` and `Inside Out 2 (2024)`, when scanned, then OMV
    reports a same-identity folder reconciliation/merge candidate rather than a
@@ -152,7 +156,13 @@ must not be proposed.
 15. Given a canonical movie file target that already exists, when the source is
    not recognised ancillary media, then OMV reports a possible duplicate or
    unresolved file collision and does not overwrite either file.
-16. Given valid titles such as `Blood & Chrome`, `Black '47`,
+16. Given a file named like `*-part2.*`, when it belongs to the same movie as the
+   canonical feature, then OMV classifies it as multi-part feature media rather
+   than a duplicate and does not rename it onto part 1.
+17. Given a tiny release-marker file such as `RARBG.COM.mp4`, when it is clearly
+   not meaningful feature media, then OMV classifies/ignores it as ancillary or
+   junk rather than reporting a duplicate feature-file collision.
+18. Given valid titles such as `Blood & Chrome`, `Black '47`,
    `The Source (Movie 2007)`, or `Mr. & Mrs. Smith`, when filesystem-safe naming
    is applied, then the valid punctuation and surrounding spacing are preserved
    unchanged.
@@ -182,8 +192,12 @@ must not be proposed.
   metadata, proving both folder and filename destinations are safe before rename.
 - Regression tests proving valid punctuation spacing is preserved for `&`,
   apostrophes, and parentheses while unsupported characters are removed.
-- Regression test proving `Sample.mkv` is ignored during canonical feature-file
-  reconciliation.
+- Regression tests proving sample-name variants (`Sample.mkv`, `sample - ...`,
+  `EVO-sample.mkv`) are ignored during canonical feature-file reconciliation.
+- Regression tests proving `-part2` files are classified as multi-part media,
+  not duplicate feature files.
+- Regression test proving tiny release-marker files such as `RARBG.COM.mp4` are
+  ignored/classified as non-feature media.
 - Regression fixture for `Inside Out 2 (2024)_` plus `Inside Out 2 (2024)`,
   proving the collision is classified as a same-identity merge candidate.
 - Tests covering an existing canonical target file, distinguishing ancillary
@@ -229,3 +243,4 @@ must not be proposed.
   extension — canonical folder and file names drop unsupported characters
   before rename planning, `Sample.mkv` is not treated as the feature, and an
   existing canonical target is classified and left in place.
+
