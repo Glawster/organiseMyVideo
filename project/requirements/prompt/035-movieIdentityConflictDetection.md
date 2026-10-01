@@ -34,8 +34,14 @@ filesystem-safe before rename planning.
 - Do not rely on catching `EINVAL` after an attempted rename as the primary
   filesystem-safety mechanism. Derive a safe destination before collision
   checks, logging, dry-run reporting, and mutation.
-- Apply the same deterministic safe-name mapping to both the movie folder and
-  the movie filename.
+- Ignore/remove unsupported filename characters rather than trying to preserve
+  them with filesystem-specific substitutions where identity remains clear.
+- Apply the same safe-name rule to both the movie folder and movie filename.
+- Exclude known ancillary media such as `Sample.mkv` from canonical feature-file
+  reconciliation.
+- Classify existing-target collisions instead of emitting only generic errors:
+  ancillary media, same-identity folder merge candidate, possible duplicate
+  feature file, or unresolved collision.
 - Do not convert already-capitalised titles to metadata sentence casing; for
   example, do not rename `Anyone But You` to `Anyone but You`.
 
@@ -71,7 +77,12 @@ Add focused regression tests for every acceptance criterion, including:
 - canonical names containing `?`, `|`, `*`, `:`, `<`, `>`, and `"`;
 - the real-library examples `Nativity 3 - Dude, Where's My Donkey?!`,
   `TAYLOR SWIFT | THE ERAS TOUR`, and `Thunderbolts*`;
-- folder and filename destinations being safe before `rename()` is called; and
+- folder and filename destinations being safe before `rename()` is called;
+- `Sample.mkv` not being treated as the feature;
+- same-identity folder collisions such as `Inside Out 2 (2024)_` versus
+  `Inside Out 2 (2024)` being reported as reconciliation/merge candidates;
+- existing canonical feature targets being reported as possible duplicate or
+  unresolved collisions without overwriting; and
 - both dry-run and confirmed workflows.
 
 Run the full repository-standard test and lint checks before handoff.
