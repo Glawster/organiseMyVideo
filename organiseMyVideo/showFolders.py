@@ -23,7 +23,6 @@ TRAILING_THE = re.compile(r",\s*the$", re.IGNORECASE)
 MOVIE_FOLDER = re.compile(r"^(?P<title>.+?)\s*\((?P<year>\d{4})\)$")
 _FILESYSTEM_SEPARATOR_PATTERN = re.compile(r"[\\/:]+")
 _FILESYSTEM_REMOVED_CHARACTER = re.compile(r"[|?*<>\"]+")
-_SPACE_BEFORE_PUNCTUATION = re.compile(r"\s+([^\w\s-])")
 _ARTWORK_SUFFIXES = {".jpg", ".jpeg", ".png"}
 _METADATA_SUFFIXES = {".xml", ".nfo"}
 
@@ -47,9 +46,9 @@ def movieFilesystemSafeTitle(title: str) -> str:
     this mapping cannot make a different film or year look safe.
     """
     safe = _FILESYSTEM_SEPARATOR_PATTERN.sub(" - ", title)
-    safe = _FILESYSTEM_REMOVED_CHARACTER.sub(" ", safe)
+    safe = _FILESYSTEM_REMOVED_CHARACTER.sub("", safe)
     safe = re.sub(r"\s+", " ", safe).strip()
-    return _SPACE_BEFORE_PUNCTUATION.sub(r"\1", safe)
+    return safe
 
 
 def canonicalMovieFolderName(name: str) -> str:
