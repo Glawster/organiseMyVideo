@@ -2,30 +2,28 @@
 
 ## Objective and status
 
-REQ-034 catalogue location reconciliation is complete. An authoritative listing
-of a movie or TV root marks folders that are present as current and folders
-that are absent as stale. A directory inside a TV show that cannot be read
-does not retire the episodes beneath it. A root that is missing, unmounted,
-or unlistable keeps the catalogue rows it already had. The requirement and
-the requirements index both record REQ-034 as Completed.
+REQ-035 movie identity conflict detection is complete. Movie scan and movie
+move report a different title or any release-year change and leave the folder
+and file in place. Punctuation-safe names and already capitalised titles are
+unchanged by that guard. The requirement and the requirements index both
+record REQ-035 as Completed.
 
 ## Accepted scope
 
-- `locationState` on movie, series, and episode rows, plus `catalogueScanRoot`.
-- Reconcile instead of deleting unseen rows. Default lists hide stale rows.
-- Locate output for current, stale, and unverified paths, with optional
-  `--show`.
-- Retarget catalogue rows on confirmed show, movie, season, and merge moves.
-- Reconcile after every `media organise --merge`, including dry-run and a run
-  that merges nothing.
-- Lanterns regression coverage on temporary roots, including locate of every
-  catalogued show and an unread season directory.
+- Compare the parsed folder and filename with the metadata about to be applied.
+- Refuse an unresolved title or year conflict before renaming, before rewriting
+  `movie.xml`, and before fetching online metadata to choose a film.
+- Report the current and proposed title and year, the evidence source, known
+  provider IDs, and runtime text already stored.
+- Keep filesystem-safe punctuation changes, leading-`The` folder names, and
+  capitalisation of an all-lowercase title.
+- Refuse the same conflict on a dry-run and on a confirmed run.
 
 ## Final verification
 
 Verified in the `mediaStudio` Conda environment:
 
-- Full `pytest` suite: 770 passed.
+- Full `pytest` suite: 795 passed.
 - `runLinter`: no findings.
 - `runLinter --markup`: no remaining issues.
 - `manageProject --check`: zero failures and zero warnings.
@@ -33,6 +31,6 @@ Verified in the `mediaStudio` Conda environment:
 
 ## Remaining work and immediate next action
 
-REQ-034 verification and documentation are complete. No implementation or
+REQ-035 verification and documentation are complete. No implementation or
 verification work remains for this increment. Select the next increment through
 the requirements index when further work is requested.

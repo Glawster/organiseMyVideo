@@ -26,7 +26,7 @@ The README is the canonical entry point for repository documentation. The living
 - [Home video archive](documentation/homeVideo.md)
 - [Command-line interface](documentation/commandLineInterface.md)
 
-- **Movies** → `/mnt/movie<n>/Title (Year)/` (`The Title` folders are stored as `Title, The (Year)`; the title stays `The Title`)
+- **Movies** → `/mnt/movie<n>/Title (Year)/` (`The Title` folders are stored as `Title, The (Year)`; the title stays `The Title`. A different title or release year in metadata is reported and is not applied as a rename.)
 - **TV shows** → `/mnt/video<n>/TV/Show Name/Season NN/` (`The Name` folders are stored as `Name, The`; the show title stays `The Name`)
 - **Home video** → `/mnt/myVideo/Video/` (GoPro, Drone, tape transfers, and other personal folders)
 - **Default staging/source folder** → `/mnt/video2/toFile`

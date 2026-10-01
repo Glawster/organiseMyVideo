@@ -356,10 +356,22 @@ class VideoMoveMixin:
             True if successful, False otherwise
         """
         resolvedMovieInfo = dict(movieInfo)
-        enrichedMovieInfo = self._enrichMovieMetadata(resolvedMovieInfo)
+        # A download that already parses as a different film is not moved onto
+        # the proposed title. Online lookup is not used to settle that.
+        if self._refuseMovieIdentityChange(
+            resolvedMovieInfo, sourceFile.parent, sourceFile
+        ):
+            return False
+        enrichedMovieInfo = self._enrichMovieMetadata(
+            self._movieMetadataWithoutIdentityState(resolvedMovieInfo)
+        )
         if enrichedMovieInfo:
             resolvedMovieInfo = enrichedMovieInfo
-        title = resolvedMovieInfo["title"]
+            if self._refuseMovieIdentityChange(
+                resolvedMovieInfo, sourceFile.parent, sourceFile
+            ):
+                return False
+        title = self._movieNamingTitle(resolvedMovieInfo) or resolvedMovieInfo["title"]
         year = resolvedMovieInfo["year"]
 
         logger.value("processing movie", sourceFile.name)
@@ -395,6 +407,8 @@ class VideoMoveMixin:
             confirmedTitle = result["name"]
             # Re-parse if user provided different input
             if confirmedTitle != f"{title} ({year})":
+                # The operator chose this name, so it replaces the retained one.
+                resolvedMovieInfo.pop("identityNamingTitle", None)
                 # Try to extract year from new input
                 match = re.match(r"^(.+?)\s*[\(\[]\s*(\d{4})\s*[\)\]]", confirmedTitle)
                 if match:
@@ -405,7 +419,7 @@ class VideoMoveMixin:
             resolvedMovieInfo["title"] = title
             resolvedMovieInfo["year"] = year
 
-        title = resolvedMovieInfo["title"]
+        title = self._movieNamingTitle(resolvedMovieInfo) or resolvedMovieInfo["title"]
         year = resolvedMovieInfo["year"]
 
         # Find existing directory or choose storage location

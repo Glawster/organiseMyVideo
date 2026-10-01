@@ -1004,7 +1004,16 @@ class VideoRescanMixin:
             sourceMovieInfo = self._normaliseMovieMetadata(sourceMovieInfo)
             if not sourceMovieInfo:
                 return None
-            return self._enrichMovieMetadata(sourceMovieInfo) or sourceMovieInfo
+            # movie.xml can name a different film from the folder. Do not fetch
+            # online metadata to choose a winner, and do not rename onto it.
+            if self._refuseMovieIdentityChange(
+                sourceMovieInfo, videoFile.parent, videoFile
+            ):
+                return sourceMovieInfo
+            metadata = self._movieMetadataWithoutIdentityState(sourceMovieInfo)
+            enriched = self._enrichMovieMetadata(metadata) or metadata
+            self._refuseMovieIdentityChange(enriched, videoFile.parent, videoFile)
+            return enriched
 
     def _resetMovieMetadataForFile(
         self,
@@ -1019,14 +1028,22 @@ class VideoRescanMixin:
             return "skipped"
         resolvedMovieInfo = dict(resolvedMovieInfo)
         resolvedMovieInfo["extension"] = videoFile.suffix
+        if self._refuseMovieIdentityChange(
+            resolvedMovieInfo, videoFile.parent, videoFile
+        ):
+            return "skipped"
 
         movieDir = videoFile.parent
+        namingOnly = bool(resolvedMovieInfo.get("identityNamingTitle"))
         with self._suppressResetMetadataPreserveLogs():
             movieXml = movieDir / "movie.xml"
-            if movieXml.exists():
-                self._updateMovieMetadataFile(movieXml, resolvedMovieInfo)
-            else:
-                self._ensureMovieMetadata(movieDir, resolvedMovieInfo)
+            # A case-only difference keeps the capitalised filename and leaves
+            # the sidecar text alone. A real conflict already returned above.
+            if not namingOnly:
+                if movieXml.exists():
+                    self._updateMovieMetadataFile(movieXml, resolvedMovieInfo)
+                else:
+                    self._ensureMovieMetadata(movieDir, resolvedMovieInfo)
             self._ensureMovieDvdIdMetadata(movieDir, resolvedMovieInfo)
             self._fetchMovieArtwork(resolvedMovieInfo, movieDir)
 
@@ -1111,11 +1128,15 @@ class VideoRescanMixin:
             movieInfo = self._resolveResetMovieInfo(videoFiles[0])
         if not movieInfo or not movieInfo.get("title") or not movieInfo.get("year"):
             return movieFolder, videoFiles
+        if self._refuseMovieIdentityChange(movieInfo, movieFolder, *videoFiles):
+            return movieFolder, videoFiles
 
         from .showFolders import canonicalMovieFolderName
 
         destinationDir = movieFolder.with_name(
-            canonicalMovieFolderName(f"{movieInfo['title']} ({movieInfo['year']})")
+            canonicalMovieFolderName(
+                f"{self._movieNamingTitle(movieInfo)} ({movieInfo['year']})"
+            )
         )
         if destinationDir == movieFolder:
             return movieFolder, videoFiles

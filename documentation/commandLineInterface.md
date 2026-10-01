@@ -121,6 +121,17 @@ full catalogue refresh. The older `library rescan` command can still target one 
 independently for compatibility and retains exhaustive behaviour. The Qt browser is
 expected to query the catalogue rather than walk disks.
 
+A different movie title, or any different release year, is an identity conflict
+during movie scan and when a parsed movie is moved. The report names the
+current title and year, the proposed title and year, the evidence that
+disagreed (usually `movie.xml`), and any IMDb id, TMDB id, or runtime already
+stored. The folder and file stay where they are, `movie.xml` is left
+unchanged, and no online lookup is made to decide which film is correct.
+Punctuation, spacing, and filesystem-safe substitutions still rename when the
+title and year agree. A metadata title that only changes capitals does not
+replace an already capitalised title. Dry-run and `--confirm` both refuse the
+conflict; a rename that is still allowed is applied only with `--confirm`.
+
 ## Compatibility interface
 
 The previous flags and the no-command organiser form remain supported without
