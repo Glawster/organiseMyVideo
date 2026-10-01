@@ -1,34 +1,71 @@
-# Implement REQ-035: Movie identity conflict detection
+# REQ-035: Movie identity conflict detection
+
+## Role
+
+Implement and verify the movie identity-conflict safeguards defined by
+`project/requirements/features/035-movieIdentityConflictDetection.md`.
 
 ## Requirement
 
-Implement [REQ-035](../features/035-movieIdentityConflictDetection.md),
-following the repository instructions. This prompt assigns that requirement.
-The requirement remains the contract.
+The authoritative requirement is:
 
-## Boundaries
+- `project/requirements/features/035-movieIdentityConflictDetection.md`
 
-Distinguish a safe movie-name tidy-up from a different film or a different
-release year. Keep legitimate punctuation, spacing, filesystem-safe
-substitution, leading-`The` inversion, and capitalisation of an all-lowercase
-title. Do not replace an already capitalised title with a less capitalised
-one.
+Do not redefine its outcome or acceptance criteria in this prompt.
 
-On an unresolved conflict, refuse the rename in both dry-run and confirmed
-runs, leave `movie.xml` unchanged, and do not fetch online metadata to pick a
-winner. Report the current and proposed title and year, the evidence source,
-known provider IDs, and any runtime already stored.
+## Objective
 
-Do not implement REQ-029's scan/organise split, and do not add an operator
-override that accepts the conflicting identity.
+Prevent movie scan/organise workflows from treating title or release-year
+identity changes as routine renames, while retaining legitimate punctuation,
+spacing and filesystem-safe normalisation and preserving the library's
+capitalised title convention.
 
-## Verification and handoff
+## Constraints
 
-Cover `13 minutes (2021)` against `One Second Forever (2021)`, the named year
-mismatches, `Anyone But You` casing, a punctuation-only rename, and both
-dry-run and confirmed refusal. Use temporary paths. Run the full test suite,
-linters, and project checks.
+- Follow the repository agent instructions and requirements process.
+- Preserve the existing metadata-source priority model unless the requirement
+  explicitly requires conflict handling around it.
+- Do not solve conflicts by fetching fresh online metadata.
+- Do not mutate or repair `movie.xml` as part of this requirement.
+- Keep scan behaviour non-destructive in accordance with REQ-029.
+- Route any confirmed filesystem mutation through the established filesystem
+  safety boundary.
+- Do not convert already-capitalised titles to metadata sentence casing; for
+  example, do not rename `Anyone But You` to `Anyone but You`.
 
-Report the files changed, the classification rules, the acceptance criteria,
-the commands and results, ambiguous cases left unresolved, and any follow-on
-requirement. Do not broaden the change beyond REQ-035.
+## Implementation guidance
+
+Introduce a clear distinction between safe naming normalisation and a material
+identity change.
+
+At minimum, treat a release-year change as a conflict. Treat a substantive
+title change as a conflict while allowing narrowly defined normalisations such
+as punctuation, whitespace, filesystem-safe substitutions and existing
+article-placement conventions.
+
+Where a conflict is detected, report the current identity, proposed identity,
+the metadata/evidence source that produced the proposed value, and useful
+supporting evidence such as provider IDs and duration where available.
+
+## Verification
+
+Add focused regression tests for every acceptance criterion, including:
+
+- `13 minutes (2021)` versus `One Second Forever (2021)`;
+- release-year disagreements;
+- `Anyone But You` versus `Anyone but You`;
+- safe punctuation-only normalisation; and
+- both dry-run and confirmed workflows.
+
+Run the full repository-standard test and lint checks before handoff.
+
+## Handoff
+
+Report:
+
+- files changed;
+- conflict-classification rules introduced;
+- acceptance criteria satisfied;
+- tests and results;
+- any metadata cases deliberately left ambiguous; and
+- any follow-on requirement needed for explicit user review/override.

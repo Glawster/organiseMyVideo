@@ -6,107 +6,134 @@ Completed
 
 ## Outcome
 
-As a media-library operator, I need movie scan and organise to tell a real
-title or release-year change from a safe filename tidy-up, so that one film is
-not renamed as if it were another and the library's capitalised titles stay as
-they are.
+As a media-library operator, I need movie scans to distinguish safe naming
+normalisation from a possible identity change so that incorrect metadata cannot
+silently cause a movie to be renamed to another title or release year.
 
 ## Context
 
-Movie reset and movie move build a destination from resolved metadata. Local
-`movie.xml` replaces the title and year taken from the folder or filename, and
-there is no comparison before the rename. A sidecar for a different film, or a
-different release year, is then applied as an ordinary rename.
+Real-library testing after REQ-034 exposed rename proposals where existing MCM
+metadata disagreed with otherwise plausible movie folders and files.
 
-These library cases must not be renamed:
+The strongest example was:
 
-- `13 minutes (2021)` to `One Second Forever (2021)`, because the existing
-  `movie.xml` names a different film
-- `Call of the Wild, The (1972)` to `Call of the Wild, The (1975)`
-- `Carry On Matron (1972)` to `Carry On Matron (2007)`
-- `Boss Level (2021)` to `Boss Level (2020)`
-- `Chernobyl - Abyss (2021)` to `Chernobyl - Abyss (2022)`
-- `Anyone But You` to `Anyone but You`
+```text
+13 minutes (2021)
+→ One Second Forever (2021)
+```
 
-Punctuation, spacing, and filesystem-safe substitutions must still be applied
-when the title identity and release year agree. `The Title (Year)` may still
-become `Title, The (Year)`. An all-lowercase on-disk title may still gain
-capitals, as with `inception (2010)` becoming `Inception (2010)`.
+The existing `movie.xml` identifies a different title while the stored media
+duration and existing folder name provide conflicting evidence.
+
+The same scan also proposed several release-year changes, for example:
+
+```text
+Call of the Wild, The (1972) → Call of the Wild, The (1975)
+Carry On Matron (1972)       → Carry On Matron (2007)
+Boss Level (2021)            → Boss Level (2020)
+Chernobyl - Abyss (2021)     → Chernobyl - Abyss (2022)
+```
+
+A title change and a year change are both identity red flags. They must not be
+treated as routine filename normalisation.
+
+Movie title casing is also a library convention. Existing title-style
+capitalisation must not be degraded merely because a metadata source uses
+different casing. For example:
+
+```text
+Anyone But You
+→ Anyone but You
+```
+
+must not be proposed.
 
 ## Scope
 
-- Compare each parsed movie folder name and filename with the title and year
-  about to be used for a rename, before `movie.xml` is rewritten and before a
-  folder or file is renamed.
-- Treat the title identity as the same when the only differences are case,
-  apostrophes, other punctuation, spacing, filesystem separators (`\`, `/`,
-  `:`), or a leading or trailing `The`. Keep an internal `The`.
-- Treat any release year that is present on both sides and not equal as an
-  identity conflict. A missing year on one side is not a conflict.
-- Treat a different title identity as an identity conflict.
-- When an unresolved conflict exists, do not rename the folder or file, do not
-  rewrite `movie.xml`, and do not fetch online metadata to decide which film
-  is correct. Report the current title and year, the proposed title and year,
-  the evidence source, provider IDs already known, and runtime or duration
-  text already stored.
-- When metadata differs only by case and would replace an uppercase letter
-  with a lowercase letter, keep the existing capitalised title for the folder
-  and file name.
-- Apply the same refusal on a dry-run and on a confirmed run. Confirmed
-  mutations that remain allowed stay on the existing filesystem-safety
-  boundary.
-- Apply the guard to movie metadata reset and to moving a movie whose folder
-  or filename already has a conflicting identity.
+- Classify a proposed movie rename as either:
+  - safe naming normalisation; or
+  - an identity conflict requiring review.
+- Flag a proposed change to the resolved movie title as an identity red flag
+  when it is more than punctuation, filesystem-safe character substitution,
+  spacing, or an explicitly supported article-placement convention.
+- Flag any proposed change to the release year as an identity red flag.
+- Do not automatically rename or propose a normal rename when an identity red
+  flag is present.
+- Report the conflicting evidence clearly enough for the user to understand
+  which source supplied the existing and proposed identity.
+- Include available evidence such as folder title/year, filename title/year,
+  MCM metadata, provider IDs and runtime/duration where useful.
+- Preserve title-style capitalisation when the existing and resolved title
+  differ only by case.
+- Do not lower-case words in an already capitalised movie title solely to match
+  metadata. In particular, `Anyone But You` must not be changed to
+  `Anyone but You`.
+- Keep `media scan` non-destructive in accordance with REQ-029.
 
 ## Out of scope
 
-- Making `media scan` observational. REQ-029 still owns that split. Safe
-  punctuation and article renames stay where they are today.
-- Choosing a winner by searching TMDB, OMDb, or any other online source.
-- Rewriting embedded media timestamps or creating a new metadata provider.
-- Treating provider-ID disagreement, by itself, as an identity conflict when
-  the title identity and release year agree.
-- Equating words that are not the same after punctuation is ignored, including
-  an internal article or `&` versus `and`.
-- An operator action that accepts a conflicting identity and then renames.
+- Automatically deciding which conflicting metadata source is correct.
+- Fetching new online metadata solely to resolve a conflict.
+- Rewriting incorrect `movie.xml` files.
+- Automatically correcting provider IDs.
+- Changing TV-series identity rules.
+- Defining a general English grammar or editorial title-casing engine beyond
+  preserving the library's capitalised title convention.
 
 ## Acceptance criteria
 
-1. Given folder and file `13 minutes (2021)` and a `movie.xml` for
-   `One Second Forever (2021)`, when movie scan or a movie move runs, then
-   nothing is renamed, `movie.xml` is unchanged, online metadata is not
-   fetched, and the report shows both titles and years, evidence `movie.xml`,
-   and any IMDb id, TMDB id, and runtime already in that file.
-2. Given the same title and a different release year, including the four
-   year pairs in Context, when movie scan runs, then the change is reported
-   as an identity conflict and the folder and file stay in place.
-3. Given an on-disk title `Anyone But You` and metadata `Anyone but You` for
-   the same year, when movie scan runs, then the folder and file keep
-   `Anyone But You`.
-4. Given a title and year that agree apart from punctuation or a filesystem
-   separator, when a confirmed movie scan runs, then the filesystem-safe name
-   is still applied. Given `The Title (Year)` for the same film and year, the
-   folder may still become `Title, The (Year)`. An all-lowercase folder may
-   still gain the metadata capitals.
-5. Given an unresolved identity conflict, when the run is a dry-run or a
-   confirmed run, then neither path renames the movie or rewrites `movie.xml`.
+1. Given a movie folder named `13 minutes (2021)` whose MCM metadata resolves
+   to `One Second Forever (2021)`, when the library is scanned, then OMV
+   reports an identity conflict and does not propose or execute that title
+   rename.
+2. Given an existing movie whose resolved metadata proposes a different release
+   year, when the scan evaluates the rename, then OMV flags the year change as
+   an identity conflict and does not treat it as routine normalisation.
+3. Given `Carry On Matron (1972)` and metadata proposing
+   `Carry On Matron (2007)`, when scanned, then the proposed year change is
+   visibly flagged for review and no rename occurs.
+4. Given a title where only punctuation, spacing, filesystem-safe substitution
+   or an explicitly supported article convention differs, when identity
+   evidence otherwise agrees, then OMV may continue to treat the change as
+   safe naming normalisation.
+5. Given `Anyone But You (2023)` and metadata containing
+   `Anyone but You (2023)`, when scanned, then OMV preserves
+   `Anyone But You (2023)` and does not propose a case-only downgrade.
+6. Given a detected identity conflict, when it is reported, then the output
+   identifies the current movie identity, the conflicting proposed identity,
+   and the evidence source responsible for the disagreement.
+7. Given runtime or duration evidence that materially conflicts with metadata,
+   when available, then it is included in the conflict evidence rather than
+   silently ignored.
+8. Given an identity conflict during a confirmed workflow, when the operation
+   reaches that movie, then the conflicting rename remains blocked unless a
+   separately defined explicit review/override workflow authorises it.
 
 ## Dependencies and decisions
 
-- [ADR-003](../../adr/003-filesystemSafetyBoundary.md) remains the boundary
-  for any confirmed rename that is still allowed.
-- REQ-029 remains the separate obligation to stop `media scan` mutating media.
-- No new architecture decision. The comparison is a guard on the existing
-  movie rename paths.
+- [REQ-019: Catalogue metadata resolution](019-catalogueMetadataResolution.md)
+  supplies already-known metadata and provider identities.
+- [REQ-020: Combined media scan command](020-combinedMediaScan.md) exposes the
+  scan workflow where the issue was observed.
+- [REQ-029: Non-destructive media scan](029-nonDestructiveMediaScan.md) remains
+  authoritative for scan safety.
+- REQ-034 real-library verification exposed the problem but catalogue location
+  reconciliation is not the cause.
+- No new ADR is currently required; implementation should use the existing
+  metadata-resolution and filesystem-safety boundaries.
 
 ## Verification
 
-- `tests/test_movieIdentityConflict.py` covers the classifier and the scan and
-  move paths named in the acceptance criteria, including dry-run and confirmed
-  refusal.
-- Existing movie reset tests cover an allowed capitalisation repair, colon
-  substitution, and a destination collision for a filename that has no
-  established title.
+- Regression fixture for `13 minutes (2021)` versus
+  `One Second Forever (2021)`.
+- Parameterised tests for movie year disagreements, including the real-library
+  examples captured in this requirement.
+- Test proving `Anyone But You` is not changed to `Anyone but You`.
+- Tests proving punctuation-only and filesystem-safe normalisation still works.
+- Tests proving conflict output identifies the relevant evidence source.
+- Tests proving dry-run and confirmed workflows both block an unresolved
+  identity-changing rename.
+- Full existing movie scan, catalogue and CLI regression suites.
 - Verified on 2026-10-01 in the `mediaStudio` environment: `pytest` 795 passed,
   `runLinter` reported no findings, `runLinter --markup` reported no remaining
   issues, `manageProject --check` reported zero failures and zero warnings,
@@ -126,7 +153,7 @@ capitals, as with `inception (2010)` becoming `Inception (2010)`.
 
 ## Change history
 
-- 2026-10-01: created — movie scan treated a different title or release year
-  in existing metadata as a routine rename.
-- 2026-10-01: completed — unresolved title and year changes are reported and
-  not renamed, and the full test suite passed.
+- 2026-10-01: created — real-library testing exposed incorrect title and year
+  rename proposals and an unwanted title-casing downgrade.
+- 2026-10-01: completed — a different title or release year is reported and
+  left in place on both dry-run and confirmed movie scan and move.
