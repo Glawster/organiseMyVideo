@@ -960,15 +960,32 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
 
         lines.extend(["", "Renames:"])
         if self._summaryRenames:
-            for index, (sourcePath, destPath) in enumerate(self._summaryRenames):
-                if index:
+            previousWasFolder = False
+            previousDestination = None
+            for sourcePath, destPath in self._summaryRenames:
+                source = Path(sourcePath)
+                destination = Path(destPath)
+                isMovie = source.suffix.lower() in VIDEO_EXTENSIONS
+
+                groupedMovie = bool(
+                    isMovie
+                    and previousWasFolder
+                    and previousDestination is not None
+                    and destination.parent == previousDestination
+                )
+                if not groupedMovie and lines[-1] != "Renames:":
                     lines.append("")
+
+                label = "movie" if isMovie else "folder"
+                prefix = "  - " if groupedMovie else "- "
                 lines.extend(
                     [
-                        f"- from: {sourcePath}",
-                        f"  to:   {destPath}",
+                        f"{prefix}{label}: {sourcePath}",
+                        f"     to:   {destPath}",
                     ]
                 )
+                previousWasFolder = not isMovie
+                previousDestination = destination if not isMovie else None
         else:
             lines.append("- none")
         lines.extend(["", "Cleanup:"])
