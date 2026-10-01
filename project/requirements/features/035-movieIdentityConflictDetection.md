@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress
+Completed
 
 ## Outcome
 
@@ -183,17 +183,17 @@ must not be proposed.
 - Tests proving dry-run and confirmed workflows both block an unresolved
   identity-changing rename.
 - Full existing movie scan, catalogue and CLI regression suites.
-- Verified on 2026-10-01 in the `mediaStudio` environment: `pytest` 795 passed,
-  `runLinter` reported no findings, `runLinter --markup` reported no remaining
-  issues, `manageProject --check` reported zero failures and zero warnings,
-  and `git diff --check` produced no output. Black was applied to the changed
-  Python files.
+- Verified on 2026-10-01 in the `mediaStudio` environment: `pytest` 816 passed,
+  `runLinter` on the changed Python files reported no findings,
+  `runLinter --markup` reported no remaining issues, `manageProject --check`
+  reported zero failures and zero warnings, and `git diff --check` produced
+  no output. Black was applied to the changed Python files.
 
 ## Traceability
 
 - Implementation: `organiseMyVideo/movieIdentity.py`,
-  `organiseMyVideo/video.py`, `organiseMyVideo/videoRescan.py`,
-  `organiseMyVideo/videoMove.py`
+  `organiseMyVideo/showFolders.py`, `organiseMyVideo/video.py`,
+  `organiseMyVideo/videoRescan.py`, `organiseMyVideo/videoMove.py`
 - Tests: `tests/test_movieIdentityConflict.py`,
   `tests/test_organiseMyVideo.py`
 - Documentation: `documentation/commandLineInterface.md`, `README.md`
@@ -214,3 +214,7 @@ must not be proposed.
   files can be mistaken for the feature, and same-identity folder/file targets
   can collide. REQ-035 now requires collision classification and safe merge/
   duplicate-candidate reporting rather than generic rename failures.
+- 2026-10-01: completed the filesystem-safe naming and collision classification
+  extension — canonical folder and file names drop unsupported characters
+  before rename planning, `Sample.mkv` is not treated as the feature, and an
+  existing canonical target is classified and left in place.

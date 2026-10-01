@@ -41,7 +41,7 @@ Historical behaviour is not assigned invented retrospective requirements.
 | 032 | [Application-wide CLI Tab completion](features/032-cliTabCompletion.md) | Complete commands, options, paths and contextual local values consistently across the public CLI. | ToDo | [Prompt](prompt/032-cliTabCompletion.md) | Pending |
 | 033 | [Camera folder capture-time correction](features/033-cameraFolderCaptureCorrection.md) | Correct existing camera folders without prior import history using frozen folder evidence and verified relocation. | Completed | [Prompt](prompt/033-cameraFolderCaptureCorrection.md) | [ADR-011](../adr/011-cameraCaptureCorrectionJournal.md) |
 | 034 | [Catalogue location reconciliation](features/034-catalogueLocationReconciliation.md) | Reconcile movie and TV catalogue locations with authoritatively scanned roots without dropping an unscanned disk. | Completed | Not required | [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
-| 035 | [Movie identity conflict detection](features/035-movieIdentityConflictDetection.md) | Flag title and release-year identity changes instead of treating them as routine movie renames, while preserving capitalised title casing. | Completed | [Prompt](prompt/035-movieIdentityConflictDetection.md) | Not required |
+| 035 | [Movie identity conflict detection](features/035-movieIdentityConflictDetection.md) | Flag title and release-year identity changes instead of routine movie renames, make canonical names filesystem-safe, and classify existing targets without overwriting. | Completed | [Prompt](prompt/035-movieIdentityConflictDetection.md) | Not required |
 
 ## Prompt index
 

@@ -7181,7 +7181,7 @@ def testMovieScanUsesDashInsteadOfColon(
 
 
 def testMovieScanDryRunDetectsReservedDestinationCollision(
-    organizer: VideoOrganizer,
+    organizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
 ):
     movieDir = organizer.sourceDir / "Example Movie (2024)"
     movieDir.mkdir()
@@ -7208,6 +7208,7 @@ def testMovieScanDryRunDetectsReservedDestinationCollision(
         patch.object(organizer, "_ensureMovieMetadata"),
         patch.object(organizer, "_ensureMovieDvdIdMetadata"),
         patch.object(organizer, "_fetchMovieArtwork"),
+        caplog.at_level(logging.WARNING),
     ):
         firstResult = organizer._resetMovieMetadataForFile(first, reserved)
         secondResult = organizer._resetMovieMetadataForFile(second, reserved)
@@ -7215,3 +7216,5 @@ def testMovieScanDryRunDetectsReservedDestinationCollision(
     assert firstResult == "renamed"
     assert secondResult == "errors"
     assert reserved == {movieDir / "Example Movie (2024).mkv"}
+    assert "classification: unresolved file collision" in caplog.text
+    assert "part2.mkv" in caplog.text

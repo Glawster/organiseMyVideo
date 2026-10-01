@@ -8,14 +8,24 @@ from typing import Iterable, Optional
 
 from organiseMyProjects.logUtils import getLogger  # type: ignore
 
+from .constants import VIDEO_EXTENSIONS
 from .filesystemOperations import FilesystemOperations
-from .seasonFolders import SeasonFolderStats, _mergeDirectory
+from .movieIdentity import (
+    MOVIE_IDENTITY_AGREE,
+    MOVIE_IDENTITY_PRESERVE_CASE,
+    movieIdentityClassify,
+)
+from .seasonFolders import SeasonFolderStats, _filesIdentical, _mergeDirectory
 
 logger = getLogger()
 LEADING_THE = re.compile(r"^the\s+(.+)$", re.IGNORECASE)
 TRAILING_THE = re.compile(r",\s*the$", re.IGNORECASE)
 MOVIE_FOLDER = re.compile(r"^(?P<title>.+?)\s*\((?P<year>\d{4})\)$")
 _FILESYSTEM_SEPARATOR_PATTERN = re.compile(r"[\\/:]+")
+_FILESYSTEM_REMOVED_CHARACTER = re.compile(r"[|?*<>\"]+")
+_SPACE_BEFORE_PUNCTUATION = re.compile(r"\s+([^\w\s-])")
+_ARTWORK_SUFFIXES = {".jpg", ".jpeg", ".png"}
+_METADATA_SUFFIXES = {".xml", ".nfo"}
 
 
 def restoreLeadingThe(name: str) -> str:
@@ -29,15 +39,32 @@ def restoreLeadingThe(name: str) -> str:
     return f"The {remainder}" if remainder else normalised
 
 
-def canonicalMovieFolderName(name: str) -> str:
-    """Return ``Title, The (Year)`` when *name* is a leading-The movie folder."""
+def movieFilesystemSafeTitle(title: str) -> str:
+    """Return *title* safe to use as a movie folder or file name.
 
+    Colons and path separators become `` - ``, so ``6:45`` stays ``6 - 45``.
+    ``|?*<>"`` are removed. Identity is compared on the original title, so
+    this mapping cannot make a different film or year look safe.
+    """
+    safe = _FILESYSTEM_SEPARATOR_PATTERN.sub(" - ", title)
+    safe = _FILESYSTEM_REMOVED_CHARACTER.sub(" ", safe)
+    safe = re.sub(r"\s+", " ", safe).strip()
+    return _SPACE_BEFORE_PUNCTUATION.sub(r"\1", safe)
+
+
+def canonicalMovieFolderName(name: str) -> str:
+    """Return ``Title, The (Year)`` when *name* is a leading-The movie folder.
+
+    Unsupported filename characters are removed before the article convention
+    is applied, so the planned folder is safe before any rename.
+    """
     parsed = MOVIE_FOLDER.match(name.strip())
     if not parsed:
         return name
-    title = canonicalTvShowFolderName(parsed.group("title").strip())
-    title = _FILESYSTEM_SEPARATOR_PATTERN.sub(" - ", title)
-    title = re.sub(r"\s+", " ", title).strip()
+    title = movieFilesystemSafeTitle(parsed.group("title").strip())
+    if not title:
+        return name
+    title = canonicalTvShowFolderName(title)
     return f"{title} ({parsed.group('year')})"
 
 
@@ -148,6 +175,24 @@ def normaliseMovieFolderNames(
                     _recordCatalogueMove(source, destination, dryRun=dryRun)
                     stats.renamed += 1
                     continue
+                # A name that only became canonical by dropping ``|?*<>"`` must
+                # not be merged. Article-only collisions keep the existing merge.
+                parsed = MOVIE_FOLDER.match(source.name.strip())
+                if parsed and _movieTitleDropsUnsupportedCharacters(
+                    parsed.group("title").strip()
+                ):
+                    logger.warning(
+                        "%s",
+                        movieFolderCollisionReport(
+                            source,
+                            destination,
+                            sameIdentity=_movieFoldersShareIdentity(
+                                source.name, destination.name
+                            ),
+                        ),
+                    )
+                    stats.conflicts += 1
+                    continue
                 if not destination.is_dir():
                     stats.conflicts += 1
                     logger.warning(
@@ -165,6 +210,105 @@ def normaliseMovieFolderNames(
                 stats.errors += 1
                 logger.warning("could not normalise movie folder %s: %s", source, error)
     return stats
+
+
+def movieFolderCollisionReport(
+    source: Path, destination: Path, *, sameIdentity: bool
+) -> str:
+    """Return the operator report for a movie folder whose target already exists."""
+    lines = ["movie folder collision"]
+    evidence = ""
+    if sameIdentity and source.is_dir() and destination.is_dir():
+        relation, evidence = movieFolderContentDescribe(source, destination)
+        lines.append("classification: same-identity merge candidate")
+        lines.append(f"content: {relation}")
+    else:
+        lines.append("classification: unresolved")
+    lines.append(f"source: {source}")
+    lines.append(f"target: {destination}")
+    if evidence:
+        lines.append(evidence)
+    return "\n".join(lines)
+
+
+def movieFolderContentDescribe(source: Path, destination: Path) -> tuple[str, str]:
+    """Return whether two movie folders are identical, complementary, or distinct."""
+    sourceSizes = _movieFolderFileSizes(source)
+    destinationSizes = _movieFolderFileSizes(destination)
+    shared = set(sourceSizes) & set(destinationSizes)
+    # Same size is not enough: a later merge must not treat different bytes as identical.
+    differing = sorted(
+        name
+        for name in shared
+        if not _filesIdentical(source / name, destination / name)
+    )
+    if set(sourceSizes) == set(destinationSizes) and not differing:
+        relation = "identical"
+    elif differing:
+        relation = "distinct"
+    else:
+        relation = "complementary"
+    evidence = (
+        f"source contains: {_movieFolderContentKinds(source)}\n"
+        f"target contains: {_movieFolderContentKinds(destination)}"
+    )
+    if differing:
+        evidence = f"{evidence}\ndistinct files: {', '.join(differing[:3])}"
+    return relation, evidence
+
+
+def _movieFolderContentKinds(folder: Path) -> str:
+    """Return a short description of feature, metadata, and artwork in *folder*."""
+    feature = metadata = artwork = False
+    for path in folder.rglob("*"):
+        if not path.is_file():
+            continue
+        suffix = path.suffix.lower()
+        if suffix in VIDEO_EXTENSIONS and path.stem.casefold() != "sample":
+            feature = True
+        elif suffix in _METADATA_SUFFIXES:
+            metadata = True
+        elif suffix in _ARTWORK_SUFFIXES:
+            artwork = True
+    kinds = []
+    if feature:
+        kinds.append("feature file")
+    if metadata:
+        kinds.append("metadata")
+    if artwork:
+        kinds.append("artwork")
+    return ", ".join(kinds) if kinds else "no recognised media"
+
+
+def _movieFolderFileSizes(folder: Path) -> dict[str, int]:
+    """Return relative file paths and sizes for one movie folder."""
+    sizes = {}
+    for path in folder.rglob("*"):
+        if path.is_file():
+            sizes[path.relative_to(folder).as_posix()] = path.stat().st_size
+    return sizes
+
+
+def _movieFoldersShareIdentity(sourceName: str, destinationName: str) -> bool:
+    """Return True when two movie folder names are the same film and year."""
+    source = MOVIE_FOLDER.match(sourceName.strip())
+    destination = MOVIE_FOLDER.match(destinationName.strip())
+    if not source or not destination:
+        return False
+    decision = movieIdentityClassify(
+        source.group("title"),
+        source.group("year"),
+        destination.group("title"),
+        destination.group("year"),
+    )
+    return decision.kind in {MOVIE_IDENTITY_AGREE, MOVIE_IDENTITY_PRESERVE_CASE}
+
+
+def _movieTitleDropsUnsupportedCharacters(title: str) -> bool:
+    """Return True when safe naming removes characters other than ``\\/:``."""
+    legacy = _FILESYSTEM_SEPARATOR_PATTERN.sub(" - ", title)
+    legacy = re.sub(r"\s+", " ", legacy).strip()
+    return movieFilesystemSafeTitle(title) != legacy
 
 
 def _recordCatalogueMove(source: Path, destination: Path, *, dryRun: bool) -> None:

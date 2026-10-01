@@ -132,6 +132,16 @@ title and year agree. A metadata title that only changes capitals does not
 replace an already capitalised title. Dry-run and `--confirm` both refuse the
 conflict; a rename that is still allowed is applied only with `--confirm`.
 
+The folder and filename are made safe before that rename is planned.
+`\`, `/`, and `:` become ` - `. `|`, `?`, `*`, `<`, `>`, and `"` are removed,
+so a title such as `Thunderbolts*` is planned as `Thunderbolts` and is not
+passed to `rename()`. Removing those characters does not make a different
+title or year safe. `Sample.mkv`, and video inside a sample folder, is not
+renamed to the feature. When the safe folder or file already exists, the scan
+reports a same-identity merge candidate, a possible duplicate feature file,
+ignored ancillary media, or an unresolved collision. Neither side is
+overwritten or deleted. A merge of the two folders is not performed.
+
 ## Compatibility interface
 
 The previous flags and the no-command organiser form remain supported without

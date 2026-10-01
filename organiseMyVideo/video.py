@@ -1886,8 +1886,13 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
 
         if not title or not year:
             return sourceFile.name
-        safeTitle = re.sub(r"[\\/:]+", " - ", str(title))
-        safeTitle = re.sub(r"\s+", " ", safeTitle).strip()
+        # The same character rules as the movie folder, applied before any
+        # caller checks whether this path already exists or renames onto it.
+        from .showFolders import movieFilesystemSafeTitle
+
+        safeTitle = movieFilesystemSafeTitle(str(title))
+        if not safeTitle:
+            return sourceFile.name
         return f"{safeTitle} ({year}){extension}"
 
     def _writeEpisodeMcmTemplate(
