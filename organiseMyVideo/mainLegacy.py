@@ -18,7 +18,7 @@ from organiseMyProjects.logUtils import (  # type: ignore
     setApplication,
 )
 
-from .constants import APP_CONFIG_FILE
+from .constants import APP_CONFIG_FILE, applicationStateDirectory
 from .filesystemOperations import FilesystemOperations
 
 thisApplication = Path(__file__).parent.name
@@ -153,7 +153,7 @@ Session file:     {sessionFile}
 def _getSummaryReportPath(sourcePath: str, mode: str) -> Path:
     """Return the summary-report path for auto/rescan runs."""
     del sourcePath, mode
-    return APP_CONFIG_FILE.parent / f"summary.{datetime.now().strftime('%Y%m%d')}.txt"
+    return applicationStateDirectory() / f"summary.{datetime.now().strftime('%Y%m%d')}.txt"
 
 
 def _buildSharedFlags(suppressDefaults: bool = False) -> argparse.ArgumentParser:

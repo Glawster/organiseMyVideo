@@ -295,6 +295,7 @@ class VideoRescanMixin:
                 if videoFile.is_file()
                 and videoFile.suffix.lower() in VIDEO_EXTENSIONS
                 and not self._isResetMovieSupplementalFile(entry, videoFile)
+                and not self._isResetMovieAncillaryFile(entry, videoFile)
             ]
             if videoFiles:
                 yield entry, videoFiles
@@ -310,6 +311,20 @@ class VideoRescanMixin:
         return any(
             part.casefold() in {"extras", "featurettes"} for part in relativeParts
         )
+
+    def _isResetMovieAncillaryFile(self, movieFolder: Path, videoFile: Path) -> bool:
+        """Return True when *videoFile* must not take the feature filename.
+
+        ``Sample.mkv`` beside the feature, and any video under a sample
+        folder, is ancillary media. It is not a second copy of the movie.
+        """
+        if videoFile.stem.casefold() == "sample":
+            return True
+        try:
+            relativeParts = videoFile.relative_to(movieFolder).parts
+        except ValueError:
+            return False
+        return any(self._isSampleLikeFolder(Path(part)) for part in relativeParts[:-1])
 
     def _iterResetTvShowDirs(self, tvDir: Path) -> Iterable[Path]:
         """Yield top-level TV show directories for reset scans."""
@@ -1004,7 +1019,16 @@ class VideoRescanMixin:
             sourceMovieInfo = self._normaliseMovieMetadata(sourceMovieInfo)
             if not sourceMovieInfo:
                 return None
-            return self._enrichMovieMetadata(sourceMovieInfo) or sourceMovieInfo
+            # movie.xml can name a different film from the folder. Do not fetch
+            # online metadata to choose a winner, and do not rename onto it.
+            if self._refuseMovieIdentityChange(
+                sourceMovieInfo, videoFile.parent, videoFile
+            ):
+                return sourceMovieInfo
+            metadata = self._movieMetadataWithoutIdentityState(sourceMovieInfo)
+            enriched = self._enrichMovieMetadata(metadata) or metadata
+            self._refuseMovieIdentityChange(enriched, videoFile.parent, videoFile)
+            return enriched
 
     def _resetMovieMetadataForFile(
         self,
@@ -1019,14 +1043,32 @@ class VideoRescanMixin:
             return "skipped"
         resolvedMovieInfo = dict(resolvedMovieInfo)
         resolvedMovieInfo["extension"] = videoFile.suffix
+        if self._refuseMovieIdentityChange(
+            resolvedMovieInfo, videoFile.parent, videoFile
+        ):
+            return "skipped"
+        if self._isResetMovieAncillaryFile(videoFile.parent, videoFile):
+            # A sample must not be planned as the feature, even when the
+            # canonical feature name is not already taken.
+            return self._movieFileCollisionOutcome(
+                videoFile,
+                videoFile.with_name(
+                    self._buildMovieDestinationFilename(videoFile, resolvedMovieInfo)
+                ),
+                ancillary=True,
+            )
 
         movieDir = videoFile.parent
+        namingOnly = bool(resolvedMovieInfo.get("identityNamingTitle"))
         with self._suppressResetMetadataPreserveLogs():
             movieXml = movieDir / "movie.xml"
-            if movieXml.exists():
-                self._updateMovieMetadataFile(movieXml, resolvedMovieInfo)
-            else:
-                self._ensureMovieMetadata(movieDir, resolvedMovieInfo)
+            # A case-only difference keeps the capitalised filename and leaves
+            # the sidecar text alone. A real conflict already returned above.
+            if not namingOnly:
+                if movieXml.exists():
+                    self._updateMovieMetadataFile(movieXml, resolvedMovieInfo)
+                else:
+                    self._ensureMovieMetadata(movieDir, resolvedMovieInfo)
             self._ensureMovieDvdIdMetadata(movieDir, resolvedMovieInfo)
             self._fetchMovieArtwork(resolvedMovieInfo, movieDir)
 
@@ -1040,8 +1082,11 @@ class VideoRescanMixin:
         if destinationPath.exists() or (
             reservedDestinations is not None and destinationPath in reservedDestinations
         ):
-            logger.error("Scan movie target already exists: %s", destinationPath)
-            return "errors"
+            # The name above is already filesystem-safe. Classify the existing
+            # target instead of renaming onto it.
+            return self._movieFileCollisionOutcome(
+                videoFile, destinationPath, ancillary=False
+            )
         if reservedDestinations is not None:
             reservedDestinations.add(destinationPath)
 
@@ -1097,11 +1142,111 @@ class VideoRescanMixin:
         self._recordSummaryRename(videoFile, destinationPath)
         return "renamed"
 
+    def _movieFileCollisionOutcome(
+        self, sourceFile: Path, destinationPath: Path, *, ancillary: bool
+    ) -> str:
+        """Report an existing or reserved movie-file target and return its outcome."""
+        if ancillary:
+            classification = "ignored ancillary media"
+            outcome = "skipped"
+        elif (
+            destinationPath.exists()
+            and destinationPath.is_file()
+            and sourceFile.suffix.lower() in VIDEO_EXTENSIONS
+        ):
+            classification = "possible duplicate feature file"
+            outcome = "errors"
+        else:
+            classification = "unresolved file collision"
+            outcome = "errors"
+        lines = [
+            "movie file collision",
+            f"classification: {classification}",
+            f"source: {sourceFile}",
+            f"target: {destinationPath}",
+        ]
+        if sourceFile.is_file() and destinationPath.is_file():
+            lines.append(f"source bytes: {sourceFile.stat().st_size}")
+            lines.append(f"target bytes: {destinationPath.stat().st_size}")
+        logger.warning("%s", "\n".join(lines))
+        if not ancillary:
+            self._recordSummaryInvestigation(
+                classification,
+                f"source: {sourceFile}",
+                f"target: {destinationPath}",
+                *(
+                    [
+                        f"source bytes: {sourceFile.stat().st_size}",
+                        f"target bytes: {destinationPath.stat().st_size}",
+                    ]
+                    if sourceFile.is_file() and destinationPath.is_file()
+                    else []
+                ),
+            )
+        return outcome
+
+    def _movieFolderSameIdentity(self, source: Path, destination: Path) -> bool:
+        """Return True when two existing movie folders name the same film."""
+        from .movieIdentity import (
+            MOVIE_IDENTITY_AGREE,
+            MOVIE_IDENTITY_PRESERVE_CASE,
+            movieIdentityClassify,
+        )
+
+        sourceParsed = self.parseMovieFilename(source.name)
+        destinationParsed = self.parseMovieFilename(destination.name)
+        if not sourceParsed or not destinationParsed:
+            return False
+        decision = movieIdentityClassify(
+            sourceParsed.get("title"),
+            sourceParsed.get("year"),
+            destinationParsed.get("title"),
+            destinationParsed.get("year"),
+        )
+        return decision.kind in {MOVIE_IDENTITY_AGREE, MOVIE_IDENTITY_PRESERVE_CASE}
+
+    def _refuseExistingMovieFolder(
+        self,
+        movieFolder: Path,
+        destinationDir: Path,
+        reservedDestinations: Optional[set[Path]],
+    ) -> bool:
+        """Return True when *destinationDir* already claimed and must be left as it is."""
+        claimed = destinationDir.exists() or (
+            reservedDestinations is not None and destinationDir in reservedDestinations
+        )
+        if not claimed:
+            return False
+        from .showFolders import movieFolderCollisionReport
+
+        sameIdentity = destinationDir.is_dir() and self._movieFolderSameIdentity(
+            movieFolder, destinationDir
+        )
+        report = movieFolderCollisionReport(
+            movieFolder, destinationDir, sameIdentity=sameIdentity
+        )
+        logger.warning("%s", report)
+        reportLines = report.splitlines()
+        classification = next(
+            (
+                line.partition(":")[2].strip()
+                for line in reportLines
+                if line.startswith("classification:")
+            ),
+            "movie folder collision",
+        )
+        self._recordSummaryInvestigation(
+            classification,
+            *reportLines[2:],
+        )
+        return True
+
     def _maybeRenameResetMovieFolder(
         self,
         movieFolder: Path,
         videoFiles: list[Path],
         movieInfo: Optional[dict] = None,
+        reservedDestinations: Optional[set[Path]] = None,
     ):
         """Return updated movie folder and paths after canonical folder rename."""
         if not movieFolder.is_dir() or not videoFiles:
@@ -1111,24 +1256,29 @@ class VideoRescanMixin:
             movieInfo = self._resolveResetMovieInfo(videoFiles[0])
         if not movieInfo or not movieInfo.get("title") or not movieInfo.get("year"):
             return movieFolder, videoFiles
+        if self._refuseMovieIdentityChange(movieInfo, movieFolder, *videoFiles):
+            return movieFolder, videoFiles
 
         from .showFolders import canonicalMovieFolderName
 
         destinationDir = movieFolder.with_name(
-            canonicalMovieFolderName(f"{movieInfo['title']} ({movieInfo['year']})")
+            canonicalMovieFolderName(
+                f"{self._movieNamingTitle(movieInfo)} ({movieInfo['year']})"
+            )
         )
         if destinationDir == movieFolder:
             return movieFolder, videoFiles
-        if destinationDir.exists():
-            logger.error(
-                "rescan movie folder target already exists: %s", destinationDir
-            )
+        if self._refuseExistingMovieFolder(
+            movieFolder, destinationDir, reservedDestinations
+        ):
             return movieFolder, videoFiles
 
         logger.multiline(
             ["renaming movie folder", movieFolder.name, destinationDir.name]
         )
         if self.dryRun:
+            if reservedDestinations is not None:
+                reservedDestinations.add(destinationDir)
             self._recordSummaryRename(movieFolder, destinationDir)
             return destinationDir, [
                 destinationDir / videoFile.relative_to(movieFolder)
@@ -1162,6 +1312,8 @@ class VideoRescanMixin:
                 )
                 return movieFolder, videoFiles
             destinationDir = fallbackDir
+        if reservedDestinations is not None:
+            reservedDestinations.add(destinationDir)
         self._recordSummaryRename(movieFolder, destinationDir)
 
         return destinationDir, [
@@ -1538,7 +1690,7 @@ class VideoRescanMixin:
                 with self._bufferResetItemLogs() as itemLogs:
                     resolvedMovieInfo = self._resolveResetMovieInfo(videoFiles[0])
                     movieFolder, videoFiles = self._maybeRenameResetMovieFolder(
-                        movieFolder, videoFiles, resolvedMovieInfo
+                        movieFolder, videoFiles, resolvedMovieInfo, reservedDestinations
                     )
                     for videoFile in videoFiles:
                         outcome = self._resetMovieMetadataForFile(

@@ -6,6 +6,8 @@ from organiseMyVideo.filesystemOperations import FilesystemOperations
 from organiseMyVideo.showFolders import (
     canonicalMovieFolderName,
     canonicalTvShowFolderName,
+    movieFilesystemSafeTitle,
+    movieFolderContentDescribe,
     normaliseMovieFolderNames,
     normaliseTvShowFolderNames,
     restoreLeadingThe,
@@ -24,7 +26,26 @@ def testCanonicalTvShowFolderNameMovesLeadingThe():
     assert canonicalMovieFolderName("The Godfather (1972)") == "Godfather, The (1972)"
     assert canonicalMovieFolderName("Godfather, The (1972)") == "Godfather, The (1972)"
     assert canonicalMovieFolderName("Inception (2010)") == "Inception (2010)"
-    assert canonicalMovieFolderName("Hitchcock/Truffaut (2015)") == "Hitchcock - Truffaut (2015)"
+    assert (
+        canonicalMovieFolderName("Hitchcock/Truffaut (2015)")
+        == "Hitchcock - Truffaut (2015)"
+    )
+    assert movieFilesystemSafeTitle("6:45") == "6 - 45"
+    assert movieFilesystemSafeTitle("Nativity 3 - Dude, Where's My Donkey?!") == (
+        "Nativity 3 - Dude, Where's My Donkey!"
+    )
+    assert movieFilesystemSafeTitle("TAYLOR SWIFT | THE ERAS TOUR") == (
+        "TAYLOR SWIFT THE ERAS TOUR"
+    )
+    assert movieFilesystemSafeTitle("Thunderbolts*") == "Thunderbolts"
+    assert movieFilesystemSafeTitle('Say "Hello"') == "Say Hello"
+    assert movieFilesystemSafeTitle("A < B") == "A B"
+    assert movieFilesystemSafeTitle("What?") == "What"
+    assert canonicalMovieFolderName("Thunderbolts* (2025)") == "Thunderbolts (2025)"
+    assert (
+        canonicalMovieFolderName("Nativity 3 - Dude, Where's My Donkey?! (2014)")
+        == "Nativity 3 - Dude, Where's My Donkey! (2014)"
+    )
 
 
 def testNormaliseRenamesLeadingTheShowFolder(tmp_path: Path):
@@ -105,3 +126,52 @@ def testNormaliseRenamesLeadingTheMovieFolder(tmp_path: Path):
     assert (newFolder / video.name).read_bytes() == b"movie"
     assert not oldFolder.exists()
     assert stats.renamed == 1
+
+
+def testMovieFolderContentRelation(tmp_path: Path):
+    source = tmp_path / "Inside Out 2 (2024)_"
+    target = tmp_path / "Inside Out 2 (2024)"
+    source.mkdir()
+    target.mkdir()
+    (source / "movie.mkv").write_bytes(b"movie")
+    (target / "movie.xml").write_text("<Title></Title>", encoding="utf-8")
+    (target / "folder.jpg").write_bytes(b"art")
+
+    relation, evidence = movieFolderContentDescribe(source, target)
+
+    assert relation == "complementary"
+    assert "feature file" in evidence
+    assert "metadata" in evidence
+    assert "artwork" in evidence
+
+    (target / "movie.mkv").write_bytes(b"movie")
+    (source / "movie.xml").write_text("<Title></Title>", encoding="utf-8")
+    (source / "folder.jpg").write_bytes(b"art")
+    relation, _evidence = movieFolderContentDescribe(source, target)
+    assert relation == "identical"
+
+    (target / "movie.mkv").write_bytes(b"xxxxx")
+    relation, evidence = movieFolderContentDescribe(source, target)
+    assert relation == "distinct"
+    assert "movie.mkv" in evidence
+
+
+def testNormaliseDoesNotMergeFolderThatDropsUnsupportedCharacters(tmp_path: Path):
+    movieRoot = tmp_path / "movie1"
+    source = movieRoot / "Thunderbolts* (2024)"
+    target = movieRoot / "Thunderbolts (2024)"
+    source.mkdir(parents=True)
+    target.mkdir()
+    (source / "Thunderbolts* (2024).mkv").write_bytes(b"source")
+    (target / "folder.jpg").write_bytes(b"art")
+
+    stats = normaliseMovieFolderNames(
+        [movieRoot],
+        filesystem=FilesystemOperations(dryRun=False),
+        dryRun=False,
+    )
+
+    assert (source / "Thunderbolts* (2024).mkv").read_bytes() == b"source"
+    assert (target / "folder.jpg").read_bytes() == b"art"
+    assert stats.renamed == 0
+    assert stats.conflicts == 1

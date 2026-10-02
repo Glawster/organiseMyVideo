@@ -5132,9 +5132,7 @@ def testResetLibraryMetadataTvTargetSkipsMovieMetadataPreparation(
 
     mockPrepare.assert_called_once_with([], [tvStorage])
     mockMovies.assert_not_called()
-    mockTv.assert_called_once_with(
-        [tvStorage], showFilter=None, deepScan=True
-    )
+    mockTv.assert_called_once_with([tvStorage], showFilter=None, deepScan=True)
 
 
 def testResetTvEpisodeTitlesRenamesNoisyStoredEpisodes(
@@ -5504,7 +5502,10 @@ def testEnsureSeriesMetadataDoesNotOverwriteCorruptFileWithoutIdentity(
         )
 
     assert seriesFile.read_bytes() == original
-    assert "could not repair corrupt series metadata without provider identity" in caplog.text
+    assert (
+        "could not repair corrupt series metadata without provider identity"
+        in caplog.text
+    )
 
 
 def testResetTvEpisodeTitlesRegeneratesCorruptEpisodeMetadataXml(
@@ -6456,9 +6457,7 @@ def testTvDuplicateKeyIgnoresTrailingSeparators(
     assert confirmedOrganizer._buildResetTvShowDuplicateKey(
         "Grimm (2011) -"
     ) == confirmedOrganizer._buildResetTvShowDuplicateKey("Grimm")
-    assert confirmedOrganizer._resetTvShowMatchesFilter(
-        "Grimm (2011) -", "grimm"
-    )
+    assert confirmedOrganizer._resetTvShowMatchesFilter("Grimm (2011) -", "grimm")
 
 
 def testTargetedTvScanMatchesYearAndTrailingTheDuplicateFolders(
@@ -6481,9 +6480,7 @@ def testTargetedTvScanMatchesYearAndTrailingTheDuplicateFolders(
     assert confirmedOrganizer._resetTvShowMatchesFilter(
         "The Crossing (2018)", "the crossing"
     )
-    assert confirmedOrganizer._resetTvShowMatchesFilter(
-        "Crossing, The", "the crossing"
-    )
+    assert confirmedOrganizer._resetTvShowMatchesFilter("Crossing, The", "the crossing")
     assert confirmedOrganizer._buildResetTvShowDuplicateKey(
         "The Crossing (2018)"
     ) == confirmedOrganizer._buildResetTvShowDuplicateKey("Crossing, The")
@@ -6773,7 +6770,7 @@ def testMainAutoModeDisablesPromptsAndSetsSummaryPath():
         useCurses=True,
     )
     assert organizerInstance.summaryReportPath == (
-        omv_main.APP_CONFIG_FILE.parent
+        omv_main.applicationStateDirectory()
         / f"summary.{omv_main.datetime.now().strftime('%Y%m%d')}.txt"
     )
     assert organizerInstance.summaryReportMode == "process"
@@ -6810,7 +6807,7 @@ def testMainRescanModeCallsResetLibraryMetadataAndSetsSummaryPath():
         useCurses=True,
     )
     assert organizerInstance.summaryReportPath == (
-        omv_main.APP_CONFIG_FILE.parent
+        omv_main.applicationStateDirectory()
         / f"summary.{omv_main.datetime.now().strftime('%Y%m%d')}.txt"
     )
     assert organizerInstance.summaryReportMode == "rescan"
@@ -6953,6 +6950,7 @@ def testWriteSummaryReportAppendsTransfersRenamesAndCleanup(
     organizer._summaryRenames = []
     organizer._summaryCleanupTasks = []
     organizer._summaryDuplicateTvShows = []
+    organizer._summaryInvestigations = []
     organizer.dryRun = False
     organizer.summaryReportMode = "rescan"
     organizer._recordSummaryCleanup("cleanup needed: /tmp/source/duplicate")
@@ -6962,8 +6960,16 @@ def testWriteSummaryReportAppendsTransfersRenamesAndCleanup(
     assert reportText.count("organiseMyVideo") == 2
     assert "organiseMyVideo DRY-RUN process summary" in reportText
     assert "organiseMyVideo ACTUAL-RUN rescan summary" in reportText
-    assert "Transfers:\n- /tmp/source/movie.mkv -> /library/movie.mkv" in reportText
-    assert "Renames:\n- /tmp/source/Extras -> /tmp/source/Featurettes" in reportText
+    assert (
+        "Transfers:\n"
+        "- from: /tmp/source/movie.mkv\n"
+        "  to:   /library/movie.mkv"
+    ) in reportText
+    assert (
+        "Renames:\n"
+        "- folder:  /tmp/source/Extras\n"
+        "  to:      /tmp/source/Featurettes"
+    ) in reportText
     assert "Cleanup:\n- remove empty folder: /tmp/source/old" in reportText
     assert (
         "Possible duplicate TV shows:\n"
@@ -6972,6 +6978,63 @@ def testWriteSummaryReportAppendsTransfersRenamesAndCleanup(
         "  - Grimm (2011)"
     ) in reportText
     assert "- cleanup needed: /tmp/source/duplicate" in reportText
+
+
+def testWriteSummaryReportGroupsMovieFolderAndFileRenames(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    reportPath = tmp_path / "summary.txt"
+    organizer.summaryReportPath = reportPath
+    organizer.summaryReportMode = "rescan"
+    organizer._recordSummaryRename(
+        Path("/mnt/movie1/Movies/First Movie? (2020)"),
+        Path("/mnt/movie1/Movies/First Movie (2020)"),
+    )
+    organizer._recordSummaryRename(
+        Path("/mnt/movie1/Movies/First Movie (2020)/First Movie? (2020).mkv"),
+        Path("/mnt/movie1/Movies/First Movie (2020)/First Movie (2020).mkv"),
+    )
+    organizer._recordSummaryRename(
+        Path("/mnt/movie2/Movies/Second Movie? (2022)"),
+        Path("/mnt/movie2/Movies/Second Movie (2022)"),
+    )
+
+    organizer._writeSummaryReport()
+
+    reportText = reportPath.read_text(encoding="utf-8")
+    assert (
+        "Renames:\n"
+        "- folder:  /mnt/movie1/Movies/First Movie? (2020)\n"
+        "  to:      /mnt/movie1/Movies/First Movie (2020)\n"
+        "  movie:   /mnt/movie1/Movies/First Movie (2020)/First Movie? (2020).mkv\n"
+        "  to:      /mnt/movie1/Movies/First Movie (2020)/First Movie (2020).mkv\n"
+        "\n"
+        "- folder:  /mnt/movie2/Movies/Second Movie? (2022)\n"
+        "  to:      /mnt/movie2/Movies/Second Movie (2022)"
+    ) in reportText
+
+
+def testWriteSummaryReportShowsInvestigations(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    reportPath = tmp_path / "summary.txt"
+    organizer.summaryReportPath = reportPath
+    organizer.summaryReportMode = "rescan"
+    organizer._recordSummaryInvestigation(
+        "possible duplicate feature file",
+        "source: /library/Movie/Movie (1).mkv",
+        "target: /library/Movie/Movie.mkv",
+    )
+
+    organizer._writeSummaryReport()
+
+    reportText = reportPath.read_text(encoding="utf-8")
+    assert (
+        "Needs further investigation:\n"
+        "- possible duplicate feature file\n"
+        "  source: /library/Movie/Movie (1).mkv\n"
+        "  target: /library/Movie/Movie.mkv"
+    ) in reportText
 
 
 def testMainConfiguresConsoleTimestampWithoutMilliseconds():
@@ -7011,16 +7074,24 @@ def testMainEnablesDebugLogging():
         omv_main.logger.logger.setLevel(previousLevel)
 
 
-def testMovieDestinationFilenameSanitisesFilesystemSeparators(organizer: VideoOrganizer):
+def testMovieDestinationFilenameSanitisesFilesystemSeparators(
+    organizer: VideoOrganizer,
+):
     source = organizer.sourceDir / "Hitchcock-Truffaut.mkv"
-    assert organizer._buildMovieDestinationFilename(
-        source,
-        {"title": "Hitchcock/Truffaut", "year": "2015", "extension": ".mkv"},
-    ) == "Hitchcock - Truffaut (2015).mkv"
-    assert organizer._buildMovieDestinationFilename(
-        source,
-        {"title": "Batman: Begins", "year": "2005", "extension": ".mkv"},
-    ) == "Batman - Begins (2005).mkv"
+    assert (
+        organizer._buildMovieDestinationFilename(
+            source,
+            {"title": "Hitchcock/Truffaut", "year": "2015", "extension": ".mkv"},
+        )
+        == "Hitchcock - Truffaut (2015).mkv"
+    )
+    assert (
+        organizer._buildMovieDestinationFilename(
+            source,
+            {"title": "Batman: Begins", "year": "2005", "extension": ".mkv"},
+        )
+        == "Batman - Begins (2005).mkv"
+    )
 
 
 def testScanItemLogsFlushAfterProgressLine(
@@ -7070,52 +7141,48 @@ def testTvShowFolderRenameUsesTwoLineOutput(
     episode.write_bytes(b"x")
 
     with (
-        patch.object(organizer, "_resolveStoredTvShowFolderName", return_value="Old Show"),
+        patch.object(
+            organizer, "_resolveStoredTvShowFolderName", return_value="Old Show"
+        ),
         caplog.at_level("INFO"),
     ):
         organizer._maybeRenameResetTvShowFolder(tvDir, "old show", [episode])
 
-    assert (
-        "...renaming TV show:\n"
-        "     old show\n"
-        "     Old Show"
-    ) in caplog.text
+    assert ("...renaming TV show:\n" "     old show\n" "     Old Show") in caplog.text
     assert "(from old show)" not in caplog.text
 
 
 def testMovieFolderRenameUsesTwoLineOutput(
     tmp_path: Path, organizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
 ):
-    movieFolder = tmp_path / "Old Name (2024)"
+    movieFolder = tmp_path / "Old: Name (2024)"
     movieFolder.mkdir()
-    movieFile = movieFolder / "Old Name (2024).mkv"
+    movieFile = movieFolder / "Old: Name (2024).mkv"
     movieFile.write_bytes(b"x")
-    movieInfo = {"title": "New Name", "year": "2024"}
+    movieInfo = {"title": "Old: Name", "year": "2024"}
 
     with caplog.at_level("INFO"):
         organizer._maybeRenameResetMovieFolder(movieFolder, [movieFile], movieInfo)
 
     assert (
-        "...renaming movie folder:\n"
-        "     Old Name (2024)\n"
-        "     New Name (2024)"
+        "...renaming movie folder:\n" "     Old: Name (2024)\n" "     Old - Name (2024)"
     ) in caplog.text
-    assert "(from Old Name (2024))" not in caplog.text
+    assert "(from Old: Name (2024))" not in caplog.text
 
 
 def testMovieScanUsesSameResolvedIdentityForFolderAndFilename(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer
 ):
     movieStorage = tmp_path / "movie1"
-    movieFolder = movieStorage / "Example Movie (2002)"
+    movieFolder = movieStorage / "Example: Movie (2002)"
     movieFolder.mkdir(parents=True)
-    movieFile = movieFolder / "Example Movie (2002).mkv"
+    movieFile = movieFolder / "Example: Movie (2002).mkv"
     movieFile.write_bytes(b"movie")
 
     def enrich(movieInfo):
         resolved = dict(movieInfo)
-        resolved["title"] = "Example Movie"
-        resolved["year"] = "2003"
+        resolved["title"] = "Example: Movie"
+        resolved["year"] = "2002"
         return resolved
 
     with (
@@ -7126,10 +7193,10 @@ def testMovieScanUsesSameResolvedIdentityForFolderAndFilename(
     ):
         stats = confirmedOrganizer.resetMovieMetadata([movieStorage])
 
-    canonicalFolder = movieStorage / "Example Movie (2003)"
+    canonicalFolder = movieStorage / "Example - Movie (2002)"
     assert stats == {"renamed": 1, "skipped": 0, "errors": 0}
     assert canonicalFolder.exists()
-    assert (canonicalFolder / "Example Movie (2003).mkv").exists()
+    assert (canonicalFolder / "Example - Movie (2002).mkv").exists()
     assert not movieFolder.exists()
 
 
@@ -7165,9 +7232,9 @@ def testMovieScanDoesNotNeedColonFallbackAfterCanonicalSanitising(
 def testMovieScanUsesDashInsteadOfColon(
     tmp_path: Path, confirmedOrganizer: VideoOrganizer
 ):
-    movieFolder = tmp_path / "Example (2021)"
+    movieFolder = tmp_path / "Example: Subtitle (2021)"
     movieFolder.mkdir()
-    movieFile = movieFolder / "Example (2021).mkv"
+    movieFile = movieFolder / "Example: Subtitle (2021).mkv"
     movieFile.write_bytes(b"movie")
     movieInfo = {"title": "Example: Subtitle", "year": "2021"}
 
@@ -7180,7 +7247,7 @@ def testMovieScanUsesDashInsteadOfColon(
 
 
 def testMovieScanDryRunDetectsReservedDestinationCollision(
-    organizer: VideoOrganizer,
+    organizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
 ):
     movieDir = organizer.sourceDir / "Example Movie (2024)"
     movieDir.mkdir()
@@ -7198,11 +7265,16 @@ def testMovieScanDryRunDetectsReservedDestinationCollision(
 
     with (
         patch.object(organizer, "_readMovieMcmHints", return_value=movieInfo),
-        patch.object(organizer, "_normaliseMovieMetadata", side_effect=lambda value: value),
-        patch.object(organizer, "_enrichMovieMetadata", side_effect=lambda value: value),
+        patch.object(
+            organizer, "_normaliseMovieMetadata", side_effect=lambda value: value
+        ),
+        patch.object(
+            organizer, "_enrichMovieMetadata", side_effect=lambda value: value
+        ),
         patch.object(organizer, "_ensureMovieMetadata"),
         patch.object(organizer, "_ensureMovieDvdIdMetadata"),
         patch.object(organizer, "_fetchMovieArtwork"),
+        caplog.at_level(logging.WARNING),
     ):
         firstResult = organizer._resetMovieMetadataForFile(first, reserved)
         secondResult = organizer._resetMovieMetadataForFile(second, reserved)
@@ -7210,3 +7282,5 @@ def testMovieScanDryRunDetectsReservedDestinationCollision(
     assert firstResult == "renamed"
     assert secondResult == "errors"
     assert reserved == {movieDir / "Example Movie (2024).mkv"}
+    assert "classification: unresolved file collision" in caplog.text
+    assert "part2.mkv" in caplog.text

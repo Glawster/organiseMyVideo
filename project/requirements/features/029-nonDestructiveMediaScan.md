@@ -12,8 +12,9 @@ catalogue state without risking changes to media files or folders.
 
 Filesystem and embedded-media mutations belong to explicit maintenance
 commands. `media organise` owns arrangement, renames, moves and merges;
-`media clean` owns removals and cleanup. Those commands remain dry-run by
-default and require `--confirm` before changing media.
+`media clean` owns incoming/staging cleanup only. Those commands remain dry-run
+by default and require `--confirm` before changing media. Library-wide naming,
+season-folder normalisation, moves and merges belong to `media organise`.
 
 ## Context
 
@@ -81,9 +82,14 @@ embedded-metadata mutations are performed.
 
 ### `media clean`
 
-`media clean` owns destructive cleanup such as removal of confirmed-empty or
-otherwise explicitly cleanable material. It remains dry-run by default and
-requires `--confirm` before deletion.
+`media clean` is confined to the configured or explicitly supplied incoming/
+staging source tree. It owns staged-name cleanup plus removal/quarantine of
+confirmed-empty or sample-only staged folders. It must not normalise TV show or
+season folders, walk library roots for repair, or perform catalogue-wide
+reconciliation merely because clean was run. It remains dry-run by default and
+requires `--confirm` before mutation.
+
+See REQ-036 for the incoming-preparation workflow and source-boundary contract.
 
 ## Reporting
 
@@ -141,7 +147,7 @@ those writes do not alter the media filesystem.
 9. Tests prove that scan code cannot reach mutating filesystem operations even
    when a compatibility `--confirm` flag is supplied.
 10. Public CLI documentation describes the boundary as **scan = observe,
-    organise = arrange, clean = remove**.
+    organise = arrange library media, clean = prepare/clean incoming media**.
 11. Existing scan filters, catalogue refresh, source resolution and focused
     show scanning continue to work.
 12. `pytest`, `runLinter` and `git diff --check` pass.
@@ -154,6 +160,7 @@ those writes do not alter the media filesystem.
 - [REQ-017](017-mergeDuplicateTvFolders.md)
 - [REQ-018](018-tvShowFolderArticles.md)
 - [REQ-020](020-combinedMediaScan.md)
+- [REQ-036](036-incomingMediaPreparation.md)
 - [ADR-003](../../adr/003-filesystemSafetyBoundary.md)
 - [ADR-008](../../adr/008-sqliteMediaCatalogue.md)
 
@@ -161,3 +168,6 @@ those writes do not alter the media filesystem.
 
 - 2026-09-27: created to make scan commands explicitly non-destructive and
   move repair mutations behind explicit organise/clean command boundaries.
+
+- 2026-10-02: clarified that `media clean` is limited to the incoming/staging
+  source tree; library normalisation remains outside clean.
