@@ -1,6 +1,6 @@
 # Requirements
 
-Next available number: 037
+Next available number: 038
 
 Requirements created after adoption of the managed process are recorded here.
 Historical behaviour is not assigned invented retrospective requirements.
@@ -43,6 +43,7 @@ Historical behaviour is not assigned invented retrospective requirements.
 | 034 | [Catalogue location reconciliation](features/034-catalogueLocationReconciliation.md) | Reconcile movie and TV catalogue locations with authoritatively scanned roots without dropping an unscanned disk. | Completed | Not required | [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
 | 035 | [Movie identity conflict detection](features/035-movieIdentityConflictDetection.md) | Flag title and release-year identity changes instead of routine movie renames, make canonical names filesystem-safe, and classify existing targets without overwriting. | Completed | [Prompt](prompt/035-movieIdentityConflictDetection.md) | Not required |
 | 036 | [Incoming media preparation workflow](features/036-incomingMediaPreparation.md) | Restrict `media clean` to incoming/staging hygiene and define the clean -> scan -> organise workflow. | ToDo | [Prompt](prompt/036-incomingMediaPreparation.md) | [ADR-003](../adr/003-filesystemSafetyBoundary.md) |
+| 037 | [Media storage redistribution](features/037-mediaStorageRedistribution.md) | Rebalance movie and TV stores by utilisation percentage using persisted dry-run plans and confirmed whole-folder moves. | ToDo | Not required | [ADR-003](../adr/003-filesystemSafetyBoundary.md), [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
 
 ## Prompt index
 
