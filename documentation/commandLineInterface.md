@@ -98,8 +98,8 @@ Dry-run is the default; `--confirm` performs moves. Same-name folders
 without IMDb/TMDB (movies) or TVDB/TMDB/IMDb (TV) are not merged. TV show
 folders that begin with `The` are stored as `Name, The`; movie folders
 as `Name, The (Year)`. Titles and media filenames keep `The Name`. Season
-folders are rewritten to unpadded `Season N`. Organise, merge, and clean
-all run that folder cleanup. Merge discovers duplicates from the current
+folders are rewritten to unpadded `Season N`. Organise and merge own library
+folder normalisation; `media clean` does not. Merge discovers duplicates from the current
 filesystem, then reconciles catalogue location state for every storage root
 it could list. That reconcile runs on a dry-run as well as after a confirmed
 merge, including when no duplicate group was found. A confirmed move also
@@ -114,10 +114,11 @@ still present. `stale` means that scan's root was listed and the folder was
 absent. `unverified` means the catalogue has not confirmed the path, or the
 folder is missing and its root was not listed. Locate does not delete rows.
 
-`media scan` repairs movie naming/metadata and performs lightweight TV show-level
-integrity checks. Use `media scan --show NAME` for a focused TV repair without walking
-unrelated shows, or `media scan --all` for the exhaustive episode-by-episode scan and
-full catalogue refresh. The older `library rescan` command can still target one side
+`media scan` is non-destructive. It inspects movie and TV libraries, reports
+naming/metadata/catalogue issues and proposed canonical paths, and may refresh
+application/catalogue state without mutating media. Use `media scan --show NAME`
+for focused inspection or `media scan --all` for exhaustive episode-level
+inspection and catalogue refresh. The older `library rescan` command can still target one side
 independently for compatibility and retains exhaustive behaviour. The Qt browser is
 expected to query the catalogue rather than walk disks.
 
@@ -136,11 +137,37 @@ The folder and filename are made safe before that rename is planned.
 `\`, `/`, and `:` become ` - `. `|`, `?`, `*`, `<`, `>`, and `"` are removed,
 so a title such as `Thunderbolts*` is planned as `Thunderbolts` and is not
 passed to `rename()`. Removing those characters does not make a different
-title or year safe. `Sample.mkv`, and video inside a sample folder, is not
-renamed to the feature. When the safe folder or file already exists, the scan
+title or year safe. Recognisable sample variants and video inside sample folders are not treated as
+feature media. When the safe folder or file already exists, the scan
 reports a same-identity merge candidate, a possible duplicate feature file,
 ignored ancillary media, or an unresolved collision. Neither side is
 overwritten or deleted. A merge of the two folders is not performed.
+
+## Incoming media cleaning
+
+`media clean [SOURCE]` is restricted to the selected incoming/staging source
+tree. It cleans staged release/site-name noise and may quarantine/remove empty
+or sample-only staged folders when confirmed. It does not normalise established
+TV show/season folders, rename library media, merge folders, or perform
+catalogue-wide reconciliation.
+
+The normal workflow is:
+
+```bash
+organiseMyVideo media clean
+organiseMyVideo media clean --confirm
+organiseMyVideo media scan
+organiseMyVideo media organise
+```
+
+`media scan` may reuse the same name-normalisation rules in memory for
+classification, but it must not perform clean mutations.
+
+Run summaries are application state and are written under
+`~/.local/state/organiseMyVideo/` (or `XDG_STATE_HOME`). They group related
+movie folder/file renames and finish with a `Needs further investigation`
+section for unresolved identity conflicts, merge candidates and possible
+duplicates.
 
 ## Compatibility interface
 
