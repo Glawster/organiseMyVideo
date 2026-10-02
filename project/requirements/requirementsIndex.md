@@ -1,6 +1,6 @@
 # Requirements
 
-Next available number: 036
+Next available number: 037
 
 Requirements created after adoption of the managed process are recorded here.
 Historical behaviour is not assigned invented retrospective requirements.
@@ -42,6 +42,7 @@ Historical behaviour is not assigned invented retrospective requirements.
 | 033 | [Camera folder capture-time correction](features/033-cameraFolderCaptureCorrection.md) | Correct existing camera folders without prior import history using frozen folder evidence and verified relocation. | Completed | [Prompt](prompt/033-cameraFolderCaptureCorrection.md) | [ADR-011](../adr/011-cameraCaptureCorrectionJournal.md) |
 | 034 | [Catalogue location reconciliation](features/034-catalogueLocationReconciliation.md) | Reconcile movie and TV catalogue locations with authoritatively scanned roots without dropping an unscanned disk. | Completed | Not required | [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
 | 035 | [Movie identity conflict detection](features/035-movieIdentityConflictDetection.md) | Flag title and release-year identity changes instead of routine movie renames, make canonical names filesystem-safe, and classify existing targets without overwriting. | Completed | [Prompt](prompt/035-movieIdentityConflictDetection.md) | Not required |
+| 036 | [Incoming media preparation workflow](features/036-incomingMediaPreparation.md) | Restrict `media clean` to incoming/staging hygiene and define the clean -> scan -> organise workflow. | ToDo | [Prompt](prompt/036-incomingMediaPreparation.md) | [ADR-003](../adr/003-filesystemSafetyBoundary.md) |
 
 ## Prompt index
 
@@ -74,4 +75,5 @@ Historical behaviour is not assigned invented retrospective requirements.
 - [032-cliTabCompletion](prompt/032-cliTabCompletion.md)
 - [033-cameraFolderCaptureCorrection](prompt/033-cameraFolderCaptureCorrection.md)
 - [035-movieIdentityConflictDetection](prompt/035-movieIdentityConflictDetection.md)
+- [036-incomingMediaPreparation](prompt/036-incomingMediaPreparation.md)
 <!-- OMP-PROMPT-INDEX-END -->
