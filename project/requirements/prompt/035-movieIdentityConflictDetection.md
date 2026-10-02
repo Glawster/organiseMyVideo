@@ -17,8 +17,9 @@ Do not redefine its outcome or acceptance criteria in this prompt.
 
 Prevent movie scan/organise workflows from treating title or release-year
 identity changes as routine renames, while retaining legitimate punctuation,
-spacing and filesystem-safe normalisation and preserving the library's
-capitalised title convention.
+spacing and filesystem-safe normalisation, preserving the library's
+capitalised title convention, and ensuring canonical movie names are made
+filesystem-safe before rename planning.
 
 ## Constraints
 
@@ -30,6 +31,17 @@ capitalised title convention.
 - Keep scan behaviour non-destructive in accordance with REQ-029.
 - Route any confirmed filesystem mutation through the established filesystem
   safety boundary.
+- Do not rely on catching `EINVAL` after an attempted rename as the primary
+  filesystem-safety mechanism. Derive a safe destination before collision
+  checks, logging, dry-run reporting, and mutation.
+- Ignore/remove unsupported filename characters rather than trying to preserve
+  them with filesystem-specific substitutions where identity remains clear.
+- Apply the same safe-name rule to both the movie folder and movie filename.
+- Exclude known ancillary media such as `Sample.mkv` from canonical feature-file
+  reconciliation.
+- Classify existing-target collisions instead of emitting only generic errors:
+  ancillary media, same-identity folder merge candidate, possible duplicate
+  feature file, or unresolved collision.
 - Do not convert already-capitalised titles to metadata sentence casing; for
   example, do not rename `Anyone But You` to `Anyone but You`.
 
@@ -47,6 +59,13 @@ Where a conflict is detected, report the current identity, proposed identity,
 the metadata/evidence source that produced the proposed value, and useful
 supporting evidence such as provider IDs and duration where available.
 
+Extend the existing filesystem-safe naming behaviour beyond the current
+colon-only fallback. Canonical metadata containing Windows/NTFS-invalid path
+characters such as `:`, `|`, `?`, `*`, `<`, `>`, or `"` must be mapped to a
+deterministic safe representation before a destination path is planned. The
+mapping must preserve recognisable identity and must not mask a substantive
+movie title or year conflict.
+
 ## Verification
 
 Add focused regression tests for every acceptance criterion, including:
@@ -54,7 +73,16 @@ Add focused regression tests for every acceptance criterion, including:
 - `13 minutes (2021)` versus `One Second Forever (2021)`;
 - release-year disagreements;
 - `Anyone But You` versus `Anyone but You`;
-- safe punctuation-only normalisation; and
+- safe punctuation-only normalisation;
+- canonical names containing `?`, `|`, `*`, `:`, `<`, `>`, and `"`;
+- the real-library examples `Nativity 3 - Dude, Where's My Donkey?!`,
+  `TAYLOR SWIFT | THE ERAS TOUR`, and `Thunderbolts*`;
+- folder and filename destinations being safe before `rename()` is called;
+- `Sample.mkv` not being treated as the feature;
+- same-identity folder collisions such as `Inside Out 2 (2024)_` versus
+  `Inside Out 2 (2024)` being reported as reconciliation/merge candidates;
+- existing canonical feature targets being reported as possible duplicate or
+  unresolved collisions without overwriting; and
 - both dry-run and confirmed workflows.
 
 Run the full repository-standard test and lint checks before handoff.

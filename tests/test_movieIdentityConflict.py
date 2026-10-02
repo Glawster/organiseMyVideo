@@ -1,12 +1,15 @@
 """REQ-035: a different movie title or year is not applied as a rename."""
 
 import logging
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from organiseMyVideo import VideoOrganizer
+from organiseMyVideo.showFolders import movieFilesystemSafeTitle
+
 from organiseMyVideo.movieIdentity import (
     MOVIE_IDENTITY_AGREE,
     MOVIE_IDENTITY_CONFLICT,
@@ -62,6 +65,29 @@ def _storedMovie(
     metadata = folder / "movie.xml"
     metadata.write_text(xml, encoding="utf-8")
     return folder, video, metadata
+
+
+def testFilesystemSafeMovieTitlePreservesValidPunctuationSpacing():
+    assert movieFilesystemSafeTitle("Battlestar Galactica - Blood & Chrome") == (
+        "Battlestar Galactica - Blood & Chrome"
+    )
+    assert movieFilesystemSafeTitle("Black '47") == "Black '47"
+    assert movieFilesystemSafeTitle("Highlander - The Source (Movie 2007)") == (
+        "Highlander - The Source (Movie 2007)"
+    )
+    assert movieFilesystemSafeTitle("Mr. & Mrs. Smith") == "Mr. & Mrs. Smith"
+    assert movieFilesystemSafeTitle("Planes, Trains & Automobiles") == (
+        "Planes, Trains & Automobiles"
+    )
+
+
+def testFilesystemSafeMovieTitleRemovesOnlyUnsupportedCharacters():
+    assert movieFilesystemSafeTitle("Why Him?") == "Why Him"
+    assert movieFilesystemSafeTitle("Casual Sex?") == "Casual Sex"
+    assert movieFilesystemSafeTitle("Thunderbolts*") == "Thunderbolts"
+    assert movieFilesystemSafeTitle("Nativity 3 - Dude, Where's My Donkey?!") == (
+        "Nativity 3 - Dude, Where's My Donkey!"
+    )
 
 
 def testMovieTitleIdentityIgnoresPunctuationArticlesAndCase():
@@ -417,3 +443,328 @@ def testScanRefusesYearIntroducedByMetadataEnrichment(
     assert "current: Example Movie (2002)" in caplog.text
     assert "proposed: Example Movie (2003)" in caplog.text
     assert "evidence: tmdb" in caplog.text
+
+
+_UNSAFE_FILENAME_CHARACTERS = set('\\/:*?"<>|')
+
+FILESYSTEM_SAFE_TITLES = (
+    (
+        "Nativity 3 - Dude, Where's My Donkey?! (2014)",
+        "Nativity 3 - Dude, Where's My Donkey?!",
+        "2014",
+        "Nativity 3 - Dude, Where's My Donkey! (2014)",
+    ),
+    (
+        "TAYLOR SWIFT | THE ERAS TOUR (2023)",
+        "TAYLOR SWIFT | THE ERAS TOUR",
+        "2023",
+        "TAYLOR SWIFT THE ERAS TOUR (2023)",
+    ),
+    (
+        "Thunderbolts* (2025)",
+        "Thunderbolts*",
+        "2025",
+        "Thunderbolts (2025)",
+    ),
+)
+
+
+def _rejectUnsafeRename(original):
+    """Return a rename spy that fails if a destination still has invalid characters."""
+
+    def _rename(source, destination, **kwargs):
+        name = Path(destination).name
+        if any(character in name for character in _UNSAFE_FILENAME_CHARACTERS):
+            raise OSError(22, "Invalid argument")
+        return original(source, destination, **kwargs)
+
+    return _rename
+
+
+@contextmanager
+def _quietMetadata(organizer: VideoOrganizer):
+    """Keep a scan on the title already stored, with no artwork lookup."""
+    with (
+        patch.object(
+            organizer, "_enrichMovieMetadata", side_effect=lambda value: dict(value)
+        ),
+        patch.object(organizer, "_fetchMovieArtwork"),
+    ):
+        yield
+
+
+@pytest.mark.parametrize(
+    ("folderName", "title", "year", "safeFolder"),
+    FILESYSTEM_SAFE_TITLES,
+)
+@pytest.mark.parametrize("dryRun", [True, False])
+def testFilesystemUnsafeTitlesAreSafeBeforeRename(
+    tmp_path: Path,
+    folderName: str,
+    title: str,
+    year: str,
+    safeFolder: str,
+    dryRun: bool,
+):
+    source = tmp_path / "source"
+    source.mkdir()
+    storage = tmp_path / "movie1"
+    folder, video, _metadata = _storedMovie(storage, folderName, _movieXml(title, year))
+    organizer = VideoOrganizer(sourceDir=str(source), dryRun=dryRun)
+    organizer.filesystem.rename = _rejectUnsafeRename(organizer.filesystem.rename)
+
+    with _quietMetadata(organizer):
+        stats = organizer.resetMovieMetadata([storage])
+
+    safeFile = f"{safeFolder}.mkv"
+    assert stats == {"renamed": 1, "skipped": 0, "errors": 0}
+    assert all(
+        not any(
+            character in Path(destination).name
+            for character in _UNSAFE_FILENAME_CHARACTERS
+        )
+        for _sourcePath, destination in organizer._summaryRenames
+    )
+    if dryRun:
+        assert len(organizer._summaryRenames) == 2
+        assert folder.is_dir()
+        assert video.is_file()
+        assert video.read_bytes() == b"movie"
+        return
+
+    canonical = storage / safeFolder
+    assert canonical.is_dir()
+    assert (canonical / safeFile).is_file()
+    assert (canonical / safeFile).read_bytes() == b"movie"
+    assert not folder.exists()
+
+
+@pytest.mark.parametrize("dryRun", [True, False])
+def testRemovedCharactersDoNotHideADifferentFilm(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, dryRun: bool
+):
+    source = tmp_path / "source"
+    source.mkdir()
+    storage = tmp_path / "movie1"
+    folder, video, metadata = _storedMovie(
+        storage,
+        "13 minutes (2021)",
+        _movieXml("One Second Forever?", "2021"),
+    )
+    originalXml = metadata.read_bytes()
+    organizer = VideoOrganizer(sourceDir=str(source), dryRun=dryRun)
+
+    with (
+        caplog.at_level(logging.INFO),
+        patch.object(organizer, "_enrichMovieMetadata") as enrich,
+    ):
+        stats = organizer.resetMovieMetadata([storage])
+
+    assert stats == {"renamed": 0, "skipped": 1, "errors": 0}
+    assert folder.is_dir()
+    assert video.is_file()
+    assert metadata.read_bytes() == originalXml
+    assert not (storage / "One Second Forever (2021)").exists()
+    assert organizer._summaryRenames == []
+    enrich.assert_not_called()
+    assert "current: 13 minutes (2021)" in caplog.text
+    assert "proposed: One Second Forever? (2021)" in caplog.text
+
+
+@pytest.mark.parametrize("dryRun", [True, False])
+def testRemovedCharactersDoNotHideADifferentYear(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, dryRun: bool
+):
+    source = tmp_path / "source"
+    source.mkdir()
+    storage = tmp_path / "movie1"
+    folder, video, _metadata = _storedMovie(
+        storage, "Thunderbolts* (2024)", _movieXml("Thunderbolts*", "2025")
+    )
+    organizer = VideoOrganizer(sourceDir=str(source), dryRun=dryRun)
+
+    with (
+        caplog.at_level(logging.INFO),
+        patch.object(organizer, "_enrichMovieMetadata") as enrich,
+    ):
+        stats = organizer.resetMovieMetadata([storage])
+
+    assert stats["renamed"] == 0
+    assert stats["errors"] == 0
+    assert folder.is_dir()
+    assert video.is_file()
+    assert not (storage / "Thunderbolts (2025)").exists()
+    assert organizer._summaryRenames == []
+    enrich.assert_not_called()
+    assert "current: Thunderbolts* (2024)" in caplog.text
+    assert "proposed: Thunderbolts* (2025)" in caplog.text
+
+
+@pytest.mark.parametrize("dryRun", [True, False])
+def testSampleIsNotRenamedToTheFeature(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, dryRun: bool
+):
+    source = tmp_path / "source"
+    source.mkdir()
+    storage = tmp_path / "movie1"
+    folder, feature, _metadata = _storedMovie(
+        storage,
+        "Inside Out 2 (2024)",
+        _movieXml("Inside Out 2", "2024"),
+        fileName="inside.mkv",
+    )
+    sample = folder / "Sample.mkv"
+    sample.write_bytes(b"sample")
+    organizer = VideoOrganizer(sourceDir=str(source), dryRun=dryRun)
+
+    with caplog.at_level(logging.INFO), _quietMetadata(organizer):
+        stats = organizer.resetMovieMetadata([storage])
+
+    assert sample.is_file()
+    assert sample.read_bytes() == b"sample"
+    assert all(
+        "Sample.mkv" not in sourcePath
+        for sourcePath, _dest in organizer._summaryRenames
+    )
+    assert "Sample.mkv" not in caplog.text
+    assert stats["errors"] == 0
+    if dryRun:
+        assert stats["errors"] == 0
+        assert feature.is_file()
+        return
+    assert (folder / "Inside Out 2 (2024).mkv").is_file()
+    assert (folder / "Inside Out 2 (2024).mkv").read_bytes() == b"movie"
+    assert not feature.exists()
+
+
+@pytest.mark.parametrize("dryRun", [True, False])
+def testSameIdentityFolderCollisionIsAMergeCandidate(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, dryRun: bool
+):
+    source = tmp_path / "source"
+    source.mkdir()
+    storage = tmp_path / "movie1"
+    featureFolder = storage / "Inside Out 2 (2024)_"
+    featureFolder.mkdir(parents=True)
+    feature = featureFolder / "Inside Out 2 (2024).mkv"
+    feature.write_bytes(b"movie")
+    metadataFolder = storage / "Inside Out 2 (2024)"
+    metadataFolder.mkdir()
+    (metadataFolder / "movie.xml").write_text(
+        _movieXml("Inside Out 2", "2024"), encoding="utf-8"
+    )
+    (metadataFolder / "folder.jpg").write_bytes(b"artwork")
+    organizer = VideoOrganizer(sourceDir=str(source), dryRun=dryRun)
+
+    with caplog.at_level(logging.INFO), _quietMetadata(organizer):
+        stats = organizer.resetMovieMetadata([storage])
+
+    assert stats["renamed"] == 0
+    assert stats["errors"] == 0
+    assert feature.read_bytes() == b"movie"
+    assert (metadataFolder / "movie.xml").is_file()
+    assert (metadataFolder / "folder.jpg").read_bytes() == b"artwork"
+    assert featureFolder.is_dir()
+    assert metadataFolder.is_dir()
+    assert organizer._summaryRenames == []
+    assert "classification: same-identity merge candidate" in caplog.text
+    assert "content: complementary" in caplog.text
+    assert "feature file" in caplog.text
+    assert "metadata" in caplog.text
+    assert "artwork" in caplog.text
+    assert str(featureFolder) in caplog.text
+    assert str(metadataFolder) in caplog.text
+
+
+@pytest.mark.parametrize("dryRun", [True, False])
+def testExistingFeatureFileIsReportedAsAPossibleDuplicate(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, dryRun: bool
+):
+    source = tmp_path / "source"
+    source.mkdir()
+    storage = tmp_path / "movie1"
+    folder, feature, _metadata = _storedMovie(
+        storage,
+        "Inside Out 2 (2024)",
+        _movieXml("Inside Out 2", "2024"),
+    )
+    other = folder / "part2.mkv"
+    other.write_bytes(b"other")
+    organizer = VideoOrganizer(sourceDir=str(source), dryRun=dryRun)
+
+    with caplog.at_level(logging.INFO), _quietMetadata(organizer):
+        stats = organizer.resetMovieMetadata([storage])
+
+    assert feature.read_bytes() == b"movie"
+    assert other.read_bytes() == b"other"
+    assert stats["renamed"] == 0
+    assert stats["errors"] == 1
+    assert "classification: possible duplicate feature file" in caplog.text
+    assert "part2.mkv" in caplog.text
+    assert str(feature) in caplog.text
+    assert organizer._summaryRenames == []
+
+
+def testSampleCollisionIsIgnoredAncillaryMedia(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    source = tmp_path / "source"
+    source.mkdir()
+    folder = tmp_path / "Inside Out 2 (2024)"
+    folder.mkdir()
+    feature = folder / "Inside Out 2 (2024).mkv"
+    feature.write_bytes(b"movie")
+    sample = folder / "Sample.mkv"
+    sample.write_bytes(b"sample")
+    organizer = VideoOrganizer(sourceDir=str(source), dryRun=False)
+    movieInfo = {
+        "title": "Inside Out 2",
+        "year": "2024",
+        "extension": ".mkv",
+        "type": "movie",
+    }
+
+    with (
+        caplog.at_level(logging.WARNING),
+        patch.object(organizer, "_fetchMovieArtwork"),
+    ):
+        outcome = organizer._resetMovieMetadataForFile(
+            sample, resolvedMovieInfo=movieInfo
+        )
+
+    assert outcome == "skipped"
+    assert sample.read_bytes() == b"sample"
+    assert feature.read_bytes() == b"movie"
+    assert "classification: ignored ancillary media" in caplog.text
+    assert "Sample.mkv" in caplog.text
+
+
+@pytest.mark.parametrize("dryRun", [True, False])
+def testMoveDoesNotOverwriteAnExistingFeatureFile(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, dryRun: bool
+):
+    source = tmp_path / "source"
+    source.mkdir()
+    incoming = source / "Inside Out 2 (2024).mkv"
+    incoming.write_bytes(b"incoming")
+    storage = tmp_path / "movie1"
+    existingFolder = storage / "Inside Out 2 (2024)"
+    existingFolder.mkdir(parents=True)
+    existing = existingFolder / "Inside Out 2 (2024).mkv"
+    existing.write_bytes(b"library")
+    organizer = VideoOrganizer(sourceDir=str(source), dryRun=dryRun)
+    movieInfo = {
+        "title": "Inside Out 2",
+        "year": "2024",
+        "extension": ".mkv",
+        "type": "movie",
+    }
+
+    with caplog.at_level(logging.INFO), _quietMetadata(organizer):
+        moved = organizer.moveMovie(incoming, movieInfo, [storage], interactive=False)
+
+    assert moved is False
+    assert incoming.read_bytes() == b"incoming"
+    assert existing.read_bytes() == b"library"
+    assert organizer._summaryTransfers == []
+    assert "classification: possible duplicate feature file" in caplog.text

@@ -441,6 +441,13 @@ class VideoMoveMixin:
         destFile = destDir / self._buildMovieDestinationFilename(
             sourceFile, resolvedMovieInfo
         )
+        if self._isResetMovieAncillaryFile(sourceFile.parent, sourceFile):
+            self._movieFileCollisionOutcome(sourceFile, destFile, ancillary=True)
+            return False
+        if destFile.exists():
+            # Planned name is already safe. Do not overwrite either file.
+            self._movieFileCollisionOutcome(sourceFile, destFile, ancillary=False)
+            return False
 
         logger.action(
             f"moving movie:\n" f"     {sourceFile.name}\n" f"     -> {destFile}"
@@ -645,6 +652,14 @@ class VideoMoveMixin:
 
         for videoFile in videoFiles:
             logger.info(_FILE_PROCESS_SEPARATOR)
+            if self._isResetMovieAncillaryFile(videoFile.parent, videoFile):
+                # Sample media is not reconciled onto the feature filename.
+                logger.warning(
+                    "ignored ancillary media\nsource: %s",
+                    videoFile,
+                )
+                stats["skipped"] += 1
+                continue
             mcmHints = self._readMcmHints(videoFile)
             tvInfo, movieInfo = self._classifyVideoFile(videoFile, mcmHints)
             if tvInfo and videoDirs:

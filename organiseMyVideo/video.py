@@ -911,6 +911,12 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         """Record cleanup work performed or still needed for the optional summary."""
         self._summaryCleanupTasks.append(task)
 
+    def _recordSummaryInvestigation(self, category: str, *details: str) -> None:
+        """Record one item that needs operator investigation after the scan."""
+        entry = (str(category), tuple(str(detail) for detail in details if detail))
+        if entry not in self._summaryInvestigations:
+            self._summaryInvestigations.append(entry)
+
     def _recordSummaryDuplicateTvShow(
         self, label: str, showNames: Iterable[str]
     ) -> None:
@@ -946,19 +952,53 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
             "Transfers:",
         ]
         if self._summaryTransfers:
-            lines.extend(
-                f"- {sourcePath} -> {destPath}"
-                for sourcePath, destPath in self._summaryTransfers
-            )
+            for index, (sourcePath, destPath) in enumerate(self._summaryTransfers):
+                if index:
+                    lines.append("")
+                lines.extend(
+                    [
+                        f"- from: {sourcePath}",
+                        f"  to:   {destPath}",
+                    ]
+                )
         else:
             lines.append("- none")
 
         lines.extend(["", "Renames:"])
         if self._summaryRenames:
-            lines.extend(
-                f"- {sourcePath} -> {destPath}"
-                for sourcePath, destPath in self._summaryRenames
-            )
+            previousWasFolder = False
+            previousDestination = None
+            for sourcePath, destPath in self._summaryRenames:
+                source = Path(sourcePath)
+                destination = Path(destPath)
+                isMovie = source.suffix.lower() in VIDEO_EXTENSIONS
+
+                groupedMovie = bool(
+                    isMovie
+                    and previousWasFolder
+                    and previousDestination is not None
+                    and destination.parent == previousDestination
+                )
+                if not groupedMovie and lines[-1] != "Renames:":
+                    lines.append("")
+
+                if groupedMovie:
+                    lines.extend(
+                        [
+                            f"  movie:   {sourcePath}",
+                            f"  to:      {destPath}",
+                        ]
+                    )
+                else:
+                    label = "movie" if isMovie else "folder"
+                    lines.extend(
+                        [
+                            f"- {label}:  {sourcePath}",
+                            f"  to:      {destPath}",
+                        ]
+                    )
+                previousWasFolder = not isMovie
+                previousDestination = destination if not isMovie else None
         else:
             lines.append("- none")
         lines.extend(["", "Cleanup:"])
@@ -973,6 +1013,15 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
                 lines.extend(f"  - {showName}" for showName in showNames)
         else:
             lines.append("- none")
+
+        lines.extend(["", "Needs further investigation:"])
+        if self._summaryInvestigations:
+            for category, details in self._summaryInvestigations:
+                lines.append(f"- {category}")
+                lines.extend(f"  {detail}" for detail in details)
+        else:
+            lines.append("- none")
+
         lines.append("")
         previous = reportPath.read_text(encoding="utf-8") if reportPath.exists() else ""
         separator = "\n\n" if previous else ""
@@ -1405,7 +1454,7 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         """
         if movieInfo.get("identityConflict"):
             if not movieInfo.get("identityConflictReported"):
-                self._reportMovieIdentityConflict(movieInfo)
+                self._reportMovieIdentityConflict(movieInfo, *paths)
                 movieInfo["identityConflictReported"] = True
             return True
 
@@ -1423,24 +1472,36 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         )
         if decision.kind == MOVIE_IDENTITY_CONFLICT:
             movieInfo["identityConflict"] = decision
-            self._reportMovieIdentityConflict(movieInfo)
+            self._reportMovieIdentityConflict(movieInfo, *paths)
             movieInfo["identityConflictReported"] = True
             return True
         if decision.kind == MOVIE_IDENTITY_PRESERVE_CASE and decision.retainedTitle:
             movieInfo["identityNamingTitle"] = decision.retainedTitle
         return False
 
-    def _reportMovieIdentityConflict(self, movieInfo: dict) -> None:
-        """Warn with the current identity, the proposal, and local evidence."""
-        logger.warning(
-            "%s",
-            movieIdentityReport(
-                movieInfo["identityConflict"],
-                evidence=movieIdentityEvidence(movieInfo),
-                imdbId=movieInfo.get("imdbId"),
-                tmdbId=movieInfo.get("tmdbId"),
-                runtime=movieInfo.get("runtime"),
+    def _reportMovieIdentityConflict(self, movieInfo: dict, *paths: Path) -> None:
+        """Warn with the current identity, proposal, location, and local evidence."""
+        report = movieIdentityReport(
+            movieInfo["identityConflict"],
+            evidence=movieIdentityEvidence(movieInfo),
+            imdbId=movieInfo.get("imdbId"),
+            tmdbId=movieInfo.get("tmdbId"),
+            runtime=movieInfo.get("runtime"),
+        )
+        logger.warning("%s", report)
+        location = next(
+            (
+                path if path.is_dir() else path.parent
+                for path in (Path(path) for path in paths)
             ),
+            None,
+        )
+        details = list(report.splitlines()[1:])
+        if location is not None:
+            details.insert(0, f"folder: {location}")
+        self._recordSummaryInvestigation(
+            "movie identity conflict",
+            *details,
         )
 
     def _applyTvMcmHints(
@@ -1886,8 +1947,13 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
 
         if not title or not year:
             return sourceFile.name
-        safeTitle = re.sub(r"[\\/:]+", " - ", str(title))
-        safeTitle = re.sub(r"\s+", " ", safeTitle).strip()
+        # The same character rules as the movie folder, applied before any
+        # caller checks whether this path already exists or renames onto it.
+        from .showFolders import movieFilesystemSafeTitle
+
+        safeTitle = movieFilesystemSafeTitle(str(title))
+        if not safeTitle:
+            return sourceFile.name
         return f"{safeTitle} ({year}){extension}"
 
     def _writeEpisodeMcmTemplate(

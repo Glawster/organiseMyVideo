@@ -6770,7 +6770,7 @@ def testMainAutoModeDisablesPromptsAndSetsSummaryPath():
         useCurses=True,
     )
     assert organizerInstance.summaryReportPath == (
-        omv_main.APP_CONFIG_FILE.parent
+        omv_main.applicationStateDirectory()
         / f"summary.{omv_main.datetime.now().strftime('%Y%m%d')}.txt"
     )
     assert organizerInstance.summaryReportMode == "process"
@@ -6807,7 +6807,7 @@ def testMainRescanModeCallsResetLibraryMetadataAndSetsSummaryPath():
         useCurses=True,
     )
     assert organizerInstance.summaryReportPath == (
-        omv_main.APP_CONFIG_FILE.parent
+        omv_main.applicationStateDirectory()
         / f"summary.{omv_main.datetime.now().strftime('%Y%m%d')}.txt"
     )
     assert organizerInstance.summaryReportMode == "rescan"
@@ -6950,6 +6950,7 @@ def testWriteSummaryReportAppendsTransfersRenamesAndCleanup(
     organizer._summaryRenames = []
     organizer._summaryCleanupTasks = []
     organizer._summaryDuplicateTvShows = []
+    organizer._summaryInvestigations = []
     organizer.dryRun = False
     organizer.summaryReportMode = "rescan"
     organizer._recordSummaryCleanup("cleanup needed: /tmp/source/duplicate")
@@ -6959,8 +6960,16 @@ def testWriteSummaryReportAppendsTransfersRenamesAndCleanup(
     assert reportText.count("organiseMyVideo") == 2
     assert "organiseMyVideo DRY-RUN process summary" in reportText
     assert "organiseMyVideo ACTUAL-RUN rescan summary" in reportText
-    assert "Transfers:\n- /tmp/source/movie.mkv -> /library/movie.mkv" in reportText
-    assert "Renames:\n- /tmp/source/Extras -> /tmp/source/Featurettes" in reportText
+    assert (
+        "Transfers:\n"
+        "- from: /tmp/source/movie.mkv\n"
+        "  to:   /library/movie.mkv"
+    ) in reportText
+    assert (
+        "Renames:\n"
+        "- folder:  /tmp/source/Extras\n"
+        "  to:      /tmp/source/Featurettes"
+    ) in reportText
     assert "Cleanup:\n- remove empty folder: /tmp/source/old" in reportText
     assert (
         "Possible duplicate TV shows:\n"
@@ -6969,6 +6978,63 @@ def testWriteSummaryReportAppendsTransfersRenamesAndCleanup(
         "  - Grimm (2011)"
     ) in reportText
     assert "- cleanup needed: /tmp/source/duplicate" in reportText
+
+
+def testWriteSummaryReportGroupsMovieFolderAndFileRenames(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    reportPath = tmp_path / "summary.txt"
+    organizer.summaryReportPath = reportPath
+    organizer.summaryReportMode = "rescan"
+    organizer._recordSummaryRename(
+        Path("/mnt/movie1/Movies/First Movie? (2020)"),
+        Path("/mnt/movie1/Movies/First Movie (2020)"),
+    )
+    organizer._recordSummaryRename(
+        Path("/mnt/movie1/Movies/First Movie (2020)/First Movie? (2020).mkv"),
+        Path("/mnt/movie1/Movies/First Movie (2020)/First Movie (2020).mkv"),
+    )
+    organizer._recordSummaryRename(
+        Path("/mnt/movie2/Movies/Second Movie? (2022)"),
+        Path("/mnt/movie2/Movies/Second Movie (2022)"),
+    )
+
+    organizer._writeSummaryReport()
+
+    reportText = reportPath.read_text(encoding="utf-8")
+    assert (
+        "Renames:\n"
+        "- folder:  /mnt/movie1/Movies/First Movie? (2020)\n"
+        "  to:      /mnt/movie1/Movies/First Movie (2020)\n"
+        "  movie:   /mnt/movie1/Movies/First Movie (2020)/First Movie? (2020).mkv\n"
+        "  to:      /mnt/movie1/Movies/First Movie (2020)/First Movie (2020).mkv\n"
+        "\n"
+        "- folder:  /mnt/movie2/Movies/Second Movie? (2022)\n"
+        "  to:      /mnt/movie2/Movies/Second Movie (2022)"
+    ) in reportText
+
+
+def testWriteSummaryReportShowsInvestigations(
+    tmp_path: Path, organizer: VideoOrganizer
+):
+    reportPath = tmp_path / "summary.txt"
+    organizer.summaryReportPath = reportPath
+    organizer.summaryReportMode = "rescan"
+    organizer._recordSummaryInvestigation(
+        "possible duplicate feature file",
+        "source: /library/Movie/Movie (1).mkv",
+        "target: /library/Movie/Movie.mkv",
+    )
+
+    organizer._writeSummaryReport()
+
+    reportText = reportPath.read_text(encoding="utf-8")
+    assert (
+        "Needs further investigation:\n"
+        "- possible duplicate feature file\n"
+        "  source: /library/Movie/Movie (1).mkv\n"
+        "  target: /library/Movie/Movie.mkv"
+    ) in reportText
 
 
 def testMainConfiguresConsoleTimestampWithoutMilliseconds():
@@ -7181,7 +7247,7 @@ def testMovieScanUsesDashInsteadOfColon(
 
 
 def testMovieScanDryRunDetectsReservedDestinationCollision(
-    organizer: VideoOrganizer,
+    organizer: VideoOrganizer, caplog: pytest.LogCaptureFixture
 ):
     movieDir = organizer.sourceDir / "Example Movie (2024)"
     movieDir.mkdir()
@@ -7208,6 +7274,7 @@ def testMovieScanDryRunDetectsReservedDestinationCollision(
         patch.object(organizer, "_ensureMovieMetadata"),
         patch.object(organizer, "_ensureMovieDvdIdMetadata"),
         patch.object(organizer, "_fetchMovieArtwork"),
+        caplog.at_level(logging.WARNING),
     ):
         firstResult = organizer._resetMovieMetadataForFile(first, reserved)
         secondResult = organizer._resetMovieMetadataForFile(second, reserved)
@@ -7215,3 +7282,5 @@ def testMovieScanDryRunDetectsReservedDestinationCollision(
     assert firstResult == "renamed"
     assert secondResult == "errors"
     assert reserved == {movieDir / "Example Movie (2024).mkv"}
+    assert "classification: unresolved file collision" in caplog.text
+    assert "part2.mkv" in caplog.text
