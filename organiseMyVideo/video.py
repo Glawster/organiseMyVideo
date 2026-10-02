@@ -14,9 +14,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable, List, Tuple, Optional, TextIO
 
-from .constants import APP_CONFIG_FILE, VIDEO_EXTENSIONS, _PREFIX_REGEX
+from .constants import APP_CONFIG_FILE, VIDEO_EXTENSIONS
 from organiseMyProjects.logUtils import getLogger  # type: ignore
 
+from .incomingNames import (
+    incomingNameNormalise,
+    mediaNameIsAncillary,
+    mediaNameIsSample,
+    mediaNameMultipartSuffix,
+)
 from .movieIdentity import (
     MOVIE_IDENTITY_CONFLICT,
     MOVIE_IDENTITY_PRESERVE_CASE,
@@ -220,6 +226,7 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         Returns:
             Dictionary with parsed info or None if parsing failed
         """
+        filename = incomingNameNormalise(filename)
         stem, extension = os.path.splitext(filename)
         # TV parsing expects a real media filename so the extension must be present.
         if not extension:
@@ -307,6 +314,7 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         Returns:
             Dictionary with parsed info or None if parsing failed
         """
+        filename = incomingNameNormalise(filename)
         # Remove extension
         nameWithoutExt = os.path.splitext(filename)[0]
         extension = os.path.splitext(filename)[1]
@@ -1575,7 +1583,14 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         movieInfo = self._applyMovieMcmHints(
             self.parseMovieFilename(sourceFile.name), mcmHints, sourceFile
         )
-        return None, movieInfo
+        if movieInfo:
+            return None, movieInfo
+        # Consult the enclosing cleaned name only when the feature is undecidable.
+        candidate = incomingNameNormalise(sourceFile.parent.name) + sourceFile.suffix
+        tvInfo = self.parseTvFilename(candidate)
+        if tvInfo:
+            return self._resolveAndEnrichTvInfo(tvInfo), None
+        return None, self.parseMovieFilename(candidate)
 
     def _resolveAndEnrichTvInfo(self, tvInfo: Optional[dict]) -> Optional[dict]:
         """Return scraped/library-enriched TV info, or the original parsed info if enrichment fails."""
@@ -1954,7 +1969,7 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         safeTitle = movieFilesystemSafeTitle(str(title))
         if not safeTitle:
             return sourceFile.name
-        return f"{safeTitle} ({year}){extension}"
+        return f"{safeTitle} ({year}){mediaNameMultipartSuffix(sourceFile.name)}{extension}"
 
     def _writeEpisodeMcmTemplate(
         self,
@@ -2318,7 +2333,7 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
 
     def _isSampleLikeFolder(self, path: Path) -> bool:
         """Return True if the folder name indicates it is a sample/extras folder."""
-        return "sample" in path.name.lower()
+        return mediaNameIsSample(path.name)
 
     def _hasRealVideoContent(self, folder: Path) -> bool:
         """
@@ -2329,6 +2344,8 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         """
         for item in folder.rglob("*"):
             if item.is_file() and item.suffix.lower() in VIDEO_EXTENSIONS:
+                if mediaNameIsAncillary(item.name):
+                    continue
                 # Ignore files that live inside a sample-like folder
                 relativeParts = item.relative_to(folder).parts
                 if any(
@@ -2377,6 +2394,21 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
             for part in relativePath.parts[:-1]
         )
 
+    def _cleanPathIsContained(self, path: Path) -> bool:
+        """Exclude symlinks, escaped paths and the retained cleanup quarantine."""
+        try:
+            relative = path.relative_to(self.sourceDir)
+            path.resolve().relative_to(self.sourceDir.resolve())
+        except ValueError:
+            return False
+        return (
+            not any(
+                self.sourceDir.joinpath(*relative.parts[:index]).is_symlink()
+                for index in range(1, len(relative.parts) + 1)
+            )
+            and ".organiseMyVideo-quarantine" not in relative.parts
+        )
+
     def cleanNames(self) -> dict:
         """
         Strip known torrent/index prefixes from file and directory names in the source directory.
@@ -2394,20 +2426,24 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
 
         for entry in sorted(self.sourceDir.iterdir()):
             oldName = entry.name
-            if not _PREFIX_REGEX.match(oldName):
+            if not self._cleanPathIsContained(entry):
                 continue
+            newName = incomingNameNormalise(oldName)
 
-            newName = _PREFIX_REGEX.sub("", oldName, count=1).strip()
-
-            if not newName or newName == oldName:
-                logger.value("skipped (no change)", oldName)
+            if newName == oldName:
+                continue
+            if not newName:
                 stats["skipped"] += 1
                 continue
 
             newPath = entry.parent / newName
+            if newPath == self.sourceDir or not self._cleanPathIsContained(newPath):
+                stats["errors"] += 1
+                continue
 
             try:
-                self.filesystem.rename(entry, newPath)
+                if not self.dryRun:
+                    self.filesystem.rename(entry, newPath)
                 logger.action(f"rename: {oldName} → {newName}")
                 self._recordSummaryRename(entry, newPath)
                 stats["renamed"] += 1
@@ -2442,22 +2478,32 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
             logger.error(f"source directory does not exist: {self.sourceDir}")
             return stats
 
+        # Select complete eligible trees first: quarantine a sample-only release
+        # once rather than separately moving each nested sample directory.
+        retained = []
         for subDir in sorted(
-            self.sourceDir.rglob("*"),
-            key=lambda p: (len(p.parts), str(p)),
-            reverse=True,
+            self.sourceDir.rglob("*"), key=lambda p: (len(p.parts), str(p))
         ):
-            if not subDir.exists() or not subDir.is_dir():
+            if not self._cleanPathIsContained(subDir) or not subDir.is_dir():
                 continue
-
+            if any(parent in subDir.parents for parent in retained):
+                continue
             if self._hasRealVideoContent(subDir):
                 logger.value("keeping (has video content)", subDir.name)
                 stats["skipped"] += 1
                 continue
 
+            retained.append(subDir)
             try:
+                # A supplied filesystem collaborator must respect this command's
+                # destination boundary as well as its source boundary.
+                quarantineRoot = (
+                    self.filesystem.quarantineRoot
+                    or self.sourceDir / ".organiseMyVideo-quarantine"
+                )
+                Path(quarantineRoot).resolve().relative_to(self.sourceDir.resolve())
                 quarantinePath = self.filesystem.quarantine(
-                    subDir, sourceRoot=self.sourceDir.parent
+                    subDir, sourceRoot=self.sourceDir
                 )
                 logger.action(f"quarantine folder: {subDir} -> {quarantinePath}")
                 self._recordSummaryCleanup(

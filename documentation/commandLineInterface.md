@@ -128,13 +128,14 @@ current title and year, the proposed title and year, the evidence that
 disagreed (usually `movie.xml`), and any IMDb id, TMDB id, or runtime already
 stored. The folder and file stay where they are, `movie.xml` is left
 unchanged, and no online lookup is made to decide which film is correct.
-Punctuation, spacing, and filesystem-safe substitutions still rename when the
+Punctuation, spacing, and filesystem-safe substitutions are proposed when the
 title and year agree. A metadata title that only changes capitals does not
 replace an already capitalised title. Dry-run and `--confirm` both refuse the
-conflict; a rename that is still allowed is applied only with `--confirm`.
+conflict. Apply approved canonical repairs using `media organise --confirm`;
+scan aliases remain observational even with compatibility `--confirm`.
 
 The folder and filename are made safe before that rename is planned.
-`\`, `/`, and `:` become ` - `. `|`, `?`, `*`, `<`, `>`, and `"` are removed,
+`\`, `/`, `:`, and `|` become ` - `. `?`, `*`, `<`, `>`, and `"` are removed,
 so a title such as `Thunderbolts*` is planned as `Thunderbolts` and is not
 passed to `rename()`. Removing those characters does not make a different
 title or year safe. Recognisable sample variants and video inside sample folders are not treated as
@@ -161,7 +162,16 @@ organiseMyVideo media organise
 ```
 
 `media scan` may reuse the same name-normalisation rules in memory for
-classification, but it must not perform clean mutations.
+classification without filesystem writes. Trusted metadata takes precedence,
+then the feature filename, then the cleaned enclosing folder. Cleanup quarantine
+is retained under `.organiseMyVideo-quarantine` inside the selected source;
+symlinks and retained quarantine are excluded from subsequent cleanup.
+
+Multipart features retain their `-partN` suffix. Bounded sample tokens and
+explicit release markers such as `RARBG.COM.mp4` are ancillary, never duplicate
+features. All-uppercase movie titles receive readable casing; for example,
+`TAYLOR SWIFT | THE ERAS TOUR` becomes `Taylor Swift - The Eras Tour`.
+Already capitalised titles such as `Anyone But You` are preserved.
 
 Run summaries are application state and are written under
 `~/.local/state/organiseMyVideo/` (or `XDG_STATE_HOME`). They group related

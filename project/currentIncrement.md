@@ -2,44 +2,50 @@
 
 ## Objective and status
 
-REQ-035 movie identity conflict detection is complete, including the
-filesystem-safe naming and collision-classification extension. A different
-title or release year is still reported and left in place. Canonical movie
-folder and file names are made safe before rename planning. `Sample.mkv` is
-not renamed to the feature. An existing canonical folder or file is classified
-and neither side is overwritten or deleted. The requirement and the
-requirements index both record REQ-035 as Completed.
+REQ-036 incoming media preparation is complete. Clean operates inside its
+selected staging source, scan is observational even with compatibility
+confirmation, and organise reuses canonical library repair. The requirement
+record and index agree on Completed.
 
-## Accepted scope
+## Accepted scope and evidence
 
-- Compare the parsed folder and filename with the metadata about to be applied.
-- Refuse an unresolved title or year conflict before renaming, before rewriting
-  `movie.xml`, and before fetching online metadata to choose a film.
-- Report the current and proposed title and year, the evidence source, known
-  provider IDs, and runtime text already stored.
-- Remove `|?*<>"` from a planned movie folder and filename, and keep the
-  existing ` - ` substitution for colons and path separators.
-- Ignore `Sample.mkv` and video inside a sample folder when reconciling the
-  feature filename.
-- Classify an existing canonical target as ignored ancillary media, a
-  same-identity folder merge candidate, a possible duplicate feature file, or
-  an unresolved file collision. Do not merge, overwrite, or delete either side.
-- Refuse the same conflict on a dry-run and on a confirmed run.
+- `incomingNameNormalise` supplies pure release-prefix cleanup to clean and
+  movie/TV parsing. Metadata precedes the feature filename, then the cleaned
+  parent. Real filename and parent-fallback fixtures retain their source paths.
+- Clean no longer invokes library show/season normalisation or reconciliation.
+  Real temporary-tree tests cover quarantine, sample-only/empty cleanup, source
+  aliases, configured defaults, symlinks and escaped candidates. Retained
+  quarantine stays inside the source and is excluded from later cleanup.
+- All CLI scan aliases force an observational organizer. A real CLI pipeline
+  parses sidecars, plans collisions and writes a summary while media and
+  sidecar paths and bytes remain unchanged with `--confirm`.
+- Samples and release markers are ancillary; multipart destinations retain
+  their part suffix. Existing title/year identity guards remain active.
+- Canonical titles retain valid punctuation, use a readable pipe separator and
+  title-style casing for all-uppercase metadata, and preserve existing capitals.
+- Existing grouped summaries, conflict locations and investigation categories
+  remain in application state. Daily append naming is preserved.
+
+| Production behaviour | Unit | Integration | Golden | UI | Resolution | Clean-room |
+| --- | --- | --- | --- | --- | --- | --- |
+| Incoming preparation and source boundary | Yes | Yes | Yes | N/A | N/A | Yes |
+| Candidate classification and collision planning | Yes | Yes | Yes | N/A | N/A | Yes |
+| Confirmed scan observation and summaries | Yes | Yes | Yes | N/A | N/A | Yes |
 
 ## Final verification
 
-Verified in the `mediaStudio` Conda environment:
+Verified in the mediaStudio Conda environment:
 
-- Full `pytest` suite: 816 passed.
-- `runLinter` on the changed Python files: no findings.
+- Full pytest: 842 passed, including 22 new incoming-preparation cases.
+- `runLinter`: no findings across application and tests.
 - `runLinter --markup`: no remaining issues.
 - `manageProject --check`: zero failures and zero warnings.
-- Black was applied to the changed Python files, and `git diff --check` passed.
+- Black applied to changed Python files.
+- Working-tree, staged and combined diff checks passed.
 
 ## Remaining work and immediate next action
 
-REQ-035 verification and documentation are complete. No implementation or
-verification work remains for this increment. A later requirement can add an
-operator action that merges a reported same-identity folder pair or accepts a
-reported identity conflict. Select the next increment through the requirements
-index when further work is requested.
+No REQ-036 implementation or verification remains. Review the feature branch.
+REQ-030 unique per-invocation summaries remain separate. Direct legacy repair
+methods remain reusable for organise; CLI scan invokes them only in observation
+mode. Conflict overrides and duplicate review decisions remain separate work.

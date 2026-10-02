@@ -110,7 +110,10 @@ commands accept a positional source or `-s`/`--source PATH`. An explicit source
 option takes precedence when both are supplied.
 
 `media clean` is restricted to that incoming/staging source tree. It does not
-normalise TV show/season folders or perform library-wide reconciliation.
+normalise TV show/season folders or perform library-wide reconciliation. Its
+quarantine stays inside the source and is excluded from later cleanup. Scan uses
+the shared name cleaner in memory; canonical library repairs belong to
+`media organise --confirm`, even if scan receives compatibility `--confirm`.
 
 ### Clean source-folder names and remove empty folders
 

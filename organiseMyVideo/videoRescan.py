@@ -318,7 +318,9 @@ class VideoRescanMixin:
         ``Sample.mkv`` beside the feature, and any video under a sample
         folder, is ancillary media. It is not a second copy of the movie.
         """
-        if videoFile.stem.casefold() == "sample":
+        from .incomingNames import mediaNameIsAncillary
+
+        if mediaNameIsAncillary(videoFile.name):
             return True
         try:
             relativeParts = videoFile.relative_to(movieFolder).parts
@@ -1011,7 +1013,13 @@ class VideoRescanMixin:
         """Resolve one canonical movie identity for a reset-scan folder."""
         with self._suppressResetNoiseLogs():
             mcmHints = self._readMovieMcmHints(videoFile)
+            # Metadata wins below; a feature filename precedes its enclosing
+            # folder when no trusted metadata identifies this copy.
             parsedMovieInfo = self.parseMovieFilename(videoFile.name)
+            if not parsedMovieInfo:
+                parsedMovieInfo = self.parseMovieFilename(
+                    videoFile.parent.name + videoFile.suffix
+                )
             sourceMovieInfo = (
                 self._applyMovieMcmHints(parsedMovieInfo, mcmHints, videoFile)
                 or parsedMovieInfo
