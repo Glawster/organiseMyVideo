@@ -109,6 +109,9 @@ The `media organise`, `media clean`, `library rescan`, and `torrent maintain`
 commands accept a positional source or `-s`/`--source PATH`. An explicit source
 option takes precedence when both are supplied.
 
+`media clean` is restricted to that incoming/staging source tree. It does not
+normalise TV show/season folders or perform library-wide reconciliation.
+
 ### Clean source-folder names and remove empty folders
 
 ```bash
@@ -116,11 +119,21 @@ python -m organiseMyVideo --clean
 python -m organiseMyVideo --clean --confirm
 ```
 
-`--clean` by itself works on the video source folder:
+`--clean` by itself works only on the incoming video source tree:
 
-- cleans source-folder names
-- removes empty subfolders
+- cleans staged release/site-name noise
+- removes/quarantines empty subfolders
 - treats folders with only sample content as empty
+- does not normalise established movie/TV library folders
+
+Recommended workflow:
+
+```bash
+organiseMyVideo media clean
+organiseMyVideo media clean --confirm
+organiseMyVideo media scan
+organiseMyVideo media organise
+```
 
 ### Clean torrent downloads
 
@@ -145,7 +158,7 @@ python -m organiseMyVideo --torrent --clean --confirm
 |--------|-------------|
 | `--source PATH` | Source directory containing files to organize. Default: `/mnt/video2/toFile` |
 | `--confirm` | Execute changes. Without this flag the script runs as a dry-run |
-| `--auto` | Run organisation without prompts and append the day’s actions to `~/.config/organiseMyVideo/summary.yyyymmdd.txt` |
+| `--auto` | Run organisation without prompts and write run summary state under `~/.local/state/organiseMyVideo/` |
 | `--clean` | Clean the source directory, or when combined with `--torrent`, also clean prefixed `.torrent` names |
 | `--refresh` | Rebuild the saved metadata library from storage before processing files |
 | `--rescan` | Scan existing movie and TV libraries, repair movie metadata/artwork, canonicalise movie names, and rename TV episodes whose filename title still looks like release noise |
