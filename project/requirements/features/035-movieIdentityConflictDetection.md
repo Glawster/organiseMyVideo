@@ -65,6 +65,12 @@ must not be proposed.
   MCM metadata, provider IDs and runtime/duration where useful.
 - Preserve title-style capitalisation when the existing and resolved title
   differ only by case.
+- When metadata is obviously ALL CAPS, prefer readable title-style capitalisation
+  for canonical output rather than preserving shout-case.
+- When an unsupported separator such as `|` separates meaningful title parts,
+  preserve readability with ` - ` rather than collapsing the words together;
+  e.g. `TAYLOR SWIFT | THE ERAS TOUR` should canonicalise to
+  `Taylor Swift - The Eras Tour`.
 - Produce a filesystem-safe canonical movie folder and filename before rename
   planning. Unsupported filename characters from metadata should be ignored/
   removed rather than passed through to `rename()`.
@@ -122,8 +128,9 @@ must not be proposed.
    `Anyone but You (2023)`, when scanned, then OMV preserves
    `Anyone But You (2023)` and does not propose a case-only downgrade.
 6. Given a detected identity conflict, when it is reported, then the output
-   identifies the current movie identity, the conflicting proposed identity,
-   and the evidence source responsible for the disagreement.
+   identifies the affected folder path, the current movie identity, the
+   conflicting proposed identity, and the evidence source responsible for the
+   disagreement.
 7. Given runtime or duration evidence that materially conflicts with metadata,
    when available, then it is included in the conflict evidence rather than
    silently ignored.
@@ -166,6 +173,9 @@ must not be proposed.
    `The Source (Movie 2007)`, or `Mr. & Mrs. Smith`, when filesystem-safe naming
    is applied, then the valid punctuation and surrounding spacing are preserved
    unchanged.
+19. Given `TAYLOR SWIFT | THE ERAS TOUR`, when canonical naming is applied, then
+   the readable result is `Taylor Swift - The Eras Tour`, preserving a separator
+   while avoiding all-caps output.
 
 ## Dependencies and decisions
 
@@ -244,3 +254,6 @@ must not be proposed.
   before rename planning, `Sample.mkv` is not treated as the feature, and an
   existing canonical target is classified and left in place.
 
+
+- 2026-10-02: clarified readable canonical casing/separator behaviour for
+  `TAYLOR SWIFT | THE ERAS TOUR` and required folder location in conflict review.

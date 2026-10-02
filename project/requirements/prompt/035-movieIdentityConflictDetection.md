@@ -34,11 +34,16 @@ filesystem-safe before rename planning.
 - Do not rely on catching `EINVAL` after an attempted rename as the primary
   filesystem-safety mechanism. Derive a safe destination before collision
   checks, logging, dry-run reporting, and mutation.
-- Ignore/remove unsupported filename characters rather than trying to preserve
-  them with filesystem-specific substitutions where identity remains clear.
+- Remove unsupported filename characters where identity remains clear, but preserve
+  a readable separator when the unsupported character separates title parts; for
+  example `TAYLOR SWIFT | THE ERAS TOUR` should become
+  `Taylor Swift - The Eras Tour`.
 - Apply the same safe-name rule to both the movie folder and movie filename.
-- Exclude known ancillary media such as `Sample.mkv` from canonical feature-file
-  reconciliation.
+- Exclude recognisable ancillary sample variants and sample-directory media from
+  canonical feature-file reconciliation.
+- Classify multipart files such as `*-part2.*` separately from duplicate feature
+  files, and classify obvious release-marker/non-feature files as ancillary/junk
+  candidates without destructive scan behaviour.
 - Classify existing-target collisions instead of emitting only generic errors:
   ancillary media, same-identity folder merge candidate, possible duplicate
   feature file, or unresolved collision.
@@ -76,9 +81,12 @@ Add focused regression tests for every acceptance criterion, including:
 - safe punctuation-only normalisation;
 - canonical names containing `?`, `|`, `*`, `:`, `<`, `>`, and `"`;
 - the real-library examples `Nativity 3 - Dude, Where's My Donkey?!`,
-  `TAYLOR SWIFT | THE ERAS TOUR`, and `Thunderbolts*`;
+  `TAYLOR SWIFT | THE ERAS TOUR` -> `Taylor Swift - The Eras Tour`, and
+  `Thunderbolts*`;
 - folder and filename destinations being safe before `rename()` is called;
-- `Sample.mkv` not being treated as the feature;
+- sample-name variants/sample directories not being treated as the feature;
+- multipart `-part2` files not being treated as duplicate features;
+- obvious release-marker/non-feature files being reported without deletion;
 - same-identity folder collisions such as `Inside Out 2 (2024)_` versus
   `Inside Out 2 (2024)` being reported as reconciliation/merge candidates;
 - existing canonical feature targets being reported as possible duplicate or
