@@ -314,6 +314,11 @@ class VideoRescanMixin:
 
     def _isResetMovieAncillaryFile(self, movieFolder: Path, videoFile: Path) -> bool:
         """Return True when *videoFile* is recognisable non-feature movie media."""
+        from .incomingNames import mediaNameIsAncillary
+
+        if mediaNameIsAncillary(videoFile.name):
+            return True
+
         stem = videoFile.stem.casefold()
         ancillaryTokens = (
             "behind the scenes",
@@ -325,10 +330,9 @@ class VideoRescanMixin:
             "making of",
             "trailer",
         )
-        if stem == "sample" or any(token in stem for token in ancillaryTokens):
+        if any(token in stem for token in ancillaryTokens):
             return True
-        if re.search(r"(^|[^a-z0-9])sample([^a-z0-9]|$)", stem):
-            return True
+
         try:
             relativeParts = videoFile.relative_to(movieFolder).parts
         except ValueError:
