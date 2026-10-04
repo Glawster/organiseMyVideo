@@ -46,6 +46,7 @@ Historical behaviour is not assigned invented retrospective requirements.
 | 037 | [Media storage redistribution](features/037-mediaStorageRedistribution.md) | Rebalance movie and TV stores by utilisation percentage using persisted dry-run plans and confirmed whole-folder moves. | ToDo | Not required | [ADR-003](../adr/003-filesystemSafetyBoundary.md), [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
 
 | 038 | [Movie location lookup](features/038-movieLocate.md) | Locate movie library folders by title and year. | Completed | [Prompt](prompt/038-movieLocate.md) | Not required |
+| 040 | [Cross-platform application support](features/040-crossPlatformSupport.md) | Run OMV on Linux, macOS and Windows using shared portability primitives, with non-destructive workflows enabled before destructive operations. | ToDo | [Prompt](prompt/040-crossPlatformSupport.md) | [ADR-003](../adr/003-filesystemSafetyBoundary.md), [ADR-010](../adr/010-sharedMediaProcessingBoundary.md) |
 
 ## Prompt index
 
@@ -80,4 +81,5 @@ Historical behaviour is not assigned invented retrospective requirements.
 - [035-movieIdentityConflictDetection](prompt/035-movieIdentityConflictDetection.md)
 - [036-incomingMediaPreparation](prompt/036-incomingMediaPreparation.md)
 - [038-movieLocate](prompt/038-movieLocate.md)
+- [040-crossPlatformSupport](prompt/040-crossPlatformSupport.md)
 <!-- OMP-PROMPT-INDEX-END -->
