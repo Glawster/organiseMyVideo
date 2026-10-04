@@ -768,3 +768,86 @@ def testMoveDoesNotOverwriteAnExistingFeatureFile(
     assert existing.read_bytes() == b"library"
     assert organizer._summaryTransfers == []
     assert "classification: possible duplicate feature file" in caplog.text
+
+
+def testMixedMovieFolderIsReportedBeforeSharedMetadataRename(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    source = tmp_path / "source"
+    source.mkdir()
+    storage = tmp_path / "movie1"
+    folder, primary, _metadata = _storedMovie(
+        storage,
+        "An American in Austen (2024)",
+        _movieXml(
+            "An American in Austen",
+            "2024",
+            imdbId="tt31068337",
+            tmdbId="1221678",
+            runtimeTag="Runtime",
+            runtime="84",
+        ),
+    )
+    second = folder / "Love And Jane (2024).mkv"
+    second.write_bytes(b"second movie")
+    organizer = VideoOrganizer(sourceDir=str(source), dryRun=True)
+
+    with (
+        caplog.at_level(logging.WARNING),
+        patch.object(organizer, "_enrichMovieMetadata") as enrich,
+    ):
+        stats = organizer.resetMovieMetadata([storage])
+
+    assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
+    assert primary.is_file()
+    assert second.is_file()
+    enrich.assert_not_called()
+    assert "mixed movie folder" in caplog.text
+    assert "An American in Austen (2024)" in caplog.text
+    assert "Love And Jane (2024)" in caplog.text
+    assert str(primary) in caplog.text
+    assert str(second) in caplog.text
+    assert "action: split required" in caplog.text
+    assert "movie identity conflict" not in caplog.text
+    assert any(
+        item[0] == "mixed movie folder"
+        for item in organizer._summaryInvestigations
+    )
+
+
+def testMovieFolderIgnoresBehindScenesButFlagsDistinctSecondProgramme(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    source = tmp_path / "source"
+    source.mkdir()
+    storage = tmp_path / "movie1"
+    folder, feature, _metadata = _storedMovie(
+        storage,
+        "Michael McIntyre - Showtime (2012)",
+        _movieXml("Michael McIntyre - Showtime", "2012"),
+    )
+    behindScenes = folder / (
+        "Michael Mcintyre - Behind The Scenes (2012) "
+        "720p MKV x264 AAC BRrip [Pioneer].mkv"
+    )
+    behindScenes.write_bytes(b"behind")
+    christmas = folder / (
+        "Michael Mcintyre - Christmas Roadshow (2012) "
+        "720p MKV x264 AAC BRrip [Pioneer].mkv"
+    )
+    christmas.write_bytes(b"christmas")
+    organizer = VideoOrganizer(sourceDir=str(source), dryRun=True)
+
+    with caplog.at_level(logging.WARNING):
+        stats = organizer.resetMovieMetadata([storage])
+
+    assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
+    assert feature.is_file()
+    assert behindScenes.is_file()
+    assert christmas.is_file()
+    assert "mixed movie folder" in caplog.text
+    assert "Michael McIntyre - Showtime (2012)" in caplog.text
+    assert "Michael Mcintyre - Christmas Roadshow (2012)" in caplog.text
+    assert str(christmas) in caplog.text
+    assert str(behindScenes) not in caplog.text
+    assert "action: split required" in caplog.text
