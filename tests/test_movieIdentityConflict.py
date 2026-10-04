@@ -458,7 +458,7 @@ FILESYSTEM_SAFE_TITLES = (
         "TAYLOR SWIFT | THE ERAS TOUR (2023)",
         "TAYLOR SWIFT | THE ERAS TOUR",
         "2023",
-        "TAYLOR SWIFT THE ERAS TOUR (2023)",
+        "Taylor Swift - The Eras Tour (2023)",
     ),
     (
         "Thunderbolts* (2025)",

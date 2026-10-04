@@ -628,6 +628,7 @@ class VideoMoveMixin:
             if f.is_file()
             and f.suffix.lower() in VIDEO_EXTENSIONS
             and not self._shouldIgnoreLocalVideoFile(f)
+            and not self._isResetMovieAncillaryFile(self.sourceDir, f)
             and not self._isInsideAnyFolder(f, musicFolders)
         ]
 

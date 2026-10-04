@@ -42,10 +42,12 @@ def movieFilesystemSafeTitle(title: str) -> str:
     """Return *title* safe to use as a movie folder or file name.
 
     Colons and path separators become `` - ``, so ``6:45`` stays ``6 - 45``.
-    ``|?*<>"`` are removed. Identity is compared on the original title, so
+    ``|`` also becomes a separator; ``?*<>"`` are removed. Identity is compared on the original title, so
     this mapping cannot make a different film or year look safe.
     """
-    safe = _FILESYSTEM_SEPARATOR_PATTERN.sub(" - ", title)
+    if title.isupper():
+        title = title.title()
+    safe = _FILESYSTEM_SEPARATOR_PATTERN.sub(" - ", title.replace("|", " - "))
     safe = _FILESYSTEM_REMOVED_CHARACTER.sub("", safe)
     safe = re.sub(r"\s+", " ", safe).strip()
     return safe

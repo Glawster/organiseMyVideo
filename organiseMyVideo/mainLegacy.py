@@ -153,7 +153,9 @@ Session file:     {sessionFile}
 def _getSummaryReportPath(sourcePath: str, mode: str) -> Path:
     """Return the summary-report path for auto/rescan runs."""
     del sourcePath, mode
-    return applicationStateDirectory() / f"summary.{datetime.now().strftime('%Y%m%d')}.txt"
+    return (
+        applicationStateDirectory() / f"summary.{datetime.now().strftime('%Y%m%d')}.txt"
+    )
 
 
 def _buildSharedFlags(suppressDefaults: bool = False) -> argparse.ArgumentParser:
@@ -244,14 +246,21 @@ def buildParser(*, internalCamera: bool = False) -> argparse.ArgumentParser:
     mediaParser = subparsers.add_parser("media", help="organise or clean staged media")
     mediaSub = mediaParser.add_subparsers(dest="mediaAction", required=True)
     mediaLocate = mediaSub.add_parser(
-        "locate", parents=[_buildSharedFlags(True)], help="locate catalogued TV shows"
+        "locate",
+        parents=[_buildSharedFlags(True)],
+        help="locate catalogued movies or TV shows",
     )
-    mediaLocate.add_argument(
+    locateSelectors = mediaLocate.add_mutually_exclusive_group()
+    locateSelectors.add_argument(
         "--show",
         help=(
             "TV show to locate (case-insensitive exact or partial match); "
             "omit to list every catalogued show"
         ),
+    )
+    locateSelectors.add_argument(
+        "--movie",
+        help="Movie title to locate (case-insensitive exact or partial match)",
     )
     mediaOrganise = mediaSub.add_parser(
         "organise", parents=[_buildSharedFlags(True)], help="organise staged media"
@@ -272,9 +281,10 @@ def buildParser(*, internalCamera: bool = False) -> argparse.ArgumentParser:
     mediaClean = mediaSub.add_parser(
         "clean",
         parents=[_buildSharedFlags(True)],
-        help="clean staged media names and folders",
+        help="clean incoming/staging source names and empty folders",
+        description="Clean only the selected incoming/staging source; libraries are excluded.",
     )
-    mediaClean.add_argument("source", nargs="?", default="/mnt/video2/toFile")
+    mediaClean.add_argument("source", nargs="?", default=None)
     mediaClean.add_argument(
         "-s", "--source", dest="sourceOverride", help="override the positional source"
     )
@@ -512,7 +522,7 @@ def _validateArguments(
         return
     if (
         args.command == "media"
-        and getattr(args, "mediaAction", None) == "scan"
+        and getattr(args, "mediaAction", None) in {"scan", "clean"}
         and not args.source
     ):
         args.source = _configuredSource(_getAppConfigPath())
@@ -774,6 +784,9 @@ def _runOrganizerWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
         _loadTvdbApiKeyFromConfig(configPath)
 
     selectedMode = _selectedMode(args)
+    # Compatibility confirmation must never enable scan mutations.
+    if selectedMode == "rescan":
+        dryRun = True
     logger.value("source directory", args.source)
     displayMode = "scan" if selectedMode == "rescan" else selectedMode
     logger.value("mode", displayMode)
@@ -822,14 +835,6 @@ Folders removed: {cleanStats['removed']}
 Folders kept:    {cleanStats['skipped']}
 Folder errors:   {cleanStats['errors']}
 """)
-        logger.doing("normalising TV show and season folders")
-        folderStats = _normaliseSeasonFolders(
-            organizer,
-            dryRun,
-            refreshCatalogue=True,
-        )
-        if folderStats.errors:
-            return 1
     elif args.rescan:
         showFilter = getattr(args, "show", None)
         canonicalScan = (
@@ -892,6 +897,8 @@ Folder errors:   {cleanStats['errors']}
     else:
         logger.doing("running file organisation mode")
         organizer.processFiles(interactive=not args.auto)
+        # Reuse library repair only in the approved organisation workflow.
+        organizer.resetLibraryMetadata()
         logger.doing("normalising TV show and season folders")
         seasonStats = _normaliseSeasonFolders(
             organizer,
@@ -919,7 +926,10 @@ def main(argv: Optional[Sequence[str]] = None, *, internalCamera: bool = False) 
         from .cli import _runMediaLocate
 
         show = getattr(args, "show", None)
-        return _runMediaLocate(["--show", show] if show else [])
+        movie = getattr(args, "movie", None)
+        if movie is not None:
+            return _runMediaLocate(["--movie", movie])
+        return _runMediaLocate(["--show", show] if show is not None else [])
     runStart()
     logger.doing("organiseMyVideo starting")
     line()

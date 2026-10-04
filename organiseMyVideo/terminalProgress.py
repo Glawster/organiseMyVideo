@@ -12,9 +12,17 @@ _PROGRESS_BAR_WIDTH = 24
 class TerminalProgress:
     """Render one in-place terminal progress line for long-running scans."""
 
-    def __init__(self, total: int, label: str, stream: Optional[TextIO] = None):
+    def __init__(
+        self,
+        total: int,
+        label: str,
+        stream: Optional[TextIO] = None,
+        *,
+        labelWidth: int = 0,
+    ):
         self.total = max(total, 0)
         self.label = label
+        self.labelWidth = labelWidth
         self.stream = stream if stream is not None else sys.stderr
         isatty = getattr(self.stream, "isatty", None)
         self.enabled = bool(callable(isatty) and isatty())
@@ -34,7 +42,9 @@ class TerminalProgress:
             percent = " --%"
             totalText = "?"
         bar = "#" * filled + "-" * (_PROGRESS_BAR_WIDTH - filled)
-        prefix = f"{self.label}: [{bar}] {percent} ({completed}/{totalText})"
+        # Pad after the colon so related progress bars share a starting column.
+        label = f"{self.label}:".ljust(self.labelWidth)
+        prefix = f"{label} [{bar}] {percent} ({completed}/{totalText})"
         columns = max(shutil.get_terminal_size(fallback=(80, 24)).columns, 20)
         available = columns - len(prefix) - 1
         suffix = ""
