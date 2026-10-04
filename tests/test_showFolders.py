@@ -35,7 +35,7 @@ def testCanonicalTvShowFolderNameMovesLeadingThe():
         "Nativity 3 - Dude, Where's My Donkey!"
     )
     assert movieFilesystemSafeTitle("TAYLOR SWIFT | THE ERAS TOUR") == (
-        "TAYLOR SWIFT THE ERAS TOUR"
+        "Taylor Swift - The Eras Tour"
     )
     assert movieFilesystemSafeTitle("Thunderbolts*") == "Thunderbolts"
     assert movieFilesystemSafeTitle('Say "Hello"') == "Say Hello"

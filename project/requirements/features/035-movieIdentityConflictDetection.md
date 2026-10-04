@@ -277,7 +277,6 @@ must not be proposed.
   before rename planning, `Sample.mkv` is not treated as the feature, and an
   existing canonical target is classified and left in place.
 
-
 - 2026-10-02: clarified readable canonical casing/separator behaviour for
   `TAYLOR SWIFT | THE ERAS TOUR` and required folder location in conflict review.
 

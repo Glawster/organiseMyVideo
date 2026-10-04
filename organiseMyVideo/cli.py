@@ -7,7 +7,7 @@ import sys
 from typing import Optional, Sequence
 
 from . import __main__ as legacyCli
-from .mediaLocate import MediaLocation, locateTvShow
+from .mediaLocate import MediaLocation, locateMovie, locateTvShow
 
 
 def _locateParser() -> argparse.ArgumentParser:
@@ -15,20 +15,25 @@ def _locateParser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog="organiseMyVideo media locate",
-        description="Locate TV show folders recorded in the media catalogue",
+        description="Locate movie or TV show folders recorded in the media catalogue",
     )
-    parser.add_argument(
+    selectors = parser.add_mutually_exclusive_group()
+    selectors.add_argument(
         "--show",
         help=(
             "TV show to locate (case-insensitive exact or partial match); "
             "omit to list every catalogued show"
         ),
     )
+    selectors.add_argument(
+        "--movie",
+        help="Movie title to locate (case-insensitive exact or partial match)",
+    )
     return parser
 
 
 def _printLocatedShows(matches: list[MediaLocation]) -> None:
-    """Print each show once, with the freshness of every stored folder."""
+    """Print each media title once, with the freshness of every stored folder."""
 
     previous = None
     for match in matches:
@@ -39,12 +44,17 @@ def _printLocatedShows(matches: list[MediaLocation]) -> None:
 
 
 def _runMediaLocate(argv: Sequence[str]) -> int:
-    """Run a catalogue-only TV show location query."""
+    """Run a catalogue-only movie or TV show location query."""
 
     args = _locateParser().parse_args(list(argv))
-    matches = locateTvShow(args.show)
-    if args.show and not matches:
-        print(f"TV show not found in media catalogue: {args.show}", file=sys.stderr)
+    # Preserve the default TV listing while selecting movies explicitly.
+    requested = args.movie if args.movie is not None else args.show
+    kind = "Movie" if args.movie is not None else "TV show"
+    matches = (
+        locateMovie(args.movie) if args.movie is not None else locateTvShow(args.show)
+    )
+    if requested is not None and not matches:
+        print(f"{kind} not found in media catalogue: {requested}", file=sys.stderr)
         return 1
     _printLocatedShows(matches)
     return 0

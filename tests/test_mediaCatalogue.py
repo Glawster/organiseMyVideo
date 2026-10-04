@@ -145,8 +145,8 @@ def testCatalogueBuffersWarningsUntilTvProgressFinishes(
     originalProgress = media_catalogue_module.TerminalProgress
 
     class TestProgress(originalProgress):
-        def __init__(self, total, label):
-            super().__init__(total, label, stream=stream)
+        def __init__(self, total, label, **kwargs):
+            super().__init__(total, label, stream=stream, **kwargs)
 
     warningPositions = []
     originalWarning = media_catalogue_module.logger.warning

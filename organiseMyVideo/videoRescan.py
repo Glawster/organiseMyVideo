@@ -1161,7 +1161,13 @@ class VideoRescanMixin:
         """Resolve one canonical movie identity for a reset-scan folder."""
         with self._suppressResetNoiseLogs():
             mcmHints = self._readMovieMcmHints(videoFile)
+            # Metadata wins below; a feature filename precedes its enclosing
+            # folder when no trusted metadata identifies this copy.
             parsedMovieInfo = self.parseMovieFilename(videoFile.name)
+            if not parsedMovieInfo:
+                parsedMovieInfo = self.parseMovieFilename(
+                    videoFile.parent.name + videoFile.suffix
+                )
             sourceMovieInfo = (
                 self._applyMovieMcmHints(parsedMovieInfo, mcmHints, videoFile)
                 or parsedMovieInfo

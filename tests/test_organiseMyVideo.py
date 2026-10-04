@@ -961,7 +961,7 @@ def testCleanEmptyFoldersMixedDirs(sourceDir: Path, confirmedOrganizer: VideoOrg
 
     stats = confirmedOrganizer.cleanEmptyFolders()
     assert stats["removed"] == 2
-    assert stats["skipped"] == 2  # MovieA + MovieB/Sample (has direct video content)
+    assert stats["skipped"] == 1  # Only the real feature tree is retained.
     assert stats["errors"] == 0
     assert realDir.exists()
     assert not emptyDir.exists()
@@ -1179,7 +1179,7 @@ def testProcessFilesRenamesExtrasFolderToFeaturettes(
     assert (featurettesDir / "Bonus.Feature.2026.mp4").exists()
     mockMoveMovie.assert_not_called()
     assert (
-        f"- {extrasDir} -> {featurettesDir}"
+        f"- folder:  {extrasDir}\n  to:      {featurettesDir}"
         in confirmedOrganizer.summaryReportPath.read_text(encoding="utf-8")
     )
 
@@ -6784,7 +6784,8 @@ def testGetSummaryReportPathUsesApplicationDirectory(tmp_path: Path):
         reportPath = omv_main._getSummaryReportPath("/tmp/source", "process")
 
     assert reportPath == (
-        configFile.parent / f"summary.{omv_main.datetime.now().strftime('%Y%m%d')}.txt"
+        omv_main.applicationStateDirectory()
+        / f"summary.{omv_main.datetime.now().strftime('%Y%m%d')}.txt"
     )
 
 
@@ -6961,9 +6962,7 @@ def testWriteSummaryReportAppendsTransfersRenamesAndCleanup(
     assert "organiseMyVideo DRY-RUN process summary" in reportText
     assert "organiseMyVideo ACTUAL-RUN rescan summary" in reportText
     assert (
-        "Transfers:\n"
-        "- from: /tmp/source/movie.mkv\n"
-        "  to:   /library/movie.mkv"
+        "Transfers:\n" "- from: /tmp/source/movie.mkv\n" "  to:   /library/movie.mkv"
     ) in reportText
     assert (
         "Renames:\n"
