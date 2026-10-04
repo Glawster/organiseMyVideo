@@ -595,7 +595,11 @@ def _moviesCollect(
         if children is not None:
             folders.extend(children)
 
-    progress = TerminalProgress(len(folders), "Cataloguing movie library")
+    progress = TerminalProgress(
+        len(folders),
+        "Cataloguing movie library",
+        labelWidth=len("Cataloguing movie library:"),
+    )
     records: list[MovieCatalogueRecord] = []
     seen: set[str] = set()
     diagnostics = []
@@ -741,7 +745,11 @@ def _tvCollect(videoDirs: list[Path], identity) -> tuple[
         if children is not None:
             shows.extend(children)
 
-    progress = TerminalProgress(len(shows), "Cataloguing TV library")
+    progress = TerminalProgress(
+        len(shows),
+        "Cataloguing TV library",
+        labelWidth=len("Cataloguing movie library:"),
+    )
     episodes: list[TvEpisodeCatalogueRecord] = []
     seriesByFolder: dict[str, TvSeriesCatalogueRecord] = {}
     seen: set[str] = set()
