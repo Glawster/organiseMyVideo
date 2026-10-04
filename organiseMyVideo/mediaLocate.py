@@ -29,6 +29,45 @@ class MediaLocation:
     state: str = LOCATION_CURRENT
 
 
+def locateMovie(
+    movieName: str, *, catalogue: MediaCatalogue | None = None
+) -> list[MediaLocation]:
+    """Return movie folders matching a case-insensitive title or title and year.
+
+    Include all recorded location states and check each folder's presence.
+    Exact title matches precede partial matches; years distinguish remakes.
+    """
+    requested = movieName.strip().casefold()
+    if not requested:
+        return []
+    mediaCatalogue = catalogue or MediaCatalogue()
+    matches = []
+    exactNames = set()
+    for row in mediaCatalogue.catalogueMoviesList(states=LOCATION_STATES):
+        name = f"{row.title} ({row.year})" if row.year else row.title
+        title = row.title.strip().casefold()
+        if requested not in name.strip().casefold():
+            continue
+        if requested in (title, name.strip().casefold()):
+            exactNames.add(name)
+        matches.append(
+            MediaLocation(
+                name=name,
+                folderPath=row.folderPath,
+                state=_locationVisibility(row.locationState, row.folderPath),
+            )
+        )
+    return sorted(
+        matches,
+        key=lambda item: (
+            item.name not in exactNames,
+            item.name.casefold(),
+            _STATE_ORDER.get(item.state, 9),
+            item.folderPath.casefold(),
+        ),
+    )
+
+
 def locateTvShow(
     showName: str | None = None, *, catalogue: MediaCatalogue | None = None
 ) -> list[MediaLocation]:

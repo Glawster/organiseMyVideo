@@ -2,20 +2,23 @@
 
 ## Objective and status
 
-Catalogue progress label alignment is complete. Movie and TV catalogue bars
-start in the same terminal column, with padding after each label's colon.
+REQ-038 movie location lookup is complete. `media locate --movie TITLE` searches
+the persisted movie catalogue and prints titles with years, folders and states.
 
 ## Accepted scope and evidence
 
-- The shared terminal renderer accepts an optional label width.
-- Both catalogue collectors use the movie label's width.
-- Existing callers retain their current formatting by default.
+- Case-insensitive partial matching accepts surrounding whitespace and years.
+- Exact title matches precede partial matches.
+- Missing folders are unverified until an authoritative scan marks them stale.
+- No matches exit 1; movie and show selectors are mutually exclusive.
+- Default TV listing and shared debug flags retain their existing routing.
+- Public CLI integration uses real movie files and a temporary SQLite catalogue.
 
 ## Final verification
 
-- Catalogue tests: 12 passed in the mediaStudio Conda environment.
-- Rendered both supplied examples and verified identical opening-bracket columns.
-- Black formatting and `git diff --check` passed.
+- Locate, CLI and catalogue location reconciliation tests: 59 passed.
+- Black applied to changed Python files; `git diff --check` passed.
+- README and both locate parsers describe the new option.
 
 ## Remaining work and immediate next action
 

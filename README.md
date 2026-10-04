@@ -91,10 +91,14 @@ By default the script runs in **dry-run** mode. Add `--confirm` to actually make
 ```bash
 organiseMyVideo media locate
 organiseMyVideo media locate --show Lanterns
+organiseMyVideo media locate --movie "Zone 414"
 ```
 
-`media locate` prints catalogued TV folders as `current`, `stale`, or
-`unverified`. Omit `--show` to list every catalogued show.
+`media locate` prints catalogued folders as `current`, `stale`, or
+`unverified`. Use `--movie TITLE` to find movies by case-insensitive exact or
+partial title, optionally including the year (for example `"Zone 414 (2021)"`).
+Movie results include their release year. `--movie` and `--show` are mutually
+exclusive; omit both to list every catalogued TV show.
 
 Use `organiseMyVideo media scan` for the normal existing-library scan. It scans
 both movie and TV libraries together; there is no movie/video selector on this

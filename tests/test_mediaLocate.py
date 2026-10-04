@@ -55,3 +55,51 @@ def testLocateTvShowReturnsNoMatchForUnknownShow(tmp_path: Path):
     catalogue = _catalogueWithShows(tmp_path)
 
     assert locateTvShow("The Pitt", catalogue=catalogue) == []
+
+
+def testLocateMovieThroughPublicCli(tmp_path, capsys):
+    from organiseMyVideo.cli import main
+    from organiseMyVideo.mediaLocate import locateMovie
+
+    root = tmp_path / "Movies"
+    for name in ("Zone 414 (2021)", "Zone 414 Returns (2026)"):
+        folder = root / name
+        folder.mkdir(parents=True)
+        (folder / f"{name}.mkv").write_bytes(b"movie")
+    catalogue = MediaCatalogue()
+    catalogue.catalogueReplaceFromStorage([root], [])
+
+    matches = locateMovie("  zOnE 414  ", catalogue=catalogue)
+    assert [item.name for item in matches] == [
+        "Zone 414 (2021)",
+        "Zone 414 Returns (2026)",
+    ]
+    assert [item.state for item in matches] == ["current", "current"]
+    assert main(["media", "locate", "--movie", "Zone 414 (2021)"]) == 0
+    output = capsys.readouterr().out
+    assert "Zone 414 (2021)" in output
+    assert str(root / "Zone 414 (2021)") in output
+    assert "current" in output
+    assert "Returns" not in output
+
+    missing = root / "Zone 414 (2021)"
+    (missing / "Zone 414 (2021).mkv").unlink()
+    missing.rmdir()
+    assert locateMovie("Zone 414 (2021)")[0].state == "unverified"
+    catalogue.catalogueReplaceFromStorage([root], [])
+    assert main(["media", "locate", "--movie", "Zone 414 (2021)"]) == 0
+    assert "stale" in capsys.readouterr().out
+    assert main(["media", "locate", "--movie", "Unknown movie"]) == 1
+    assert (
+        "Movie not found in media catalogue: Unknown movie" in capsys.readouterr().err
+    )
+    assert locateMovie("   ") == []
+
+
+def testLocateMovieAndShowAreMutuallyExclusive():
+    import pytest
+    from organiseMyVideo.cli import main
+
+    with pytest.raises(SystemExit) as error:
+        main(["media", "locate", "--movie", "Zone", "--show", "Lanterns"])
+    assert error.value.code == 2

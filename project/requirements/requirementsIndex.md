@@ -1,6 +1,6 @@
 # Requirements
 
-Next available number: 038
+Next available number: 039
 
 Requirements created after adoption of the managed process are recorded here.
 Historical behaviour is not assigned invented retrospective requirements.
@@ -45,6 +45,8 @@ Historical behaviour is not assigned invented retrospective requirements.
 | 036 | [Incoming media preparation workflow](features/036-incomingMediaPreparation.md) | Restrict `media clean` to incoming/staging hygiene and define the clean -> scan -> organise workflow. | Completed | [Prompt](prompt/036-incomingMediaPreparation.md) | [ADR-003](../adr/003-filesystemSafetyBoundary.md) |
 | 037 | [Media storage redistribution](features/037-mediaStorageRedistribution.md) | Rebalance movie and TV stores by utilisation percentage using persisted dry-run plans and confirmed whole-folder moves. | ToDo | Not required | [ADR-003](../adr/003-filesystemSafetyBoundary.md), [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
 
+| 038 | [Movie location lookup](features/038-movieLocate.md) | Locate movie library folders by title and year. | Completed | [Prompt](prompt/038-movieLocate.md) | Not required |
+
 ## Prompt index
 
 <!-- OMP-PROMPT-INDEX-BEGIN -->
@@ -77,4 +79,5 @@ Historical behaviour is not assigned invented retrospective requirements.
 - [033-cameraFolderCaptureCorrection](prompt/033-cameraFolderCaptureCorrection.md)
 - [035-movieIdentityConflictDetection](prompt/035-movieIdentityConflictDetection.md)
 - [036-incomingMediaPreparation](prompt/036-incomingMediaPreparation.md)
+- [038-movieLocate](prompt/038-movieLocate.md)
 <!-- OMP-PROMPT-INDEX-END -->

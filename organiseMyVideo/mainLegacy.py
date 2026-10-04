@@ -246,14 +246,21 @@ def buildParser(*, internalCamera: bool = False) -> argparse.ArgumentParser:
     mediaParser = subparsers.add_parser("media", help="organise or clean staged media")
     mediaSub = mediaParser.add_subparsers(dest="mediaAction", required=True)
     mediaLocate = mediaSub.add_parser(
-        "locate", parents=[_buildSharedFlags(True)], help="locate catalogued TV shows"
+        "locate",
+        parents=[_buildSharedFlags(True)],
+        help="locate catalogued movies or TV shows",
     )
-    mediaLocate.add_argument(
+    locateSelectors = mediaLocate.add_mutually_exclusive_group()
+    locateSelectors.add_argument(
         "--show",
         help=(
             "TV show to locate (case-insensitive exact or partial match); "
             "omit to list every catalogued show"
         ),
+    )
+    locateSelectors.add_argument(
+        "--movie",
+        help="Movie title to locate (case-insensitive exact or partial match)",
     )
     mediaOrganise = mediaSub.add_parser(
         "organise", parents=[_buildSharedFlags(True)], help="organise staged media"
@@ -919,7 +926,10 @@ def main(argv: Optional[Sequence[str]] = None, *, internalCamera: bool = False) 
         from .cli import _runMediaLocate
 
         show = getattr(args, "show", None)
-        return _runMediaLocate(["--show", show] if show else [])
+        movie = getattr(args, "movie", None)
+        if movie is not None:
+            return _runMediaLocate(["--movie", movie])
+        return _runMediaLocate(["--show", show] if show is not None else [])
     runStart()
     logger.doing("organiseMyVideo starting")
     line()
