@@ -26,6 +26,7 @@ MOVIE_IDENTITY_STATE_KEYS = (
 
 _APOSTROPHE_PATTERN = re.compile(r"['\u2019]")
 _NON_IDENTITY_PATTERN = re.compile(r"[^0-9a-z]+")
+_PATH_LIKE_TITLE_PATTERN = re.compile(r"^(?:[A-Za-z]:[\\/]|/|\\\\)")
 
 
 @dataclass(frozen=True)
@@ -133,6 +134,33 @@ def movieIdentityClassifySources(
     return established[0]
 
 
+def movieIdentityMetadataSuspectReasons(
+    title: object,
+    *,
+    metadataRuntime: object = None,
+    mediaRuntime: object = None,
+) -> tuple[str, ...]:
+    """Return reasons why metadata should not be trusted as movie identity.
+
+    A path-like title is never a credible movie title. Runtime disagreement is
+    treated as material only when both values are parseable, differ by at least
+    15 minutes, and differ by at least 25 percent of the feature runtime.
+    """
+    reasons = []
+    titleText = _displayText(title)
+    if titleText and _PATH_LIKE_TITLE_PATTERN.match(titleText):
+        reasons.append("metadata title contains a filesystem path")
+
+    metadataMinutes = _runtimeMinutes(metadataRuntime)
+    mediaMinutes = _runtimeMinutes(mediaRuntime)
+    if metadataMinutes is not None and mediaMinutes is not None and mediaMinutes > 0:
+        difference = abs(metadataMinutes - mediaMinutes)
+        if difference >= 15 and difference / mediaMinutes >= 0.25:
+            reasons.append("metadata runtime conflicts materially with media runtime")
+
+    return tuple(reasons)
+
+
 def movieIdentityEvidence(movieInfo: Mapping[str, object]) -> str:
     """Return the local source that supplied the proposed movie identity."""
     source = movieInfo.get("metadataSource")
@@ -159,15 +187,29 @@ def movieIdentityReport(
     imdbId: object = None,
     tmdbId: object = None,
     runtime: object = None,
+    mediaRuntime: object = None,
 ) -> str:
     """Return the operator-facing conflict report."""
+    suspectReasons = movieIdentityMetadataSuspectReasons(
+        decision.proposedTitle,
+        metadataRuntime=runtime,
+        mediaRuntime=mediaRuntime,
+    )
+    heading = "movie metadata identity suspect" if suspectReasons else "movie identity conflict"
     lines = [
-        "movie identity conflict",
+        heading,
         f"current: {_movieIdentityLabel(decision.currentTitle, decision.currentYear)}",
         f"proposed: {_movieIdentityLabel(decision.proposedTitle, decision.proposedYear)}",
         f"evidence: {evidence}",
     ]
-    for label, value in (("imdb", imdbId), ("tmdb", tmdbId), ("runtime", runtime)):
+    for reason in suspectReasons:
+        lines.append(f"reason: {reason}")
+    for label, value in (
+        ("imdb", imdbId),
+        ("tmdb", tmdbId),
+        ("metadata runtime", runtime),
+        ("media runtime", mediaRuntime),
+    ):
         text = _displayText(value)
         if text:
             lines.append(f"{label}: {text}")
@@ -220,10 +262,27 @@ def _displayText(value: object) -> Optional[str]:
 
 
 def _movieIdentityLabel(title: Optional[str], year: Optional[str]) -> str:
-    """Return ``Title (Year)`` when both parts are known."""
+    """Return ``Title (Year)`` without duplicating an embedded matching year."""
     if title and year:
+        embeddedYear = re.search(r"\((\d{4})\)\s*$", title)
+        if embeddedYear and embeddedYear.group(1) == str(year):
+            return title
         return f"{title} ({year})"
     return title or ""
+
+
+def _runtimeMinutes(value: object) -> Optional[float]:
+    """Return a numeric runtime in minutes when *value* begins with a number."""
+    text = _displayText(value)
+    if text is None:
+        return None
+    match = re.match(r"^\s*(\d+(?:\.\d+)?)", text)
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
 
 
 def _yearText(value: object) -> Optional[str]:
