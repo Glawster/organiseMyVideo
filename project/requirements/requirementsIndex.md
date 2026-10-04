@@ -45,7 +45,7 @@ Historical behaviour is not assigned invented retrospective requirements.
 | 036 | [Incoming media preparation workflow](features/036-incomingMediaPreparation.md) | Restrict `media clean` to incoming/staging hygiene and define the clean -> scan -> organise workflow. | Completed | [Prompt](prompt/036-incomingMediaPreparation.md) | [ADR-003](../adr/003-filesystemSafetyBoundary.md) |
 | 037 | [Media storage redistribution](features/037-mediaStorageRedistribution.md) | Rebalance movie and TV stores by utilisation percentage using persisted dry-run plans and confirmed whole-folder moves. | ToDo | Not required | [ADR-003](../adr/003-filesystemSafetyBoundary.md), [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
 | 038 | [Movie location lookup](features/038-movieLocate.md) | Locate movie library folders by title and year. | Completed | [Prompt](prompt/038-movieLocate.md) | Not required |
-| 039 | [Mixed movie folder split](features/038-mixedMovieFolderSplit.md) | Detect distinct movies sharing one folder and plan a safe confirmed split while ignoring ancillary media. | ToDo | Not required | [ADR-003](../adr/003-filesystemSafetyBoundary.md) |
+| 039 | [Mixed movie folder split](features/039-mixedMovieFolderSplit.md) | Detect distinct movies sharing one folder and plan a safe confirmed split while ignoring ancillary media. | ToDo | Not required | [ADR-003](../adr/003-filesystemSafetyBoundary.md) |
 
 ## Prompt index
 
