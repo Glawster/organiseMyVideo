@@ -394,17 +394,73 @@ class VideoRescanMixin:
             ordered[0],
         )
         secondary = [entry for entry in ordered if entry is not primary]
+
+        collectionFile = movieFolder / "collection.xml"
+        collectionTitle = None
+        classification = "mixed movie folder"
+        action = "split required"
+        needsInvestigation = True
+
+        if collectionFile.is_file():
+            root = self._readXmlRoot(collectionFile)
+            if root is not None:
+                collectionTitle = self._readFirstXmlText(
+                    root, ("LocalTitle", "OriginalTitle")
+                )
+            classification = "recognised MCM collection"
+            action = "collection recognised"
+            needsInvestigation = False
+        elif self._resetMovieFolderLooksLikeCollection(movieFolder, ordered):
+            classification = "possible movie collection"
+            action = "operator decision required"
+
         return {
             "folder": movieFolder,
             "primary": primary,
             "secondary": secondary,
             "identities": ordered,
+            "classification": classification,
+            "action": action,
+            "collectionFile": collectionFile if collectionFile.is_file() else None,
+            "collectionTitle": collectionTitle,
+            "needsInvestigation": needsInvestigation,
         }
 
+    def _resetMovieFolderLooksLikeCollection(
+        self, movieFolder: Path, identities: list[dict]
+    ) -> bool:
+        """Return True for a clear legacy collection/container structure."""
+        parentParts = []
+        for identity in identities:
+            for videoFile in identity["files"]:
+                try:
+                    relative = videoFile.relative_to(movieFolder)
+                except ValueError:
+                    return False
+                if len(relative.parts) < 2:
+                    return False
+                parentParts.append(relative.parts[0])
+
+        if not parentParts or len(set(parentParts)) != 1:
+            return False
+
+        collectionDirName = parentParts[0].casefold()
+        return any(
+            token in collectionDirName
+            for token in ("collection", "boxset", "box set", "trilogy", "saga")
+        )
+
     def _reportResetMixedMovieFolder(self, finding: dict) -> None:
-        """Report a mixed movie folder and record it for later organisation."""
-        lines = ["mixed movie folder", f"folder: {finding['folder']}"]
+        """Report a multi-identity folder without assuming that it needs splitting."""
+        classification = finding.get("classification", "mixed movie folder")
+        lines = [classification, f"folder: {finding['folder']}"]
         details = [f"folder: {finding['folder']}"]
+        if finding.get("collectionTitle"):
+            lines.append(f"collection: {finding['collectionTitle']}")
+            details.append(f"collection: {finding['collectionTitle']}")
+        if finding.get("collectionFile"):
+            lines.append(f"collection metadata: {finding['collectionFile']}")
+            details.append(f"collection metadata: {finding['collectionFile']}")
         for index, identity in enumerate(finding["identities"], start=1):
             label = identity["title"]
             if identity.get("year"):
@@ -414,10 +470,11 @@ class VideoRescanMixin:
             for videoFile in identity["files"]:
                 lines.append(f"file: {videoFile}")
                 details.append(f"file: {videoFile}")
-        lines.append("action: split required")
-        details.append("action: split required")
+        lines.append(f"action: {finding['action']}")
+        details.append(f"action: {finding['action']}")
         logger.warning("%s", "\n".join(lines))
-        self._recordSummaryInvestigation("mixed movie folder", *details)
+        if finding.get("needsInvestigation", True):
+            self._recordSummaryInvestigation(classification, *details)
 
     def _iterResetTvShowDirs(self, tvDir: Path) -> Iterable[Path]:
         """Yield top-level TV show directories for reset scans."""
