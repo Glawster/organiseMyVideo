@@ -48,6 +48,22 @@ Anyone But You
 
 must not be proposed.
 
+A later real-library case exposed another form of unsafe MCM evidence. The
+stored movie was a roughly 91-minute feature, while `movie.xml` contained:
+
+```text
+LocalTitle:     Q:\Movies\Entangled (2019)
+OriginalTitle:  Q:\Movies\Entangled (2019)
+ProductionYear: 2019
+TMDbId:         641556
+RunningTime:    3
+```
+
+The path-like title and three-minute metadata runtime materially contradict the
+stored feature. This must be treated as suspect identity metadata requiring
+review, not as authoritative evidence from which OMV constructs a canonical
+rename.
+
 ## Scope
 
 - Classify a proposed movie rename as either:
@@ -63,6 +79,15 @@ must not be proposed.
   which source supplied the existing and proposed identity.
 - Include available evidence such as folder title/year, filename title/year,
   MCM metadata, provider IDs and runtime/duration where useful.
+- Treat obviously path-like movie titles from metadata as suspect identity
+  evidence rather than canonical movie titles. This includes Windows drive/path
+  forms such as `Q:\Movies\Entangled (2019)` and equivalent path-bearing values.
+- When metadata runtime/duration materially contradicts the actual feature
+  runtime, downgrade that metadata from authoritative identity evidence and
+  report the contradiction for investigation rather than silently renaming from
+  it.
+- A suspect MCM record must remain blocked even when it also contains provider
+  IDs. Provider IDs do not override contradictory local evidence automatically.
 - Preserve title-style capitalisation when the existing and resolved title
   differ only by case.
 - When metadata is obviously ALL CAPS, prefer readable title-style capitalisation
@@ -194,7 +219,15 @@ must not be proposed.
    and a separately titled `Christmas Roadshow (2012)` video, behind-the-scenes
    content is treated as ancillary while the separate programme title is surfaced
    as a possible secondary identity requiring split investigation.
-20. Given one movie folder containing two distinct feature movies, such as
+22. Given MCM metadata whose title is path-like, such as
+   `Q:\Movies\Entangled (2019)`, when the stored media is scanned, OMV marks the
+   metadata identity as suspect and does not use that path-like value to derive
+   a canonical movie rename.
+23. Given the same `Entangled (2019)` case where `movie.xml` reports a three-minute
+   runtime while the actual MKV is roughly 91 minutes, OMV reports the material
+   runtime contradiction, keeps the rename blocked, and does not treat the TMDb
+   ID alone as sufficient proof that the MCM identity is authoritative.
+24. Given one movie folder containing two distinct feature movies, such as
    `Love And Jane (2024)` and `An American in Austen (2024)`, when scan evidence
    resolves both identities, then OMV reports a mixed-identity folder / split
    candidate with the supporting feature-file paths instead of only reporting a
@@ -238,6 +271,9 @@ must not be proposed.
 - Tests proving conflict output identifies the relevant evidence source.
 - Tests proving dry-run and confirmed workflows both block an unresolved
   identity-changing rename.
+- Regression fixture for the malformed `Entangled (2019)` MCM record, proving a
+  path-like title and material runtime contradiction are reported as suspect
+  metadata and cannot drive a canonical rename.
 - Full existing movie scan, catalogue and CLI regression suites.
 - Verified on 2026-10-01 in the `mediaStudio` environment: `pytest` 816 passed,
   `runLinter` on the changed Python files reported no findings,
@@ -276,12 +312,12 @@ must not be proposed.
   extension — canonical folder and file names drop unsupported characters
   before rename planning, `Sample.mkv` is not treated as the feature, and an
   existing canonical target is classified and left in place.
-
 - 2026-10-02: clarified readable canonical casing/separator behaviour for
   `TAYLOR SWIFT | THE ERAS TOUR` and required folder location in conflict review.
-
 - 2026-10-04: extended after real-library scan found two distinct movies sharing
   one folder; scan must classify this as a mixed-identity split candidate.
-
 - 2026-10-04: extended from real-library mixed-folder findings; scan now distinguishes
   distinct feature identities from ancillary material before shared metadata repair.
+- 2026-10-04: extended from the malformed `Entangled (2019)` MCM record; path-like
+  metadata titles and material runtime contradictions are suspect identity evidence
+  and must not drive canonical renames even when provider IDs are present.
