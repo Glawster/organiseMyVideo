@@ -70,7 +70,6 @@ def movieIdentityClassify(
 
     currentIdentity = movieTitleIdentity(currentTitleText)
     proposedIdentity = movieTitleIdentity(proposedTitleText)
-    # A label that is only punctuation, or only an article, is not an identity.
     if not currentIdentity or not proposedIdentity:
         return empty
 
@@ -111,11 +110,7 @@ def movieIdentityClassifySources(
     proposedTitle: object,
     proposedYear: object,
 ) -> MovieIdentityDecision:
-    """Classify *sources* in order and let a conflict win.
-
-    The first source is preferred when several labels only need their
-    capitals preserved. Pass the folder before the filename.
-    """
+    """Classify *sources* in order and let a conflict win."""
     established = []
     for currentTitle, currentYear in sources:
         decision = movieIdentityClassify(
@@ -140,12 +135,7 @@ def movieIdentityMetadataSuspectReasons(
     metadataRuntime: object = None,
     mediaRuntime: object = None,
 ) -> tuple[str, ...]:
-    """Return reasons why metadata should not be trusted as movie identity.
-
-    A path-like title is never a credible movie title. Runtime disagreement is
-    treated as material only when both values are parseable, differ by at least
-    15 minutes, and differ by at least 25 percent of the feature runtime.
-    """
+    """Return reasons why metadata should not be trusted as movie identity."""
     reasons = []
     titleText = _displayText(title)
     if titleText and _PATH_LIKE_TITLE_PATTERN.match(titleText):
@@ -195,7 +185,9 @@ def movieIdentityReport(
         metadataRuntime=runtime,
         mediaRuntime=mediaRuntime,
     )
-    heading = "movie metadata identity suspect" if suspectReasons else "movie identity conflict"
+    heading = (
+        "movie metadata identity suspect" if suspectReasons else "movie identity conflict"
+    )
     lines = [
         heading,
         f"current: {_movieIdentityLabel(decision.currentTitle, decision.currentYear)}",
@@ -204,15 +196,17 @@ def movieIdentityReport(
     ]
     for reason in suspectReasons:
         lines.append(f"reason: {reason}")
-    for label, value in (
-        ("imdb", imdbId),
-        ("tmdb", tmdbId),
-        ("metadata runtime", runtime),
-        ("media runtime", mediaRuntime),
-    ):
+    for label, value in (("imdb", imdbId), ("tmdb", tmdbId)):
         text = _displayText(value)
         if text:
             lines.append(f"{label}: {text}")
+    runtimeText = _displayText(runtime)
+    if runtimeText:
+        label = "metadata runtime" if mediaRuntime is not None else "runtime"
+        lines.append(f"{label}: {runtimeText}")
+    mediaRuntimeText = _displayText(mediaRuntime)
+    if mediaRuntimeText:
+        lines.append(f"media runtime: {mediaRuntimeText}")
     return "\n".join(lines)
 
 
@@ -234,11 +228,7 @@ def _identityLetters(text: str) -> str:
 
 
 def _capitalisationDowngrade(current: str, proposed: str) -> bool:
-    """Return True when *proposed* would lowercase a capital already on disk.
-
-    Punctuation is ignored so a filesystem-safe substitution cannot also
-    replace ``But`` with ``but``.
-    """
+    """Return True when *proposed* would lowercase a capital already on disk."""
     currentLetters = _identityLetters(current)
     proposedLetters = _identityLetters(proposed)
     if currentLetters.casefold() != proposedLetters.casefold():
