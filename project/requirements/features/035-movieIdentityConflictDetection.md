@@ -88,8 +88,14 @@ must not be proposed.
   - obvious junk/release-marker files that are not feature media;
   - multi-part feature media (for example `-part2`);
   - same-identity folder collision / merge candidate;
-  - possible duplicate feature file; and
+  - possible duplicate feature file;
+  - mixed-identity movie folder / split candidate; and
   - unresolved collision requiring review.
+- When one physical movie folder contains two distinct feature movies that resolve
+  to different identities, classify it as a mixed-identity folder / split candidate
+  rather than reducing the condition to a metadata rename conflict. Report the
+  identities and the feature files that support each identity. Do not move either
+  movie during scan.
 - A same-identity folder collision must not overwrite or delete either side.
   Treat it as a reconciliation candidate and establish whether content is
   identical, complementary, or distinct before any later merge operation.
@@ -176,6 +182,11 @@ must not be proposed.
 19. Given `TAYLOR SWIFT | THE ERAS TOUR`, when canonical naming is applied, then
    the readable result is `Taylor Swift - The Eras Tour`, preserving a separator
    while avoiding all-caps output.
+20. Given one movie folder containing two distinct feature movies, such as
+   `Love And Jane (2024)` and `An American in Austen (2024)`, when scan evidence
+   resolves both identities, then OMV reports a mixed-identity folder / split
+   candidate with the supporting feature-file paths instead of only reporting a
+   rename conflict, and scan performs no move.
 
 ## Dependencies and decisions
 
@@ -257,3 +268,6 @@ must not be proposed.
 
 - 2026-10-02: clarified readable canonical casing/separator behaviour for
   `TAYLOR SWIFT | THE ERAS TOUR` and required folder location in conflict review.
+
+- 2026-10-04: extended after real-library scan found two distinct movies sharing
+  one folder; scan must classify this as a mixed-identity split candidate.
