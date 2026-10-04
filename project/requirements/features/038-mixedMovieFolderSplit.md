@@ -107,6 +107,24 @@ A scan finding should identify at least:
 The item must also appear under `Needs further investigation` until an organise
 plan safely resolves it.
 
+## Additional real-library classification case
+
+A folder may contain one main feature, obvious ancillary material, and a separately titled programme:
+
+```text
+Michael McIntyre - Showtime (2012).mkv
+Michael Mcintyre - Behind The Scenes (2012) ...mkv
+Michael Mcintyre - Christmas Roadshow (2012) ...mkv
+```
+
+`Behind The Scenes` is ancillary and must not create a split candidate.
+`Christmas Roadshow` has a distinct programme-style title and should be surfaced
+as a possible secondary identity requiring split investigation rather than being
+treated as a duplicate or renamed onto the main feature.
+
+Filename size may support reporting but must not be the rule that decides whether
+content is ancillary or a separate programme.
+
 ## Acceptance criteria
 
 1. Two distinct feature movies in one folder are classified as a mixed-identity split candidate, not merely a rename conflict.
@@ -119,6 +137,7 @@ plan safely resolves it.
 8. Existing destination collisions block the split rather than overwrite.
 9. Catalogue location state is reconciled after a successful split.
 10. Tests include the real-library `Love And Jane (2024)` / `An American in Austen (2024)` case.
+11. Tests cover the Michael McIntyre case and prove behind-the-scenes content is ignored while the separately titled programme remains visible for split investigation.
 
 ## Dependencies
 
