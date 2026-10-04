@@ -851,3 +851,76 @@ def testMovieFolderIgnoresBehindScenesButFlagsDistinctSecondProgramme(
     assert str(christmas) in caplog.text
     assert str(behindScenes) not in caplog.text
     assert "action: split required" in caplog.text
+
+
+def testMcmCollectionXmlRecognisesIntentionalCollection(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    source = tmp_path / "source"
+    source.mkdir()
+    storage = tmp_path / "movie1"
+    folder = storage / "02 Halo 4 Forward Unto Dawn - Complete Mini Series (2012)"
+    collectionDir = folder / "Halo Collection 2010-2015"
+    collectionDir.mkdir(parents=True)
+    first = collectionDir / "02 Halo 4 Forward Unto Dawn - Complete Mini Series (2012).mp4"
+    second = collectionDir / "03 Halo Nightfall - Complete Mini Series 2014.mp4"
+    third = collectionDir / "04 Halo The Fall Of Reach - Complete Animated Series 2015.mp4"
+    for path in (first, second, third):
+        path.write_bytes(b"movie")
+    (folder / "collection.xml").write_text(
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        "<Item>\n"
+        "  <LocalTitle>02 Halo 4 Forward Unto Dawn - Complete Mini Series</LocalTitle>\n"
+        "  <ProductionYear>2012</ProductionYear>\n"
+        "</Item>\n",
+        encoding="utf-8",
+    )
+    organizer = VideoOrganizer(sourceDir=str(source), dryRun=True)
+
+    with (
+        caplog.at_level(logging.WARNING),
+        patch.object(organizer, "_enrichMovieMetadata") as enrich,
+    ):
+        stats = organizer.resetMovieMetadata([storage])
+
+    assert stats == {"renamed": 0, "skipped": 3, "errors": 0}
+    enrich.assert_not_called()
+    assert "recognised MCM collection" in caplog.text
+    assert "collection metadata:" in caplog.text
+    assert "Halo Nightfall" in caplog.text
+    assert "action: collection recognised" in caplog.text
+    assert all(
+        item[0] != "recognised MCM collection"
+        for item in organizer._summaryInvestigations
+    )
+
+
+def testCollectionLikeSubfolderRequiresOperatorDecision(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    source = tmp_path / "source"
+    source.mkdir()
+    storage = tmp_path / "movie1"
+    folder = storage / "02 Halo 4 Forward Unto Dawn - Complete Mini Series (2012)"
+    collectionDir = folder / "Halo Collection 2010-2015"
+    collectionDir.mkdir(parents=True)
+    first = collectionDir / "02 Halo 4 Forward Unto Dawn - Complete Mini Series (2012).mp4"
+    second = collectionDir / "03 Halo Nightfall - Complete Mini Series 2014.mp4"
+    for path in (first, second):
+        path.write_bytes(b"movie")
+    organizer = VideoOrganizer(sourceDir=str(source), dryRun=True)
+
+    with (
+        caplog.at_level(logging.WARNING),
+        patch.object(organizer, "_enrichMovieMetadata") as enrich,
+    ):
+        stats = organizer.resetMovieMetadata([storage])
+
+    assert stats == {"renamed": 0, "skipped": 2, "errors": 0}
+    enrich.assert_not_called()
+    assert "possible movie collection" in caplog.text
+    assert "action: operator decision required" in caplog.text
+    assert any(
+        item[0] == "possible movie collection"
+        for item in organizer._summaryInvestigations
+    )
