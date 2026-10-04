@@ -30,11 +30,49 @@ operation under `media organise`.
 
 ## Scope
 
+## Collection-aware classification
+
+Multiple distinct titles in one folder do not always mean an accidental mixed
+folder. OMV must distinguish three states before proposing a split:
+
+1. **Recognised MCM collection**
+   - `collection.xml` exists in the movie folder.
+   - Its presence is explicit operator/MCM evidence that the folder is intended
+     to represent a collection/container.
+   - The file may contain only a display label/year and may have blank provider
+     IDs; presence is still structural collection evidence.
+   - `collection.xml` must not be treated as normal `movie.xml` identity
+     evidence for every contained feature.
+   - Scan reports the collection and its detected member identities, but does
+     not add it to split investigation merely because multiple identities exist.
+
+2. **Possible movie collection**
+   - No `collection.xml` exists.
+   - Multiple distinct feature identities are grouped beneath a clear
+     collection-like subfolder (for example a folder containing `Collection`,
+     `Boxset`, `Box Set`, `Trilogy`, or `Saga`).
+   - Scan reports an operator decision requirement rather than automatically
+     classifying it as a split.
+   - The unresolved item remains under `Needs further investigation`.
+
+3. **Mixed movie folder / split candidate**
+   - Multiple distinct feature identities remain after ancillary, multipart and
+     recognised collection evidence is excluded.
+   - Scan reports the folder as requiring a split.
+
+Absence of `collection.xml` is not proof that the folder is not a collection.
+
+The operator decision for a possible collection belongs to `media organise`,
+not `media scan`. A decision such as `collection`, `split`, or `ignore for
+now` should be persisted in application state/catalogue so later scans do not
+repeatedly ask the same question. OMV should not create or rewrite MCM
+`collection.xml` as part of this requirement.
+
 - Detect a movie folder containing two or more distinct feature identities.
 - Use feature-file evidence, trusted metadata/provider IDs, runtime and names to
   distinguish genuinely distinct movies from ancillary/sample/multipart media.
-- Report the condition during `media scan` as a `mixed movie folder` /
-  `split candidate`.
+- Classify multiple identities during `media scan` as a recognised MCM collection,
+  possible movie collection, or mixed movie folder / split candidate.
 - Identify which feature file(s) belong to each resolved movie identity.
 - Keep `media scan` strictly non-destructive.
 - Provide an explicit `media organise` path that can move the misplaced movie
@@ -138,6 +176,10 @@ content is ancillary or a separate programme.
 9. Catalogue location state is reconciled after a successful split.
 10. Tests include the real-library `Love And Jane (2024)` / `An American in Austen (2024)` case.
 11. Tests cover the Michael McIntyre case and prove behind-the-scenes content is ignored while the separately titled programme remains visible for split investigation.
+12. Given `collection.xml`, multiple distinct movie identities are reported as a recognised MCM collection rather than a split candidate.
+13. Given a collection-like nested folder without `collection.xml`, scan reports a possible movie collection and an operator decision requirement.
+14. Absence of `collection.xml` alone never proves that multiple titles are an accidental mixed folder.
+15. A future organise-time operator decision can be persisted so subsequent scans reuse it rather than prompting repeatedly.
 
 ## Dependencies
 
@@ -149,3 +191,5 @@ content is ancillary or a separate programme.
 ## Change history
 
 - 2026-10-04: created from real-library scan where two distinct movies were stored in one folder.
+
+- 2026-10-04: added collection-aware classification from the real Halo MCM collection case, including `collection.xml`, possible collection inference and persisted operator decision requirements.
