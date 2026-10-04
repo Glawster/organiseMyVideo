@@ -102,6 +102,11 @@ must not be proposed.
 - Do not lower-case words in an already capitalised movie title solely to match
   metadata. In particular, `Anyone But You` must not be changed to
   `Anyone but You`.
+- When multiple meaningful video filenames in one folder resolve to distinct movie
+  identities, report a mixed movie folder / split candidate before applying shared
+  folder metadata to every file. Obvious ancillary material such as samples,
+  trailers, featurettes and behind-the-scenes content must not create a split
+  candidate. Multipart media must also remain part of the same movie identity.
 - Keep `media scan` non-destructive in accordance with REQ-029.
 
 ## Out of scope
@@ -182,6 +187,13 @@ must not be proposed.
 19. Given `TAYLOR SWIFT | THE ERAS TOUR`, when canonical naming is applied, then
    the readable result is `Taylor Swift - The Eras Tour`, preserving a separator
    while avoiding all-caps output.
+20. Given one folder containing distinct feature filenames for `Love And Jane (2024)`
+   and `An American in Austen (2024)`, scan reports a mixed movie folder / split
+   candidate with both file paths and performs no rename.
+21. Given `Michael McIntyre - Showtime (2012)` with a `Behind The Scenes` video
+   and a separately titled `Christmas Roadshow (2012)` video, behind-the-scenes
+   content is treated as ancillary while the separate programme title is surfaced
+   as a possible secondary identity requiring split investigation.
 20. Given one movie folder containing two distinct feature movies, such as
    `Love And Jane (2024)` and `An American in Austen (2024)`, when scan evidence
    resolves both identities, then OMV reports a mixed-identity folder / split
@@ -271,3 +283,6 @@ must not be proposed.
 
 - 2026-10-04: extended after real-library scan found two distinct movies sharing
   one folder; scan must classify this as a mixed-identity split candidate.
+
+- 2026-10-04: extended from real-library mixed-folder findings; scan now distinguishes
+  distinct feature identities from ancillary material before shared metadata repair.
