@@ -99,3 +99,9 @@ class VideoOrganizer(RescanMergeCleanupMixin, MetadataMixin, VideoMixin, Torrent
         showKey = self._buildResetTvShowDuplicateKey(showName)
         filterKey = self._buildResetTvShowDuplicateKey(showFilter)
         return bool(filterKey and filterKey in showKey)
+
+    def _shouldPromptInteractively(self) -> bool:
+        """Never ask mutation questions while the organizer is in dry-run mode."""
+        if self.dryRun:
+            return False
+        return super()._shouldPromptInteractively()
