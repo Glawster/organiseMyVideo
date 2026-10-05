@@ -197,7 +197,6 @@ def testRemovedInteractionOptionsAreRejected(removedOption):
 
 def testGrokRequiresExactlyOneAction():
     parser = applicationMain.buildParser()
-
     with pytest.raises(SystemExit) as missingAction:
         parser.parse_args(["grok"])
     with pytest.raises(SystemExit) as conflictingActions:
@@ -405,6 +404,6 @@ def testGlobalConfirmationSurvivesCameraSubparser():
 def testDebugPreservesMediaLocateDispatch():
     from organiseMyVideo.cli import main
 
-    with patch("organiseMyVideo.cli.locateTvShow", return_value=[]) as locate:
-        assert main(["--debug", "media", "locate", "--show", "Example"]) == 1
+    with patch("organiseMyVideo.cli.locateMedia", return_value=[]) as locate:
+        assert main(["--debug", "media", "locate", "Example"]) == 1
     locate.assert_called_once_with("Example")
