@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,7 +27,32 @@ class MediaLocation:
 
     name: str
     folderPath: str
+    mediaType: str = "Media"
     state: str = LOCATION_CURRENT
+
+
+def locateMedia(
+    search: str, *, catalogue: MediaCatalogue | None = None
+) -> list[MediaLocation]:
+    """Return movie and TV folders matching one case-insensitive search."""
+    requested = search.strip().casefold()
+    if not requested:
+        return []
+    mediaCatalogue = catalogue or MediaCatalogue()
+    matches = [
+        *locateMovie(search, catalogue=mediaCatalogue),
+        *locateTvShow(search, catalogue=mediaCatalogue),
+    ]
+    return sorted(
+        matches,
+        key=lambda item: (
+            not _locationNameIsExact(item, requested),
+            item.mediaType.casefold(),
+            item.name.casefold(),
+            _STATE_ORDER.get(item.state, 9),
+            item.folderPath.casefold(),
+        ),
+    )
 
 
 def locateMovie(
@@ -54,6 +80,7 @@ def locateMovie(
             MediaLocation(
                 name=name,
                 folderPath=row.folderPath,
+                mediaType="Movie",
                 state=_locationVisibility(row.locationState, row.folderPath),
             )
         )
@@ -93,6 +120,7 @@ def locateTvShow(
             MediaLocation(
                 name=row.showName,
                 folderPath=row.folderPath,
+                mediaType="TV",
                 state=_locationVisibility(row.locationState, row.folderPath),
             )
         )
@@ -105,6 +133,16 @@ def locateTvShow(
             item.folderPath.casefold(),
         ),
     )
+
+
+def _locationNameIsExact(item: MediaLocation, requested: str) -> bool:
+    """Return True when *requested* exactly identifies this result."""
+    name = item.name.strip().casefold()
+    if name == requested:
+        return True
+    if item.mediaType == "Movie":
+        return re.sub(r"\s+\(\d{4}\)$", "", name) == requested
+    return False
 
 
 def _locationVisibility(locationState: str, folderPath: str) -> str:
