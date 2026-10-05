@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -26,6 +27,7 @@ _FILESYSTEM_SEPARATOR_PATTERN = re.compile(r"[\\/:]+")
 _FILESYSTEM_REMOVED_CHARACTER = re.compile(r"[|?*<>\"]+")
 _ARTWORK_SUFFIXES = {".jpg", ".jpeg", ".png"}
 _METADATA_SUFFIXES = {".xml", ".nfo"}
+_LARGE_COMPARISON_BYTES = 512 * 1024 * 1024
 
 
 def restoreLeadingThe(name: str) -> str:
@@ -244,7 +246,7 @@ def movieFolderContentDescribe(source: Path, destination: Path) -> tuple[str, st
     differing = sorted(
         name
         for name in shared
-        if not _filesIdentical(source / name, destination / name)
+        if not _movieFilesIdentical(source / name, destination / name)
     )
     if set(sourceSizes) == set(destinationSizes) and not differing:
         relation = "identical"
@@ -270,6 +272,41 @@ def movieFolderContentDescribe(source: Path, destination: Path) -> tuple[str, st
                 f"{label} disposable junk: {', '.join(junk[:3])}"
             )
     return relation, "\n".join(evidenceLines)
+
+
+def _movieFilesIdentical(left: Path, right: Path) -> bool:
+    """Compare movie files, showing live progress when a large read is required."""
+    try:
+        large = max(left.stat().st_size, right.stat().st_size) >= _LARGE_COMPARISON_BYTES
+    except OSError:
+        large = False
+    stream = sys.stderr
+    isatty = getattr(stream, "isatty", None)
+    showProgress = bool(large and callable(isatty) and isatty())
+    lastPercent = -1
+
+    def _progress(processed: int, total: int) -> None:
+        nonlocal lastPercent
+        if not showProgress or total <= 0:
+            return
+        percent = min(int(processed * 100 / total), 100)
+        if percent == lastPercent and processed < total:
+            return
+        lastPercent = percent
+        processedGb = processed / (1024**3)
+        totalGb = total / (1024**3)
+        stream.write(
+            f"\rComparing duplicate content: {left.name} "
+            f"{percent:3d}% ({processedGb:.1f}/{totalGb:.1f} GB)"
+        )
+        stream.flush()
+
+    try:
+        return _filesIdentical(left, right, progress=_progress if showProgress else None)
+    finally:
+        if showProgress and lastPercent >= 0:
+            stream.write("\n")
+            stream.flush()
 
 
 def _movieFolderContentKinds(folder: Path) -> str:
