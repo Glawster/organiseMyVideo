@@ -49,6 +49,7 @@ def testEntangledConflictReportDoesNotDuplicateYearAndFlagsSuspectTitle():
         evidence="movie.xml",
         tmdbId="641556",
         runtime="3",
+        mediaRuntime="91",
     )
 
     assert report.startswith("movie metadata identity suspect\n")
@@ -56,5 +57,7 @@ def testEntangledConflictReportDoesNotDuplicateYearAndFlagsSuspectTitle():
     assert r"proposed: Q:\Movies\Entangled (2019)" in report
     assert "(2019) (2019)" not in report
     assert "reason: metadata title contains a filesystem path" in report
+    assert "reason: metadata runtime conflicts materially with media runtime" in report
     assert "tmdb: 641556" in report
     assert "metadata runtime: 3" in report
+    assert "media runtime: 91" in report
