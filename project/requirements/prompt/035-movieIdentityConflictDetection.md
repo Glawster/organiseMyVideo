@@ -44,9 +44,20 @@ filesystem-safe before rename planning.
 - Classify multipart files such as `*-part2.*` separately from duplicate feature
   files, and classify obvious release-marker/non-feature files as ancillary/junk
   candidates without destructive scan behaviour.
+- Treat `Downloaded From ... .txt` release-note files as disposable junk
+  candidates. Scan may report them, but must not delete them.
 - Classify existing-target collisions instead of emitting only generic errors:
   ancillary media, same-identity folder merge candidate, possible duplicate
   feature file, or unresolved collision.
+- Inspect same-identity collision contents recursively enough to distinguish
+  top-level feature files from feature media nested under another canonical
+  movie folder. A nested same-identity feature should be reported as a
+  structural/complementary reconciliation case rather than a plain duplicate.
+- Before expensive content comparison, use conclusive cheap checks first:
+  different sizes mean different files; matching device+inode means the same
+  physical file. Equal size/name/timestamp/link count alone is insufficient.
+- When a genuine large-file content comparison is required, emit visible
+  secondary progress so the enclosing library scan does not appear stalled.
 - Do not convert already-capitalised titles to metadata sentence casing; for
   example, do not rename `Anyone But You` to `Anyone but You`.
 
@@ -71,6 +82,12 @@ deterministic safe representation before a destination path is planned. The
 mapping must preserve recognisable identity and must not mask a substantive
 movie title or year conflict.
 
+For same-identity reconciliation, distinguish substantive media from disposable
+release-note junk when comparing folder contents. Report nested feature folders
+and junk candidates explicitly so an operator can see why two folders are
+complementary. Do not perform the destructive merge or junk deletion during
+`media scan`; any confirmed cleanup belongs under `media organise`.
+
 ## Verification
 
 Add focused regression tests for every acceptance criterion, including:
@@ -87,8 +104,16 @@ Add focused regression tests for every acceptance criterion, including:
 - sample-name variants/sample directories not being treated as the feature;
 - multipart `-part2` files not being treated as duplicate features;
 - obvious release-marker/non-feature files being reported without deletion;
+- `Downloaded From glodls.to.txt`, `Downloaded From The Pirate Bay.txt`, and
+  `Downloaded From torrentgalaxy.to.txt` being classified as disposable junk;
 - same-identity folder collisions such as `Inside Out 2 (2024)_` versus
   `Inside Out 2 (2024)` being reported as reconciliation/merge candidates;
+- the real Inside Out 2 layout where the canonical folder has metadata/artwork
+  while the underscore folder contains a nested `Inside Out 2 (2024)` feature
+  folder, proving the structure is reported as complementary reconciliation;
+- equal-sized different-inode feature files not being assumed identical;
+- matching device+inode files bypassing full content comparison;
+- large-file comparison progress being observable;
 - existing canonical feature targets being reported as possible duplicate or
   unresolved collisions without overwriting; and
 - both dry-run and confirmed workflows.
