@@ -27,8 +27,8 @@ class MediaLocation:
 
     name: str
     folderPath: str
-    mediaType: str = "Media"
     state: str = LOCATION_CURRENT
+    mediaType: str = "Media"
 
 
 def locateMedia(
@@ -80,8 +80,8 @@ def locateMovie(
             MediaLocation(
                 name=name,
                 folderPath=row.folderPath,
-                mediaType="Movie",
                 state=_locationVisibility(row.locationState, row.folderPath),
+                mediaType="Movie",
             )
         )
     return sorted(
@@ -120,8 +120,8 @@ def locateTvShow(
             MediaLocation(
                 name=row.showName,
                 folderPath=row.folderPath,
-                mediaType="TV",
                 state=_locationVisibility(row.locationState, row.folderPath),
+                mediaType="TV",
             )
         )
     return sorted(
