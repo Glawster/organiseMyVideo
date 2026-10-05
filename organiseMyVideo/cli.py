@@ -49,10 +49,24 @@ def _runMediaLocate(argv: Sequence[str]) -> int:
     return 0
 
 
+def _locateArguments(arguments: Sequence[str]) -> Optional[list[str]]:
+    """Return locate arguments when the canonical command is present."""
+
+    values = list(arguments)
+    for index in range(len(values) - 1):
+        if values[index : index + 2] != ["media", "locate"]:
+            continue
+        if any(value not in {"--debug", "--quiet"} for value in values[:index]):
+            return None
+        return values[index + 2 :]
+    return None
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     """Run the public CLI through the canonical parser."""
 
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if arguments[:2] == ["media", "locate"]:
-        return _runMediaLocate(arguments[2:])
+    locateArguments = _locateArguments(arguments)
+    if locateArguments is not None:
+        return _runMediaLocate(locateArguments)
     return legacyCli.main(arguments)
