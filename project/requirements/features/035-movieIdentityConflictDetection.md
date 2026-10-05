@@ -64,6 +64,19 @@ stored feature. This must be treated as suspect identity metadata requiring
 review, not as authoritative evidence from which OMV constructs a canonical
 rename.
 
+A further production scan found two same-identity folders:
+
+```text
+Sonic the Hedgehog 3 (2024)
+Sonic the Hedgehog 3 (2024)_
+```
+
+Each contained a 20,526,191,454-byte feature file with the same name and timestamp,
+but the files had different inode numbers on the same filesystem. OMV therefore
+could not conclude that they were the same physical file and legitimately began a
+full content comparison. The scan appeared stalled because the comparison read a
+20 GB file in 1 MiB chunks without any visible secondary progress.
+
 ## Scope
 
 - Classify a proposed movie rename as either:
@@ -124,6 +137,22 @@ rename.
 - A same-identity folder collision must not overwrite or delete either side.
   Treat it as a reconciliation candidate and establish whether content is
   identical, complementary, or distinct before any later merge operation.
+- Before a potentially expensive full-file duplicate comparison, use cheap and
+  conclusive checks first:
+  - different file sizes mean the files are different and no content comparison
+    is required;
+  - the same filesystem device and inode means both paths refer to the same
+    physical file and no content comparison is required;
+  - matching size, timestamps, link counts, names, or folder identities alone
+    are not sufficient to prove two different inodes contain identical content.
+- When different-inode files still require content or hash comparison, expose
+  visible progress for that comparison, including enough context to show which
+  movie/files are being checked and how much data has been processed. The main
+  library scan must not appear frozen while many gigabytes are read.
+- A trailing underscore in a folder name is evidence of a reconciliation case,
+  not permission to delete it automatically. An operator may independently remove
+  a known redundant underscore folder after verifying it, but `media scan` must
+  remain non-destructive and must not infer safe deletion from the suffix alone.
 - Do not lower-case words in an already capitalised movie title solely to match
   metadata. In particular, `Anyone But You` must not be changed to
   `Anyone but You`.
@@ -232,6 +261,19 @@ rename.
    resolves both identities, then OMV reports a mixed-identity folder / split
    candidate with the supporting feature-file paths instead of only reporting a
    rename conflict, and scan performs no move.
+25. Given `Sonic the Hedgehog 3 (2024)` and `Sonic the Hedgehog 3 (2024)_` each
+   containing a 20,526,191,454-byte feature file on the same filesystem but with
+   different inodes, OMV does not assume the files are identical from size,
+   timestamp, link count or naming alone; if identity must be established it
+   performs the required content comparison without modifying either folder.
+26. Given a duplicate-content comparison that reads a large feature file, OMV
+   visibly reports the comparison target and progress while the read is running
+   so the operator can distinguish active I/O from a stalled library scan.
+27. Given two candidate files whose device and inode are identical, OMV treats
+   them as the same physical file without hashing or reading the complete file.
+28. Given an underscore-suffixed reconciliation folder, scan does not delete it
+   merely because of the suffix; manual operator cleanup remains separate from
+   the non-destructive scan workflow.
 
 ## Dependencies and decisions
 
@@ -274,6 +316,13 @@ rename.
 - Regression fixture for the malformed `Entangled (2019)` MCM record, proving a
   path-like title and material runtime contradiction are reported as suspect
   metadata and cannot drive a canonical rename.
+- Regression fixture for the Sonic same-identity folders with equal-sized files
+  but different inodes, proving a full comparison is not skipped merely because
+  cheap metadata agrees.
+- Test proving identical device/inode pairs bypass content hashing.
+- Test proving different file sizes bypass content hashing as non-identical.
+- Test proving a genuine large-file comparison emits observable progress rather
+  than leaving the enclosing library progress apparently frozen.
 - Full existing movie scan, catalogue and CLI regression suites.
 - Verified on 2026-10-01 in the `mediaStudio` environment: `pytest` 816 passed,
   `runLinter` on the changed Python files reported no findings,
@@ -321,3 +370,6 @@ rename.
 - 2026-10-04: extended from the malformed `Entangled (2019)` MCM record; path-like
   metadata titles and material runtime contradictions are suspect identity evidence
   and must not drive canonical renames even when provider IDs are present.
+- 2026-10-05: extended from the Sonic same-identity collision; duplicate verification
+  now requires cheap inode/size fast paths, visible progress for genuine large-file
+  comparisons, and no automatic deletion based only on an underscore folder suffix.
