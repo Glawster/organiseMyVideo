@@ -1,12 +1,24 @@
 """REQ-035 regression tests for same-identity movie reconciliation evidence."""
 
+import io
+import os
 from pathlib import Path
+from unittest.mock import patch
 
 from organiseMyVideo.incomingNames import mediaNameIsDisposableJunk
+from organiseMyVideo.seasonFolders import _filesIdentical
 from organiseMyVideo.showFolders import (
+    _movieFilesIdentical,
     movieFolderCollisionReport,
     movieFolderContentDescribe,
 )
+
+
+class _TtyBuffer(io.StringIO):
+    """String buffer that behaves like an interactive terminal."""
+
+    def isatty(self) -> bool:
+        return True
 
 
 def testDownloadedFromTextFilesAreDisposableJunk():
@@ -45,7 +57,10 @@ def testNestedFeatureFolderIsReportedAsComplementaryReconciliation(tmp_path: Pat
     relation, evidence = movieFolderContentDescribe(duplicate, canonical)
 
     assert relation == "complementary"
-    assert "source contains: nested feature file, metadata, 2 disposable junk file(s)" in evidence
+    assert (
+        "source contains: nested feature file, metadata, 2 disposable junk file(s)"
+        in evidence
+    )
     assert "target contains: metadata, artwork" in evidence
     assert "source nested feature folder: Inside Out 2 (2024)" in evidence
     assert "Downloaded From glodls.to.txt" in evidence
@@ -73,3 +88,45 @@ def testDisposableJunkDoesNotMakeSubstantiveContentsDistinct(tmp_path: Path):
 
     assert relation == "identical"
     assert "source disposable junk: Downloaded From torrentgalaxy.to.txt" in evidence
+
+
+def testSameDeviceAndInodeBypassContentRead(tmp_path: Path):
+    original = tmp_path / "Movie (2024).mkv"
+    linked = tmp_path / "Movie (2024)-linked.mkv"
+    original.write_bytes(b"feature content")
+    os.link(original, linked)
+    progress = []
+
+    assert _filesIdentical(original, linked, progress=lambda done, total: progress.append((done, total)))
+    assert progress == []
+
+
+def testDifferentSizeBypassesContentRead(tmp_path: Path):
+    left = tmp_path / "left.mkv"
+    right = tmp_path / "right.mkv"
+    left.write_bytes(b"short")
+    right.write_bytes(b"a different length")
+    progress = []
+
+    assert not _filesIdentical(left, right, progress=lambda done, total: progress.append((done, total)))
+    assert progress == []
+
+
+def testLargeMovieComparisonDisplaysProgress(tmp_path: Path):
+    left = tmp_path / "Sonic the Hedgehog 3 (2024).mkv"
+    right = tmp_path / "Sonic the Hedgehog 3 (2024)-copy.mkv"
+    payload = b"same feature content" * 1024
+    left.write_bytes(payload)
+    right.write_bytes(payload)
+    stream = _TtyBuffer()
+
+    with (
+        patch("organiseMyVideo.showFolders.sys.stderr", stream),
+        patch("organiseMyVideo.showFolders._LARGE_COMPARISON_BYTES", 1),
+    ):
+        assert _movieFilesIdentical(left, right)
+
+    output = stream.getvalue()
+    assert "Comparing duplicate content:" in output
+    assert "Sonic the Hedgehog 3 (2024).mkv" in output
+    assert "100%" in output
