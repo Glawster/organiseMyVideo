@@ -77,6 +77,30 @@ could not conclude that they were the same physical file and legitimately began 
 full content comparison. The scan appeared stalled because the comparison read a
 20 GB file in 1 MiB chunks without any visible secondary progress.
 
+A separate same-identity collision exposed a complementary-folder layout:
+
+```text
+Inside Out 2 (2024)/
+    movie.xml
+    artwork...
+
+Inside Out 2 (2024)_/
+    artwork...
+    Downloaded From glodls.to.txt
+    Downloaded From The Pirate Bay.txt
+    Downloaded From torrentgalaxy.to.txt
+    Inside Out 2 (2024)/
+        Inside Out 2 (2024).mkv
+        movie.xml
+```
+
+The canonical top-level folder contains metadata/artwork while the underscore
+folder contains the actual feature inside a nested canonical subfolder. This is
+not a simple duplicate-folder case: it is a same-identity structural
+reconciliation candidate with complementary content. Release-origin text files
+such as `Downloaded From ... .txt` are disposable download artefacts and should
+not be preserved as movie-library content.
+
 ## Scope
 
 - Classify a proposed movie rename as either:
@@ -120,6 +144,9 @@ full content comparison. The scan appeared stalled because the comparison read a
 - Ignore known non-feature media such as `Sample.mkv` during canonical feature
   filename reconciliation; these files must not be renamed to the feature's
   canonical movie filename.
+- Treat release-origin marker files such as `Downloaded From *.txt` as disposable
+  junk, not movie metadata or sidecars. `media scan` may report/classify them but
+  remains non-destructive; confirmed removal belongs to `media organise`.
 - When a canonical file or folder target already exists, classify the condition
   rather than reporting only a generic rename error. Distinguish at least:
   - ignored ancillary media such as samples;
@@ -137,6 +164,15 @@ full content comparison. The scan appeared stalled because the comparison read a
 - A same-identity folder collision must not overwrite or delete either side.
   Treat it as a reconciliation candidate and establish whether content is
   identical, complementary, or distinct before any later merge operation.
+- Same-identity collision analysis must inspect enough nested folder structure to
+  distinguish a true duplicate from complementary content. In particular, detect
+  feature media stored in a nested canonical subfolder beneath an underscore or
+  otherwise non-canonical parent rather than assuming the parent contains only
+  metadata or junk.
+- A later confirmed reconciliation may flatten a nested same-identity feature into
+  the canonical movie folder, reconcile metadata/artwork, and remove now-empty or
+  redundant structure only after conflicts have been checked. These destructive
+  actions belong to `media organise`, never `media scan`.
 - Before a potentially expensive full-file duplicate comparison, use cheap and
   conclusive checks first:
   - different file sizes mean the files are different and no content comparison
@@ -274,6 +310,19 @@ full content comparison. The scan appeared stalled because the comparison read a
 28. Given an underscore-suffixed reconciliation folder, scan does not delete it
    merely because of the suffix; manual operator cleanup remains separate from
    the non-destructive scan workflow.
+29. Given the `Inside Out 2 (2024)` production layout where the canonical
+   top-level folder contains metadata/artwork while `Inside Out 2 (2024)_`
+   contains a nested `Inside Out 2 (2024)/Inside Out 2 (2024).mkv`, scan
+   classifies the structure as a same-identity complementary reconciliation
+   candidate and reports the nested feature rather than treating the folders as
+   simple duplicates.
+30. Given a confirmed reconciliation of that complementary layout, `media organise`
+   may flatten the nested feature into the canonical folder only after checking
+   for conflicting feature files and sidecars; `media scan` performs no move.
+31. Given release-origin marker files such as `Downloaded From glodls.to.txt`,
+   `Downloaded From The Pirate Bay.txt`, or `Downloaded From torrentgalaxy.to.txt`,
+   scan classifies them as disposable junk and a confirmed `media organise`
+   cleanup may remove them without treating them as movie metadata or sidecars.
 
 ## Dependencies and decisions
 
@@ -308,6 +357,9 @@ full content comparison. The scan appeared stalled because the comparison read a
   ignored/classified as non-feature media.
 - Regression fixture for `Inside Out 2 (2024)_` plus `Inside Out 2 (2024)`,
   proving the collision is classified as a same-identity merge candidate.
+- Regression fixture for the nested Inside Out 2 layout, proving the nested
+  feature is discovered, complementary content is reported, and download-origin
+  text markers are classified as disposable junk rather than sidecars.
 - Tests covering an existing canonical target file, distinguishing ancillary
   media from possible duplicate feature content.
 - Tests proving conflict output identifies the relevant evidence source.
@@ -373,3 +425,7 @@ full content comparison. The scan appeared stalled because the comparison read a
 - 2026-10-05: extended from the Sonic same-identity collision; duplicate verification
   now requires cheap inode/size fast paths, visible progress for genuine large-file
   comparisons, and no automatic deletion based only on an underscore folder suffix.
+- 2026-10-05: extended from the nested `Inside Out 2 (2024)` collision; same-identity
+  reconciliation now recognises complementary nested feature layouts and classifies
+  `Downloaded From ...` text files as disposable junk for confirmed organise-time
+  cleanup.
