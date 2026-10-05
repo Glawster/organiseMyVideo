@@ -7,7 +7,7 @@ import sys
 from typing import Optional, Sequence
 
 from . import __main__ as legacyCli
-from .mediaLocate import MediaLocation, locateMovie, locateTvShow
+from .mediaLocate import MediaLocation, locateMedia
 
 
 def _locateParser() -> argparse.ArgumentParser:
@@ -17,46 +17,35 @@ def _locateParser() -> argparse.ArgumentParser:
         prog="organiseMyVideo media locate",
         description="Locate movie or TV show folders recorded in the media catalogue",
     )
-    selectors = parser.add_mutually_exclusive_group()
-    selectors.add_argument(
-        "--show",
-        help=(
-            "TV show to locate (case-insensitive exact or partial match); "
-            "omit to list every catalogued show"
-        ),
-    )
-    selectors.add_argument(
-        "--movie",
-        help="Movie title to locate (case-insensitive exact or partial match)",
+    parser.add_argument(
+        "search",
+        metavar="SEARCH",
+        help="movie or TV title to locate (case-insensitive exact or partial match)",
     )
     return parser
 
 
-def _printLocatedShows(matches: list[MediaLocation]) -> None:
-    """Print each media title once, with the freshness of every stored folder."""
+def _printLocatedMedia(matches: list[MediaLocation]) -> None:
+    """Print each media title once, with type and freshness of every location."""
 
     previous = None
     for match in matches:
-        if match.name != previous:
-            print(match.name)
-            previous = match.name
+        identity = (match.mediaType, match.name)
+        if identity != previous:
+            print(f"{match.mediaType}: {match.name}")
+            previous = identity
         print(f"  {match.folderPath}    {match.state}")
 
 
 def _runMediaLocate(argv: Sequence[str]) -> int:
-    """Run a catalogue-only movie or TV show location query."""
+    """Run one catalogue-only movie/TV location query."""
 
     args = _locateParser().parse_args(list(argv))
-    # Preserve the default TV listing while selecting movies explicitly.
-    requested = args.movie if args.movie is not None else args.show
-    kind = "Movie" if args.movie is not None else "TV show"
-    matches = (
-        locateMovie(args.movie) if args.movie is not None else locateTvShow(args.show)
-    )
-    if requested is not None and not matches:
-        print(f"{kind} not found in media catalogue: {requested}", file=sys.stderr)
+    matches = locateMedia(args.search)
+    if not matches:
+        print(f"Media not found in media catalogue: {args.search}", file=sys.stderr)
         return 1
-    _printLocatedShows(matches)
+    _printLocatedMedia(matches)
     return 0
 
 
@@ -64,4 +53,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     """Run the public CLI through the canonical parser."""
 
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments[:2] == ["media", "locate"]:
+        return _runMediaLocate(arguments[2:])
     return legacyCli.main(arguments)
