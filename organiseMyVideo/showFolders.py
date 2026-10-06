@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -10,6 +11,7 @@ from organiseMyProjects.logUtils import getLogger  # type: ignore
 
 from .constants import VIDEO_EXTENSIONS
 from .filesystemOperations import FilesystemOperations
+from .incomingNames import mediaNameIsAncillary, mediaNameIsDisposableJunk
 from .movieIdentity import (
     MOVIE_IDENTITY_AGREE,
     MOVIE_IDENTITY_PRESERVE_CASE,
@@ -25,6 +27,7 @@ _FILESYSTEM_SEPARATOR_PATTERN = re.compile(r"[\\/:]+")
 _FILESYSTEM_REMOVED_CHARACTER = re.compile(r"[|?*<>\"]+")
 _ARTWORK_SUFFIXES = {".jpg", ".jpeg", ".png"}
 _METADATA_SUFFIXES = {".xml", ".nfo"}
+_LARGE_COMPARISON_BYTES = 512 * 1024 * 1024
 
 
 def restoreLeadingThe(name: str) -> str:
@@ -223,6 +226,8 @@ def movieFolderCollisionReport(
         relation, evidence = movieFolderContentDescribe(source, destination)
         lines.append("classification: same-identity merge candidate")
         lines.append(f"content: {relation}")
+        if relation == "complementary":
+            lines.append("action: reconcile complementary contents")
     else:
         lines.append("classification: unresolved")
     lines.append(f"source: {source}")
@@ -241,7 +246,7 @@ def movieFolderContentDescribe(source: Path, destination: Path) -> tuple[str, st
     differing = sorted(
         name
         for name in shared
-        if not _filesIdentical(source / name, destination / name)
+        if not _movieFilesIdentical(source / name, destination / name)
     )
     if set(sourceSizes) == set(destinationSizes) and not differing:
         relation = "identical"
@@ -249,43 +254,129 @@ def movieFolderContentDescribe(source: Path, destination: Path) -> tuple[str, st
         relation = "distinct"
     else:
         relation = "complementary"
-    evidence = (
-        f"source contains: {_movieFolderContentKinds(source)}\n"
-        f"target contains: {_movieFolderContentKinds(destination)}"
-    )
+    evidenceLines = [
+        f"source contains: {_movieFolderContentKinds(source)}",
+        f"target contains: {_movieFolderContentKinds(destination)}",
+    ]
     if differing:
-        evidence = f"{evidence}\ndistinct files: {', '.join(differing[:3])}"
-    return relation, evidence
+        evidenceLines.append(f"distinct files: {', '.join(differing[:3])}")
+    for label, folder in (("source", source), ("target", destination)):
+        nested = _movieFolderNestedFeatureDirs(folder)
+        if nested:
+            evidenceLines.append(
+                f"{label} nested feature folder: {', '.join(nested[:3])}"
+            )
+        junk = _movieFolderDisposableJunk(folder)
+        if junk:
+            evidenceLines.append(
+                f"{label} disposable junk: {', '.join(junk[:3])}"
+            )
+    return relation, "\n".join(evidenceLines)
+
+
+def _movieFilesIdentical(left: Path, right: Path) -> bool:
+    """Compare movie files, showing live progress when a large read is required."""
+    try:
+        large = max(left.stat().st_size, right.stat().st_size) >= _LARGE_COMPARISON_BYTES
+    except OSError:
+        large = False
+    stream = sys.stderr
+    isatty = getattr(stream, "isatty", None)
+    showProgress = bool(large and callable(isatty) and isatty())
+    lastPercent = -1
+
+    def _progress(processed: int, total: int) -> None:
+        nonlocal lastPercent
+        if not showProgress or total <= 0:
+            return
+        percent = min(int(processed * 100 / total), 100)
+        if percent == lastPercent and processed < total:
+            return
+        lastPercent = percent
+        processedGb = processed / (1024**3)
+        totalGb = total / (1024**3)
+        stream.write(
+            f"\rComparing duplicate content: {left.name} "
+            f"{percent:3d}% ({processedGb:.1f}/{totalGb:.1f} GB)"
+        )
+        stream.flush()
+
+    try:
+        return _filesIdentical(left, right, progress=_progress if showProgress else None)
+    finally:
+        if showProgress and lastPercent >= 0:
+            stream.write("\n")
+            stream.flush()
 
 
 def _movieFolderContentKinds(folder: Path) -> str:
-    """Return a short description of feature, metadata, and artwork in *folder*."""
-    feature = metadata = artwork = False
+    """Return a short description of feature, metadata, artwork and junk."""
+    directFeature = nestedFeature = metadata = artwork = False
+    junkCount = 0
     for path in folder.rglob("*"):
         if not path.is_file():
             continue
+        if mediaNameIsDisposableJunk(path.name):
+            junkCount += 1
+            continue
         suffix = path.suffix.lower()
-        if suffix in VIDEO_EXTENSIONS and path.stem.casefold() != "sample":
-            feature = True
+        if suffix in VIDEO_EXTENSIONS and not mediaNameIsAncillary(path.name):
+            relative = path.relative_to(folder)
+            if len(relative.parts) > 1:
+                nestedFeature = True
+            else:
+                directFeature = True
         elif suffix in _METADATA_SUFFIXES:
             metadata = True
         elif suffix in _ARTWORK_SUFFIXES:
             artwork = True
     kinds = []
-    if feature:
+    if directFeature:
         kinds.append("feature file")
+    if nestedFeature:
+        kinds.append("nested feature file")
     if metadata:
         kinds.append("metadata")
     if artwork:
         kinds.append("artwork")
+    if junkCount:
+        kinds.append(f"{junkCount} disposable junk file(s)")
     return ", ".join(kinds) if kinds else "no recognised media"
 
 
+def _movieFolderNestedFeatureDirs(folder: Path) -> list[str]:
+    """Return first-level nested folders containing meaningful feature media."""
+    nested = set()
+    for path in folder.rglob("*"):
+        if (
+            not path.is_file()
+            or path.suffix.lower() not in VIDEO_EXTENSIONS
+            or mediaNameIsAncillary(path.name)
+        ):
+            continue
+        relative = path.relative_to(folder)
+        if len(relative.parts) > 1:
+            nested.add(relative.parts[0])
+    return sorted(nested, key=str.casefold)
+
+
+def _movieFolderDisposableJunk(folder: Path) -> list[str]:
+    """Return release-note files safe to present as later cleanup candidates."""
+    return sorted(
+        (
+            path.relative_to(folder).as_posix()
+            for path in folder.rglob("*")
+            if path.is_file() and mediaNameIsDisposableJunk(path.name)
+        ),
+        key=str.casefold,
+    )
+
+
 def _movieFolderFileSizes(folder: Path) -> dict[str, int]:
-    """Return relative file paths and sizes for one movie folder."""
+    """Return substantive relative file paths and sizes for one movie folder."""
     sizes = {}
     for path in folder.rglob("*"):
-        if path.is_file():
+        if path.is_file() and not mediaNameIsDisposableJunk(path.name):
             sizes[path.relative_to(folder).as_posix()] = path.stat().st_size
     return sizes
 

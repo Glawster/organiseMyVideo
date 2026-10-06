@@ -25,6 +25,18 @@ command can also become a media-mutation command.
 
 The CLI should make the safety boundary obvious from the command name.
 
+TV season folders also need one canonical representation. The canonical folder
+is `Season N` with the numeric season written as an integer and therefore no
+leading zeroes. For example, season 1 is stored as `Season 1`, not `Season 01`.
+Any organiser path that creates or selects a destination season folder must use
+that same rule rather than introducing a padded folder that later needs
+normalisation.
+
+A zero-byte video file is not usable media. Its presence usually means that the
+copy/download is incomplete or damaged and the operator needs to obtain the
+media again. Scan must surface this explicitly rather than treating the file as
+a valid movie/episode or silently skipping it.
+
 ## Command contract
 
 ### `media scan`
@@ -48,6 +60,8 @@ A scan may:
 - identify malformed or non-canonical names;
 - calculate and report the canonical filename/folder that would be expected;
 - report missing, conflicting or suspicious metadata;
+- detect and report zero-byte video files as unusable media requiring operator
+  attention/redownload;
 - refresh derived OMV catalogue/application state.
 
 A scan must not:
@@ -77,6 +91,15 @@ canonical library structure, including:
 - moves required by the organiser;
 - provider-identified folder merges when `--merge` is selected.
 
+Whenever a TV episode is moved into a season directory, the destination must be
+`Season N` with no leading zeroes in `N`, irrespective of whether the source
+filename uses `S01`, `S001`, or any other padded season representation. Existing
+`Season 01` style folders are normalisation candidates for `Season 1`.
+
+A zero-byte source video must not be moved into the organised library as though
+it were valid media. The organiser must warn, leave it in place, and classify it
+as requiring operator attention/redownload.
+
 It remains dry-run by default. `--confirm` is required before filesystem or
 embedded-metadata mutations are performed.
 
@@ -102,6 +125,16 @@ Example:
 naming issue
   current:  /mnt/video1/TV/Farscape/Season 1/Farscape.S01E01.720p.WEB.x264.mkv
   expected: /mnt/video1/TV/Farscape/Season 1/Farscape - S01E01 - Premiere.mkv
+```
+
+A zero-byte finding should identify the file and make the required operator
+action obvious, for example:
+
+```text
+zero-byte video file
+  file: /mnt/video1/TV/Farscape/Season 1/Farscape.S01E03.mkv
+  bytes: 0
+  action: redownload required
 ```
 
 The same planned correction may subsequently be presented by
@@ -150,7 +183,20 @@ those writes do not alter the media filesystem.
     organise = arrange library media, clean = prepare/clean incoming media**.
 11. Existing scan filters, catalogue refresh, source resolution and focused
     show scanning continue to work.
-12. `pytest`, `runLinter` and `git diff --check` pass.
+12. A TV episode moved by `media organise` is targeted at `Season N` with no
+    leading zeroes, for example `Season 1` rather than `Season 01`.
+13. Existing padded season folders are reported as naming issues during scan
+    and are normalised only by the appropriate confirmed organise operation.
+14. A zero-byte file whose suffix is a recognised video extension is reported
+    by scan with its full path, byte count `0`, and an action indicating that
+    redownload/operator repair is required.
+15. A zero-byte source video is not moved into the organised library by
+    `media organise`; it remains in place and is reported as requiring
+    redownload/operator attention.
+16. Zero-byte detection applies to both movie and TV video extensions and does
+    not treat ordinary zero-byte non-video marker/metadata files as broken
+    media.
+17. `pytest`, `runLinter` and `git diff --check` pass.
 
 ## Dependencies and decisions
 
@@ -171,3 +217,7 @@ those writes do not alter the media filesystem.
 
 - 2026-10-02: clarified that `media clean` is limited to the incoming/staging
   source tree; library normalisation remains outside clean.
+
+- 2026-10-05: clarified canonical TV season destinations as unpadded `Season N`
+  and added zero-byte video detection/reporting, including the rule that broken
+  zero-byte source media must not be organised into the library.

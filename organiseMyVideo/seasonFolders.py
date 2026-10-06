@@ -6,7 +6,7 @@ import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Callable, Iterable, Optional
 
 from organiseMyProjects.logUtils import getLogger  # type: ignore
 
@@ -179,24 +179,49 @@ def _recordCatalogueMove(source: Path, destination: Path, *, dryRun: bool) -> No
     catalogueRecordMove(source, destination, dryRun=dryRun)
 
 
-def _filesIdentical(left: Path, right: Path) -> bool:
-    """Return True when two regular files have the same size and SHA-256 digest."""
+def _filesIdentical(
+    left: Path,
+    right: Path,
+    progress: Optional[Callable[[int, int], None]] = None,
+) -> bool:
+    """Return True when two regular files have identical content.
+
+    Cheap conclusive checks run before hashing: different sizes are distinct,
+    while matching filesystem device and inode mean both paths name the same
+    physical file. Different inodes of equal size still require content hashes.
+    """
 
     try:
         if not left.is_file() or not right.is_file():
             return False
-        if left.stat().st_size != right.stat().st_size:
+        leftStat = left.stat()
+        rightStat = right.stat()
+        if leftStat.st_size != rightStat.st_size:
             return False
-        return _digest(left) == _digest(right)
+        if leftStat.st_dev == rightStat.st_dev and leftStat.st_ino == rightStat.st_ino:
+            return True
+
+        processed = 0
+        total = leftStat.st_size + rightStat.st_size
+
+        def _onRead(amount: int) -> None:
+            nonlocal processed
+            processed += amount
+            if progress is not None:
+                progress(processed, total)
+
+        return _digest(left, _onRead) == _digest(right, _onRead)
     except OSError:
         return False
 
 
-def _digest(path: Path) -> str:
+def _digest(path: Path, onRead: Optional[Callable[[int], None]] = None) -> str:
     """Return a SHA-256 digest without loading the whole file into memory."""
 
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
+            if onRead is not None:
+                onRead(len(chunk))
     return digest.hexdigest()

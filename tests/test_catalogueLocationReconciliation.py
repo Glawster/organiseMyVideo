@@ -94,10 +94,12 @@ def testLocateShowsLanternsStates(tmp_path: Path, capsys: pytest.CaptureFixture[
     removed.rmdir()
     catalogue.catalogueReplaceFromStorage([], [video1, video2])
 
-    assert _runMediaLocate(["--show", "Lanterns"]) == 0
+    assert _runMediaLocate(["Lanterns"]) == 0
     output = capsys.readouterr().out
 
-    assert output == ("Lanterns\n" f"  {live}    current\n" f"  {removed}    stale\n")
+    assert output == (
+        "TV: Lanterns\n" f"  {live}    current\n" f"  {removed}    stale\n"
+    )
 
 
 def testMergeDiscoveryIgnoresStaleLanternsFolder(tmp_path: Path):
@@ -318,12 +320,14 @@ def testConfirmedMergeCarriesEpisodeIdentity(tmp_path: Path):
     assert {row.filePath: row.locationState for row in episodes}[str(moved)] == "stale"
 
 
-def testLocateWithoutShowListsEveryCataloguedShow(capsys: pytest.CaptureFixture[str]):
-    assert _runMediaLocate([]) == 0
-    assert capsys.readouterr().out == ""
+def testLocateRequiresSearch():
+    with pytest.raises(SystemExit) as error:
+        _runMediaLocate([])
+
+    assert error.value.code == 2
 
 
-def testLocateWithoutShowListsAllCataloguedShows(
+def testUnifiedLocateFindsEachCataloguedShow(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ):
     root = tmp_path / "TV"
@@ -332,11 +336,11 @@ def testLocateWithoutShowListsAllCataloguedShows(
     catalogue = MediaCatalogue()
     catalogue.catalogueReplaceFromStorage([], [root])
 
-    assert _runMediaLocate([]) == 0
+    assert _runMediaLocate(["Lanterns"]) == 0
+    assert capsys.readouterr().out == "TV: Lanterns\n" f"  {lanterns}    current\n"
 
-    assert capsys.readouterr().out == (
-        "Lanterns\n" f"  {lanterns}    current\n" "Pitt\n" f"  {pitt}    current\n"
-    )
+    assert _runMediaLocate(["Pitt"]) == 0
+    assert capsys.readouterr().out == "TV: Pitt\n" f"  {pitt}    current\n"
 
 
 def testUnreadableShowSubtreeDoesNotMarkExistingEpisodesStale(

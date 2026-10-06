@@ -26,6 +26,15 @@ filesystem-safe before rename planning.
 - Follow the repository agent instructions and requirements process.
 - Preserve the existing metadata-source priority model unless the requirement
   explicitly requires conflict handling around it.
+- Suspect MCM evidence must be rejected before ordinary title/year comparison.
+  A path-like MCM title or a material metadata-runtime/feature-runtime mismatch
+  is independently sufficient to block that MCM identity even when punctuation
+  normalisation would otherwise make the titles compare equal and even when a
+  provider ID is present.
+- When MCM runtime is used as identity evidence, obtain the actual feature
+  duration through the shared video-probe service when available and compare the
+  two values. Do not persist this technical runtime merely as a side effect of
+  identity checking.
 - Do not solve conflicts by fetching fresh online metadata.
 - Do not mutate or repair `movie.xml` as part of this requirement.
 - Keep scan behaviour non-destructive in accordance with REQ-029.
@@ -38,17 +47,38 @@ filesystem-safe before rename planning.
   a readable separator when the unsupported character separates title parts; for
   example `TAYLOR SWIFT | THE ERAS TOUR` should become
   `Taylor Swift - The Eras Tour`.
+- Treat `:` as the canonical filesystem separator ` - ` while allowing display
+  and catalogue metadata to retain the original colon. The leading-article rule
+  remains a separate step, so `The Walking Dead: Dead City` becomes
+  `Walking Dead - Dead City, The` on disk.
 - Apply the same safe-name rule to both the movie folder and movie filename.
 - Exclude recognisable ancillary sample variants and sample-directory media from
   canonical feature-file reconciliation.
+- Ancillary descriptors such as `interview`, `trailer`, `making of`, and
+  `featurette` must be matched as explicit ancillary labels/segments, not as bare
+  substrings that can consume genuine titles such as `The Interview` or
+  `Trailer Park Boys`.
 - Classify multipart files such as `*-part2.*` separately from duplicate feature
   files, and classify obvious release-marker/non-feature files as ancillary/junk
   candidates without destructive scan behaviour.
+- Treat `Downloaded From ... .txt` release-note files as disposable junk
+  candidates. Scan may report them, but must not delete them.
 - Classify existing-target collisions instead of emitting only generic errors:
   ancillary media, same-identity folder merge candidate, possible duplicate
   feature file, or unresolved collision.
+- Inspect same-identity collision contents recursively enough to distinguish
+  top-level feature files from feature media nested under another canonical
+  movie folder. A nested same-identity feature should be reported as a
+  structural/complementary reconciliation case rather than a plain duplicate.
+- Before expensive content comparison, use conclusive cheap checks first:
+  different sizes mean different files; matching device+inode means the same
+  physical file. Equal size/name/timestamp/link count alone is insufficient.
+- When a genuine large-file content comparison is required, emit visible
+  secondary progress so the enclosing library scan does not appear stalled.
 - Do not convert already-capitalised titles to metadata sentence casing; for
   example, do not rename `Anyone But You` to `Anyone but You`.
+- Operator-facing identity-conflict/suspect-metadata warnings must include the
+  affected folder path as well as current/proposed identity and evidence source.
 
 ## Implementation guidance
 
@@ -60,9 +90,15 @@ title change as a conflict while allowing narrowly defined normalisations such
 as punctuation, whitespace, filesystem-safe substitutions and existing
 article-placement conventions.
 
-Where a conflict is detected, report the current identity, proposed identity,
-the metadata/evidence source that produced the proposed value, and useful
-supporting evidence such as provider IDs and duration where available.
+Evaluate suspect metadata before ordinary identity agreement. A title that
+contains a filesystem path remains suspect even if punctuation stripping makes
+it compare equal to the folder/filename identity. Likewise, a materially wrong
+MCM runtime must block the MCM identity even when title and year agree.
+
+Where a conflict or suspect metadata record is detected, report the affected
+folder, current identity, proposed identity, the metadata/evidence source that
+produced the proposed value, and useful supporting evidence such as provider IDs
+and both metadata/technical duration where available.
 
 Extend the existing filesystem-safe naming behaviour beyond the current
 colon-only fallback. Canonical metadata containing Windows/NTFS-invalid path
@@ -70,6 +106,12 @@ characters such as `:`, `|`, `?`, `*`, `<`, `>`, or `"` must be mapped to a
 deterministic safe representation before a destination path is planned. The
 mapping must preserve recognisable identity and must not mask a substantive
 movie title or year conflict.
+
+For same-identity reconciliation, distinguish substantive media from disposable
+release-note junk when comparing folder contents. Report nested feature folders
+and junk candidates explicitly so an operator can see why two folders are
+complementary. Do not perform the destructive merge or junk deletion during
+`media scan`; any confirmed cleanup belongs under `media organise`.
 
 ## Verification
 
@@ -80,15 +122,33 @@ Add focused regression tests for every acceptance criterion, including:
 - `Anyone But You` versus `Anyone but You`;
 - safe punctuation-only normalisation;
 - canonical names containing `?`, `|`, `*`, `:`, `<`, `>`, and `"`;
+- `The Walking Dead: Dead City` retaining the colon in display/catalogue
+  identity while using `Walking Dead - Dead City, The` as the canonical show
+  folder;
 - the real-library examples `Nativity 3 - Dude, Where's My Donkey?!`,
   `TAYLOR SWIFT | THE ERAS TOUR` -> `Taylor Swift - The Eras Tour`, and
   `Thunderbolts*`;
 - folder and filename destinations being safe before `rename()` is called;
 - sample-name variants/sample directories not being treated as the feature;
+- `The Interview` and `Trailer Park Boys` remaining legitimate feature titles
+  while explicit `Behind The Scenes`/featurette/trailer labels remain ancillary;
 - multipart `-part2` files not being treated as duplicate features;
 - obvious release-marker/non-feature files being reported without deletion;
+- `Downloaded From glodls.to.txt`, `Downloaded From The Pirate Bay.txt`, and
+  `Downloaded From torrentgalaxy.to.txt` being classified as disposable junk;
 - same-identity folder collisions such as `Inside Out 2 (2024)_` versus
   `Inside Out 2 (2024)` being reported as reconciliation/merge candidates;
+- the real Inside Out 2 layout where the canonical folder has metadata/artwork
+  while the underscore folder contains a nested `Inside Out 2 (2024)` feature
+  folder, proving the structure is reported as complementary reconciliation;
+- path-like MCM metadata being blocked even when punctuation-normalised identity
+  would otherwise compare equal;
+- an MCM runtime of roughly three minutes versus an actual roughly 91-minute
+  feature being reported and blocked, including when a TMDb ID is present;
+- identity warnings containing the affected folder path;
+- equal-sized different-inode feature files not being assumed identical;
+- matching device+inode files bypassing full content comparison;
+- large-file comparison progress being observable;
 - existing canonical feature targets being reported as possible duplicate or
   unresolved collisions without overwriting; and
 - both dry-run and confirmed workflows.

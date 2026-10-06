@@ -313,20 +313,172 @@ class VideoRescanMixin:
         )
 
     def _isResetMovieAncillaryFile(self, movieFolder: Path, videoFile: Path) -> bool:
-        """Return True when *videoFile* must not take the feature filename.
-
-        ``Sample.mkv`` beside the feature, and any video under a sample
-        folder, is ancillary media. It is not a second copy of the movie.
-        """
+        """Return True when *videoFile* is recognisable non-feature movie media."""
         from .incomingNames import mediaNameIsAncillary
 
         if mediaNameIsAncillary(videoFile.name):
             return True
+
+        stem = videoFile.stem.casefold()
+        ancillaryTokens = (
+            "behind the scenes",
+            "behind-the-scenes",
+            "featurette",
+            "deleted scene",
+            "deleted scenes",
+            "interview",
+            "making of",
+            "trailer",
+        )
+        if any(token in stem for token in ancillaryTokens):
+            return True
+
         try:
             relativeParts = videoFile.relative_to(movieFolder).parts
         except ValueError:
             return False
         return any(self._isSampleLikeFolder(Path(part)) for part in relativeParts[:-1])
+
+    def _resetMovieFilenameIdentity(self, videoFile: Path) -> Optional[tuple[str, Optional[str]]]:
+        """Return a usable movie identity parsed from one feature filename."""
+        parsed = self.parseMovieFilename(videoFile.name)
+        if not parsed or not parsed.get("title"):
+            return None
+        return parsed["title"], parsed.get("year")
+
+    def _resetMovieIdentityKey(
+        self, title: str, year: Optional[str]
+    ) -> tuple[str, Optional[str]]:
+        """Return a stable key for grouping filename-derived movie identities."""
+        from .movieIdentity import movieTitleIdentity
+
+        return movieTitleIdentity(title), str(year) if year is not None else None
+
+    def _classifyResetMovieFolderVideos(
+        self, movieFolder: Path, videoFiles: list[Path]
+    ) -> Optional[dict]:
+        """Return a mixed-folder finding when filenames identify distinct movies.
+
+        This deliberately uses filename/folder evidence before shared movie.xml
+        metadata. Ancillary and multipart files cannot create a second identity.
+        """
+        folderParsed = self.parseMovieFilename(movieFolder.name)
+        folderKey = None
+        if folderParsed and folderParsed.get("title"):
+            folderKey = self._resetMovieIdentityKey(
+                folderParsed["title"], folderParsed.get("year")
+            )
+
+        identities: dict[tuple[str, Optional[str]], dict] = {}
+        for videoFile in videoFiles:
+            if self._isResetMovieAncillaryFile(movieFolder, videoFile):
+                continue
+            if re.search(r"(?:^|[-_. ]+)part\s*\d+(?:[-_. ]|$)", videoFile.stem, re.I):
+                continue
+            identity = self._resetMovieFilenameIdentity(videoFile)
+            if identity is None:
+                continue
+            title, year = identity
+            key = self._resetMovieIdentityKey(title, year)
+            entry = identities.setdefault(
+                key, {"title": title, "year": year, "files": []}
+            )
+            entry["files"].append(videoFile)
+
+        if len(identities) < 2:
+            return None
+
+        ordered = list(identities.values())
+        primary = next(
+            (
+                entry
+                for key, entry in identities.items()
+                if folderKey is not None and key == folderKey
+            ),
+            ordered[0],
+        )
+        secondary = [entry for entry in ordered if entry is not primary]
+
+        collectionFile = movieFolder / "collection.xml"
+        collectionTitle = None
+        classification = "mixed movie folder"
+        action = "split required"
+        needsInvestigation = True
+
+        if collectionFile.is_file():
+            root = self._readXmlRoot(collectionFile)
+            if root is not None:
+                collectionTitle = self._readFirstXmlText(
+                    root, ("LocalTitle", "OriginalTitle")
+                )
+            classification = "recognised MCM collection"
+            action = "collection recognised"
+            needsInvestigation = False
+        elif self._resetMovieFolderLooksLikeCollection(movieFolder, ordered):
+            classification = "possible movie collection"
+            action = "operator decision required"
+
+        return {
+            "folder": movieFolder,
+            "primary": primary,
+            "secondary": secondary,
+            "identities": ordered,
+            "classification": classification,
+            "action": action,
+            "collectionFile": collectionFile if collectionFile.is_file() else None,
+            "collectionTitle": collectionTitle,
+            "needsInvestigation": needsInvestigation,
+        }
+
+    def _resetMovieFolderLooksLikeCollection(
+        self, movieFolder: Path, identities: list[dict]
+    ) -> bool:
+        """Return True for a clear legacy collection/container structure."""
+        parentParts = []
+        for identity in identities:
+            for videoFile in identity["files"]:
+                try:
+                    relative = videoFile.relative_to(movieFolder)
+                except ValueError:
+                    return False
+                if len(relative.parts) < 2:
+                    return False
+                parentParts.append(relative.parts[0])
+
+        if not parentParts or len(set(parentParts)) != 1:
+            return False
+
+        collectionDirName = parentParts[0].casefold()
+        return any(
+            token in collectionDirName
+            for token in ("collection", "boxset", "box set", "trilogy", "saga")
+        )
+
+    def _reportResetMixedMovieFolder(self, finding: dict) -> None:
+        """Report a multi-identity folder without assuming that it needs splitting."""
+        classification = finding.get("classification", "mixed movie folder")
+        lines = [classification, f"folder: {finding['folder']}"]
+        details = [f"folder: {finding['folder']}"]
+        if finding.get("collectionTitle"):
+            lines.append(f"collection: {finding['collectionTitle']}")
+            details.append(f"collection: {finding['collectionTitle']}")
+        if finding.get("collectionFile"):
+            lines.append(f"collection metadata: {finding['collectionFile']}")
+            details.append(f"collection metadata: {finding['collectionFile']}")
+        for index, identity in enumerate(finding["identities"], start=1):
+            label = identity["title"]
+            if identity.get("year"):
+                label = f"{label} ({identity['year']})"
+            lines.append(f"movie {index}: {label}")
+            details.append(f"movie {index}: {label}")
+            for videoFile in identity["files"]:
+                lines.append(f"file: {videoFile}")
+                details.append(f"file: {videoFile}")
+        lines.append(f"action: {finding['action']}")
+        details.append(f"action: {finding['action']}")
+        logger.warning("%s", "\n".join(lines))
+        if finding.get("needsInvestigation", True):
+            self._recordSummaryInvestigation(classification, *details)
 
     def _iterResetTvShowDirs(self, tvDir: Path) -> Iterable[Path]:
         """Yield top-level TV show directories for reset scans."""
@@ -1696,15 +1848,25 @@ class VideoRescanMixin:
             for completed, (movieFolder, videoFiles) in enumerate(movieGroups):
                 progress.render(completed, movieFolder.name)
                 with self._bufferResetItemLogs() as itemLogs:
-                    resolvedMovieInfo = self._resolveResetMovieInfo(videoFiles[0])
-                    movieFolder, videoFiles = self._maybeRenameResetMovieFolder(
-                        movieFolder, videoFiles, resolvedMovieInfo, reservedDestinations
+                    mixedFolder = self._classifyResetMovieFolderVideos(
+                        movieFolder, videoFiles
                     )
-                    for videoFile in videoFiles:
-                        outcome = self._resetMovieMetadataForFile(
-                            videoFile, reservedDestinations, resolvedMovieInfo
+                    if mixedFolder is not None:
+                        self._reportResetMixedMovieFolder(mixedFolder)
+                        stats["skipped"] += len(videoFiles)
+                    else:
+                        resolvedMovieInfo = self._resolveResetMovieInfo(videoFiles[0])
+                        movieFolder, videoFiles = self._maybeRenameResetMovieFolder(
+                            movieFolder,
+                            videoFiles,
+                            resolvedMovieInfo,
+                            reservedDestinations,
                         )
-                        stats[outcome] += 1
+                        for videoFile in videoFiles:
+                            outcome = self._resetMovieMetadataForFile(
+                                videoFile, reservedDestinations, resolvedMovieInfo
+                            )
+                            stats[outcome] += 1
                 progress.render(completed + 1, movieFolder.name)
                 self._flushResetItemLogs(progress, itemLogs)
         finally:

@@ -7,6 +7,7 @@ from .constants import _PREFIX_REGEX
 
 _SAMPLE_TOKEN = re.compile(r"(?:^|[\s._-])sample(?:$|[\s._-])", re.IGNORECASE)
 _MULTIPART_TOKEN = re.compile(r"(?:[\s._-])part[\s._-]*(\d+)$", re.IGNORECASE)
+_DOWNLOADED_FROM_TEXT = re.compile(r"^downloaded\s+from\b", re.IGNORECASE)
 _RELEASE_MARKERS = {"rarbg.com", "rarbg", "www.rarbg.com"}
 
 
@@ -21,6 +22,14 @@ def mediaNameIsAncillary(name: str) -> bool:
     """Recognise bounded sample tokens and explicit release-marker filenames."""
     return bool(_SAMPLE_TOKEN.search(Path(name).stem)) or (
         Path(name).stem.casefold() in _RELEASE_MARKERS
+    )
+
+
+def mediaNameIsDisposableJunk(name: str) -> bool:
+    """Return True for known release-note files that add no library value."""
+    path = Path(name)
+    return path.suffix.casefold() == ".txt" and bool(
+        _DOWNLOADED_FROM_TEXT.match(path.stem.strip())
     )
 
 

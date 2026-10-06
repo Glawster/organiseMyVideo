@@ -2,8 +2,10 @@
 
 from pathlib import Path
 
+import pytest
+
 from organiseMyVideo.mediaCatalogue import MediaCatalogue
-from organiseMyVideo.mediaLocate import locateTvShow
+from organiseMyVideo.mediaLocate import locateMedia, locateMovie, locateTvShow
 
 
 def _catalogueWithShows(tmp_path: Path) -> MediaCatalogue:
@@ -57,9 +59,30 @@ def testLocateTvShowReturnsNoMatchForUnknownShow(tmp_path: Path):
     assert locateTvShow("The Pitt", catalogue=catalogue) == []
 
 
+def testLocateMediaReturnsMoviesAndTv(tmp_path: Path):
+    movieRoot = tmp_path / "Movies"
+    movie = movieRoot / "Lanterns (2025)"
+    movie.mkdir(parents=True)
+    (movie / "Lanterns (2025).mkv").touch()
+
+    tvRoot = tmp_path / "TV"
+    show = tvRoot / "Lanterns"
+    show.mkdir(parents=True)
+    (show / "Lanterns.S01E01.mkv").touch()
+
+    catalogue = MediaCatalogue(tmp_path / "mixed.sqlite")
+    catalogue.catalogueReplaceFromStorage([movieRoot], [tvRoot])
+
+    matches = locateMedia("Lanterns", catalogue=catalogue)
+
+    assert {(item.mediaType, item.name) for item in matches} == {
+        ("Movie", "Lanterns (2025)"),
+        ("TV", "Lanterns"),
+    }
+
+
 def testLocateMovieThroughPublicCli(tmp_path, capsys):
     from organiseMyVideo.cli import main
-    from organiseMyVideo.mediaLocate import locateMovie
 
     root = tmp_path / "Movies"
     for name in ("Zone 414 (2021)", "Zone 414 Returns (2026)"):
@@ -75,9 +98,9 @@ def testLocateMovieThroughPublicCli(tmp_path, capsys):
         "Zone 414 Returns (2026)",
     ]
     assert [item.state for item in matches] == ["current", "current"]
-    assert main(["media", "locate", "--movie", "Zone 414 (2021)"]) == 0
+    assert main(["media", "locate", "Zone 414 (2021)"]) == 0
     output = capsys.readouterr().out
-    assert "Zone 414 (2021)" in output
+    assert "Movie: Zone 414 (2021)" in output
     assert str(root / "Zone 414 (2021)") in output
     assert "current" in output
     assert "Returns" not in output
@@ -87,19 +110,26 @@ def testLocateMovieThroughPublicCli(tmp_path, capsys):
     missing.rmdir()
     assert locateMovie("Zone 414 (2021)")[0].state == "unverified"
     catalogue.catalogueReplaceFromStorage([root], [])
-    assert main(["media", "locate", "--movie", "Zone 414 (2021)"]) == 0
+    assert main(["media", "locate", "Zone 414 (2021)"]) == 0
     assert "stale" in capsys.readouterr().out
-    assert main(["media", "locate", "--movie", "Unknown movie"]) == 1
+    assert main(["media", "locate", "Unknown media"]) == 1
     assert (
-        "Movie not found in media catalogue: Unknown movie" in capsys.readouterr().err
+        "Media not found in media catalogue: Unknown media" in capsys.readouterr().err
     )
     assert locateMovie("   ") == []
 
 
-def testLocateMovieAndShowAreMutuallyExclusive():
-    import pytest
+def testLocateRequiresSearch():
     from organiseMyVideo.cli import main
 
     with pytest.raises(SystemExit) as error:
-        main(["media", "locate", "--movie", "Zone", "--show", "Lanterns"])
+        main(["media", "locate"])
+    assert error.value.code == 2
+
+
+def testLegacyLocateSelectorsAreRejected():
+    from organiseMyVideo.cli import main
+
+    with pytest.raises(SystemExit) as error:
+        main(["media", "locate", "--movie", "Zone"])
     assert error.value.code == 2

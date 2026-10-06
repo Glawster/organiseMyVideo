@@ -424,6 +424,12 @@ def _inventoryCardQuery(arguments: Sequence[str]) -> bool:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
 
+    from .cli import _locateArguments, _runMediaLocate
+
+    locateArguments = _locateArguments(arguments)
+    if locateArguments is not None:
+        return _runMediaLocate(locateArguments)
+
     _legacyGlobalsSync()
     return _legacy.main(arguments)
 
