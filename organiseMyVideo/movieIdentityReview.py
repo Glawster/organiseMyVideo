@@ -25,7 +25,7 @@ _ANCILLARY_DESCRIPTOR = re.compile(
 )
 _ANCILLARY_SEGMENT = re.compile(
     rf"(?:^|\s[-–—]\s|[._\[\]()]+){_ANCILLARY_DESCRIPTOR.pattern}"
-    rf"(?=$|\s[-–—]\s|[._\[\]()]+)",
+    rf"(?=$|\s*(?:[-–—._\[\]()]+|\(\d{{4}}\)))",
     re.IGNORECASE,
 )
 
