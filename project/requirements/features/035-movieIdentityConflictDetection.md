@@ -2,7 +2,7 @@
 
 ## Status
 
-Completed
+InProgress
 
 ## Outcome
 
@@ -115,6 +115,14 @@ The article-placement rule and the filesystem separator rule are independent:
 `The` moves according to the existing canonical article convention, while `:`
 becomes ` - ` so that `Dead City` remains visibly separated from the main title.
 
+A 2026-10-06 completeness review exposed four remaining gaps: the colon rule
+needed direct regression coverage; suspect MCM evidence only changed report
+wording after ordinary title/year classification instead of independently
+blocking the metadata; ancillary descriptors were matched as bare substrings and
+could therefore hide genuine features such as `The Interview` or `Trailer Park
+Boys`; and the visible conflict warning omitted the affected folder path. These
+are blocking completion items for this requirement.
+
 ## Scope
 
 - Classify a proposed movie rename as either:
@@ -133,10 +141,18 @@ becomes ` - ` so that `Dead City` remains visibly separated from the main title.
 - Treat obviously path-like movie titles from metadata as suspect identity
   evidence rather than canonical movie titles. This includes Windows drive/path
   forms such as `Q:\Movies\Entangled (2019)` and equivalent path-bearing values.
+- Suspect MCM identity evidence must be evaluated before ordinary normalised
+  title/year agreement. A path-like metadata title remains suspect even if
+  punctuation stripping would otherwise make it compare equal to an on-disk
+  title.
 - When metadata runtime/duration materially contradicts the actual feature
   runtime, downgrade that metadata from authoritative identity evidence and
   report the contradiction for investigation rather than silently renaming from
   it.
+- When MCM runtime is being used as identity evidence, obtain the actual feature
+  duration through the shared video-probe service when available so a material
+  contradiction can be detected. Technical runtime gathered only for this guard
+  must not be persisted merely as a side effect of identity checking.
 - A suspect MCM record must remain blocked even when it also contains provider
   IDs. Provider IDs do not override contradictory local evidence automatically.
 - Preserve title-style capitalisation when the existing and resolved title
@@ -164,6 +180,11 @@ becomes ` - ` so that `Dead City` remains visibly separated from the main title.
 - Ignore known non-feature media such as `Sample.mkv` during canonical feature
   filename reconciliation; these files must not be renamed to the feature's
   canonical movie filename.
+- Ancillary descriptors such as `interview`, `trailer`, `making of`,
+  `featurette`, `deleted scene`, and `behind the scenes` must be recognised only
+  when they are explicit ancillary labels/segments. Bare substring matching must
+  not exclude a genuine feature title such as `The Interview (2014)` or
+  `Trailer Park Boys`.
 - Treat release-origin marker files such as `Downloaded From *.txt` as disposable
   junk, not movie metadata or sidecars. `media scan` may report/classify them but
   remains non-destructive; confirmed removal belongs to `media organise`.
@@ -252,9 +273,10 @@ becomes ` - ` so that `Dead City` remains visibly separated from the main title.
    identifies the affected folder path, the current movie identity, the
    conflicting proposed identity, and the evidence source responsible for the
    disagreement.
-7. Given runtime or duration evidence that materially conflicts with metadata,
-   when available, then it is included in the conflict evidence rather than
-   silently ignored.
+7. Given MCM runtime/duration evidence for a feature, when the identity guard is
+   evaluated and technical feature duration is available, then OMV compares the
+   metadata runtime with the actual feature runtime and includes a material
+   contradiction in the conflict evidence rather than silently ignoring it.
 8. Given an identity conflict during a confirmed workflow, when the operation
    reaches that movie, then the conflicting rename remains blocked unless a
    separately defined explicit review/override workflow authorises it.
@@ -306,12 +328,14 @@ becomes ` - ` so that `Dead City` remains visibly separated from the main title.
    as a possible secondary identity requiring split investigation.
 22. Given MCM metadata whose title is path-like, such as
    `Q:\Movies\Entangled (2019)`, when the stored media is scanned, OMV marks the
-   metadata identity as suspect and does not use that path-like value to derive
-   a canonical movie rename.
+   metadata identity as suspect before ordinary title/year agreement and does not
+   use that path-like value to derive a canonical movie rename even if
+   punctuation-normalised identity would otherwise compare equal.
 23. Given the same `Entangled (2019)` case where `movie.xml` reports a three-minute
-   runtime while the actual MKV is roughly 91 minutes, OMV reports the material
-   runtime contradiction, keeps the rename blocked, and does not treat the TMDb
-   ID alone as sufficient proof that the MCM identity is authoritative.
+   runtime while the actual MKV is roughly 91 minutes, OMV obtains/uses the
+   technical feature duration when available, reports the material runtime
+   contradiction, keeps the rename blocked, and does not treat the TMDb ID alone
+   as sufficient proof that the MCM identity is authoritative.
 24. Given one movie folder containing two distinct feature movies, such as
    `Love And Jane (2024)` and `An American in Austen (2024)`, when scan evidence
    resolves both identities, then OMV reports a mixed-identity folder / split
@@ -349,6 +373,11 @@ becomes ` - ` so that `Dead City` remains visibly separated from the main title.
    than removing it. After the existing leading-article convention is applied,
    the canonical show folder form is `Walking Dead - Dead City, The`; display
    and catalogue metadata may continue to use `The Walking Dead: Dead City`.
+33. Given genuine feature titles containing ancillary words, such as
+   `The Interview (2014)` or `Trailer Park Boys`, when movie files are selected
+   for scan, OMV does not exclude them merely because `interview` or `trailer`
+   appears as a word in the title; explicit ancillary labels such as
+   `Michael McIntyre - Behind The Scenes` remain ancillary.
 
 ## Dependencies and decisions
 
@@ -380,6 +409,9 @@ becomes ` - ` so that `Dead City` remains visibly separated from the main title.
   apostrophes, and parentheses while unsupported characters are removed.
 - Regression tests proving sample-name variants (`Sample.mkv`, `sample - ...`,
   `EVO-sample.mkv`) are ignored during canonical feature-file reconciliation.
+- Regression tests proving genuine titles such as `The Interview` and
+  `Trailer Park Boys` are not removed by ancillary matching while an explicit
+  `Behind The Scenes` segment remains ancillary.
 - Regression tests proving `-part2` files are classified as multi-part media,
   not duplicate feature files.
 - Regression test proving tiny release-marker files such as `RARBG.COM.mp4` are
@@ -391,12 +423,14 @@ becomes ` - ` so that `Dead City` remains visibly separated from the main title.
   text markers are classified as disposable junk rather than sidecars.
 - Tests covering an existing canonical target file, distinguishing ancillary
   media from possible duplicate feature content.
-- Tests proving conflict output identifies the relevant evidence source.
+- Tests proving conflict output identifies the affected folder and relevant
+  evidence source.
 - Tests proving dry-run and confirmed workflows both block an unresolved
   identity-changing rename.
 - Regression fixture for the malformed `Entangled (2019)` MCM record, proving a
-  path-like title and material runtime contradiction are reported as suspect
-  metadata and cannot drive a canonical rename.
+  path-like title is blocked before normalised identity agreement and a material
+  runtime contradiction uses actual feature duration, is reported as suspect
+  metadata, and cannot drive a canonical rename even when provider IDs are present.
 - Regression fixture for the Sonic same-identity folders with equal-sized files
   but different inodes, proving a full comparison is not skipped merely because
   cheap metadata agrees.
@@ -414,10 +448,11 @@ becomes ` - ` so that `Dead City` remains visibly separated from the main title.
 ## Traceability
 
 - Implementation: `organiseMyVideo/movieIdentity.py`,
-  `organiseMyVideo/showFolders.py`, `organiseMyVideo/video.py`,
-  `organiseMyVideo/videoRescan.py`, `organiseMyVideo/videoMove.py`
+  `organiseMyVideo/movieIdentityReview.py`, `organiseMyVideo/showFolders.py`,
+  `organiseMyVideo/video.py`, `organiseMyVideo/videoRescan.py`,
+  `organiseMyVideo/videoMove.py`
 - Tests: `tests/test_movieIdentityConflict.py`,
-  `tests/test_organiseMyVideo.py`
+  `tests/test_req035Review.py`, `tests/test_organiseMyVideo.py`
 - Documentation: `documentation/commandLineInterface.md`, `README.md`
 - Pull request: pending
 - Agent runs: None
@@ -461,3 +496,7 @@ becomes ` - ` so that `Dead City` remains visibly separated from the main title.
 - 2026-10-06: clarified filesystem-safe separator handling: `:` remains valid in
   display/catalogue titles but canonical filesystem folder/file names replace it
   with ` - `, preserving title boundaries (for example `The Walking Dead: Dead City`).
+- 2026-10-06: reopened after completeness review. Suspect MCM evidence must now
+  block before normalised identity agreement, actual feature duration is used
+  when checking MCM runtime, visible conflict output includes the folder path,
+  and ancillary labels may no longer consume genuine feature titles by substring.
