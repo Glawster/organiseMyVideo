@@ -2,7 +2,7 @@
 
 ## Status
 
-InProgress
+Completed
 
 ## Outcome
 
@@ -444,6 +444,7 @@ are blocking completion items for this requirement.
   `runLinter --markup` reported no remaining issues, `manageProject --check`
   reported zero failures and zero warnings, and `git diff --check` produced
   no output. Black was applied to the changed Python files.
+- Successful pytest run 2026-10-06
 
 ## Traceability
 
@@ -500,3 +501,4 @@ are blocking completion items for this requirement.
   block before normalised identity agreement, actual feature duration is used
   when checking MCM runtime, visible conflict output includes the folder path,
   and ancillary labels may no longer consume genuine feature titles by substring.
+- 2026-10-06: successful pytest run confirming all recent extensions and clarifications.
