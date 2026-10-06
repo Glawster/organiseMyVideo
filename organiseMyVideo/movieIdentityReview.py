@@ -79,8 +79,6 @@ class MovieIdentityReviewMixin:
             mediaRuntime = movieInfo.get("mediaRuntime")
             if movieInfo.get("runtime") and mediaRuntime is None:
                 mediaRuntime = self._movieTechnicalRuntimeMinutes(*paths)
-                if mediaRuntime is not None:
-                    movieInfo["mediaRuntime"] = mediaRuntime
 
             suspectReasons = movieIdentityMetadataSuspectReasons(
                 movieInfo.get("title"),
@@ -88,6 +86,8 @@ class MovieIdentityReviewMixin:
                 mediaRuntime=mediaRuntime,
             )
             if suspectReasons:
+                if mediaRuntime is not None:
+                    movieInfo["mediaRuntime"] = mediaRuntime
                 if not movieInfo.get("identityConflict"):
                     movieInfo["identityConflict"] = self._movieIdentityDecisionForPaths(
                         movieInfo, *paths
