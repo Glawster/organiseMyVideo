@@ -32,6 +32,7 @@ from .constants import (
 )
 from .metadata import MetadataMixin
 from .filesystemOperations import FilesystemOperations
+from .movieIdentityReview import MovieIdentityReviewMixin
 from .rescanMergeCleanup import RescanMergeCleanupMixin
 from .torrent import TorrentMixin
 from .video import VideoMixin
@@ -39,7 +40,13 @@ from .video import VideoMixin
 logger = getLogger()
 
 
-class VideoOrganizer(RescanMergeCleanupMixin, MetadataMixin, VideoMixin, TorrentMixin):
+class VideoOrganizer(
+    MovieIdentityReviewMixin,
+    RescanMergeCleanupMixin,
+    MetadataMixin,
+    VideoMixin,
+    TorrentMixin,
+):
     """Organise video files into structured movie and TV show directories.
 
     Combines all domain-specific mixins into a single class:
