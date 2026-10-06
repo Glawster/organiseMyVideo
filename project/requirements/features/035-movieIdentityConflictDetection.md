@@ -101,6 +101,20 @@ reconciliation candidate with complementary content. Release-origin text files
 such as `Downloaded From ... .txt` are disposable download artefacts and should
 not be preserved as movie-library content.
 
+A title separator must also retain its semantic boundary when converted to a
+filesystem-safe name. Metadata and catalogue display titles may retain `:`, but
+filesystem folder/file names must replace a title colon with ` - ` rather than
+simply removing it. For example:
+
+```text
+The Walking Dead: Dead City
+→ Walking Dead - Dead City, The
+```
+
+The article-placement rule and the filesystem separator rule are independent:
+`The` moves according to the existing canonical article convention, while `:`
+becomes ` - ` so that `Dead City` remains visibly separated from the main title.
+
 ## Scope
 
 - Classify a proposed movie rename as either:
@@ -133,6 +147,12 @@ not be preserved as movie-library content.
   preserve readability with ` - ` rather than collapsing the words together;
   e.g. `TAYLOR SWIFT | THE ERAS TOUR` should canonicalise to
   `Taylor Swift - The Eras Tour`.
+- Treat `:` as a meaningful title separator. Preserve `:` in display/catalogue
+  metadata where appropriate, but canonical filesystem folder/file names must
+  replace `:` with ` - ` rather than deleting it or collapsing the adjacent
+  title parts. For example, `The Walking Dead: Dead City` should use the
+  filesystem-safe title form `The Walking Dead - Dead City` before any separate
+  article-placement convention is applied.
 - Produce a filesystem-safe canonical movie folder and filename before rename
   planning. Unsupported filename characters from metadata should be ignored/
   removed rather than passed through to `rename()`.
@@ -323,6 +343,12 @@ not be preserved as movie-library content.
    `Downloaded From The Pirate Bay.txt`, or `Downloaded From torrentgalaxy.to.txt`,
    scan classifies them as disposable junk and a confirmed `media organise`
    cleanup may remove them without treating them as movie metadata or sidecars.
+32. Given a canonical title containing a colon, such as
+   `The Walking Dead: Dead City`, when a filesystem folder or filename is
+   derived, OMV preserves the title boundary by replacing `:` with ` - ` rather
+   than removing it. After the existing leading-article convention is applied,
+   the canonical show folder form is `Walking Dead - Dead City, The`; display
+   and catalogue metadata may continue to use `The Walking Dead: Dead City`.
 
 ## Dependencies and decisions
 
@@ -347,6 +373,9 @@ not be preserved as movie-library content.
 - Tests proving punctuation-only and filesystem-safe normalisation still works.
 - Regression tests for unsupported filename characters in canonical movie
   metadata, proving both folder and filename destinations are safe before rename.
+- Regression test proving colon-separated titles preserve the separator as
+  ` - ` in filesystem-safe folder/file names while catalogue/display metadata
+  retains `:`, including `The Walking Dead: Dead City`.
 - Regression tests proving valid punctuation spacing is preserved for `&`,
   apostrophes, and parentheses while unsupported characters are removed.
 - Regression tests proving sample-name variants (`Sample.mkv`, `sample - ...`,
@@ -429,3 +458,6 @@ not be preserved as movie-library content.
   reconciliation now recognises complementary nested feature layouts and classifies
   `Downloaded From ...` text files as disposable junk for confirmed organise-time
   cleanup.
+- 2026-10-06: clarified filesystem-safe separator handling: `:` remains valid in
+  display/catalogue titles but canonical filesystem folder/file names replace it
+  with ` - `, preserving title boundaries (for example `The Walking Dead: Dead City`).
