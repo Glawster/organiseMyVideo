@@ -1,25 +1,27 @@
 # Current increment
 
-## Objective and status
+## Objective and scope
 
-REQ-038 movie location lookup is complete. `media locate --movie TITLE` searches
-the persisted movie catalogue and prints titles with years, folders and states.
+Capture OMV REQ-040 videoInterfaceDesign as the counterpart to OMS REQ-012.
+OMV owns MCM-inspired design and real Qt/TUI implementation, catalogue/workflow
+services, provider executables, Wine compatibility and shared-library handoff.
+OMS owns Studio dispatch, config/provider/lifecycle integration and generic media.
 
-## Accepted scope and evidence
+## Acceptance and verification
 
-- Case-insensitive partial matching accepts surrounding whitespace and years.
-- Exact title matches precede partial matches.
-- Missing folders are unverified until an authoritative scan marks them stale.
-- No matches exit 1; movie and show selectors are mutually exclusive.
-- Default TV listing and shared debug flags retain their existing routing.
-- Public CLI integration uses real movie files and a temporary SQLite catalogue.
+Preserve existing CLI workflows and REQ-002 browsing acceptance. Map broader
+functional delivery and actual Wine compatibility to explicit staged acceptance.
+Validate new requirement/prompt links, indices and project conventions. Existing
+README and roadmap edits remain unrelated user work and are preserved.
 
-## Final verification
+## Verification still required
 
-- Locate, CLI and catalogue location reconciliation tests: 59 passed.
-- Black applied to changed Python files; `git diff --check` passed.
-- README and both locate parsers describe the new option.
+The requirement remains ToDo. Wireframes, provider/worker decisions and actual
+interface implementation are future delivery. Classify existing project-check
+findings separately from the new records; do not claim Wine tests have run.
 
-## Remaining work and immediate next action
+## Next
 
-No implementation or verification remains. Review the working-tree change.
+Agree the launch contract with OMS, deliver the MCM coverage/design matrix,
+and implement one real catalogue-backed slice before management/compatibility
+extensions. Keep application policy and CLI semantics under OMV ownership.
