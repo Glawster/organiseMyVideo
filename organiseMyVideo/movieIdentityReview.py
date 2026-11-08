@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import glob
 import re
 from pathlib import Path
 
@@ -35,22 +36,13 @@ class MovieIdentityReviewMixin:
 
     def _movieTechnicalRuntimeMinutes(self, *paths: Path) -> str | None:
         """Return actual feature runtime in minutes when a video can be probed."""
-        videoFile = next(
-            (
-                Path(path)
-                for path in paths
-                if Path(path).is_file()
-                and Path(path).suffix.casefold() in VIDEO_EXTENSIONS
-            ),
-            None,
-        )
-        if videoFile is None:
-            return None
-
         from organiseMediaStudio.video.errors import VideoProcessingError
         from organiseMediaStudio.video.probe import videoProbe
 
         try:
+            videoFile = self._movieFeatureFile(*paths)
+            if videoFile is None:
+                return None
             durationSeconds = videoProbe(videoFile).durationSeconds
         except (OSError, VideoProcessingError):
             return None
@@ -58,6 +50,28 @@ class MovieIdentityReviewMixin:
             return None
         minutes = durationSeconds / 60.0
         return f"{minutes:.1f}".rstrip("0").rstrip(".")
+
+    def _movieFeatureFile(self, *paths: Path) -> Path | None:
+        """Return the largest video among *paths* and their same-named siblings.
+
+        Only same-named siblings are considered, because a file's parent can be
+        a staging folder holding unrelated films.
+        """
+        videoFiles = [
+            Path(path)
+            for path in paths
+            if Path(path).is_file() and Path(path).suffix.casefold() in VIDEO_EXTENSIONS
+        ]
+        candidates = set(videoFiles)
+        for videoFile in videoFiles:
+            candidates.update(
+                sibling
+                for sibling in videoFile.parent.glob(f"{glob.escape(videoFile.stem)}.*")
+                if sibling.is_file() and sibling.suffix.casefold() in VIDEO_EXTENSIONS
+            )
+        return max(
+            candidates, key=lambda path: (path.stat().st_size, str(path)), default=None
+        )
 
     def _movieIdentityDecisionForPaths(self, movieInfo: dict, *paths: Path):
         """Return the current-vs-proposed decision used in identity reporting."""

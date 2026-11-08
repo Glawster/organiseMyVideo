@@ -108,10 +108,11 @@ points the moved catalogue row at the new path and keeps the old path as
 
 `media locate` reads catalogued TV show folders. `--show NAME` selects a
 case-insensitive exact or partial name. Omitting `--show` lists every
-catalogued show. Each folder is printed as `current`, `stale`, or
-`unverified`. `current` means an authoritative scan saw the folder and it is
-still present. `stale` means that scan's root was listed and the folder was
-absent. `unverified` means the catalogue has not confirmed the path, or the
+catalogued show. Each folder is printed as `current` or `unverified`, and
+`--all` also prints `stale` locations. `current` means an authoritative scan saw
+the folder and it is still present. `stale` means that scan's root was listed
+and the folder was absent, and the next scan removes the location from the
+catalogue. `unverified` means the catalogue has not confirmed the path, or the
 folder is missing and its root was not listed. Locate does not delete rows.
 
 `media scan` is non-destructive. It inspects movie and TV libraries, reports

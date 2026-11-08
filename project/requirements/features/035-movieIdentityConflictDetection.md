@@ -502,3 +502,7 @@ are blocking completion items for this requirement.
   when checking MCM runtime, visible conflict output includes the folder path,
   and ancillary labels may no longer consume genuine feature titles by substring.
 - 2026-10-06: successful pytest run confirming all recent extensions and clarifications.
+- 2026-11-08: corrected — an hour-only MCM runtime such as `1h` was read as one
+  minute and blocked 148 valid movies. It now stands for the range of minutes it
+  can mean, `1h 31m` and `30min` are read as durations, an unrecognised format
+  is not compared, and the probe uses the largest same-named video.

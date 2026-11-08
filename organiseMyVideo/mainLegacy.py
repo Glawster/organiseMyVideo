@@ -711,6 +711,13 @@ Errors:              {stats.errors}
 """
 
 
+def _retiredRootKinds(organizer) -> frozenset[str]:
+    """Return the storage kinds whose root list the configuration states."""
+
+    configuredKinds = getattr(organizer, "configuredStorageKinds", None)
+    return frozenset(configuredKinds()) if callable(configuredKinds) else frozenset()
+
+
 def _normaliseSeasonFolders(organizer, dryRun: bool, *, refreshCatalogue: bool):
     """Canonicalise TV show and season folder names and optionally refresh TV paths."""
 
@@ -754,6 +761,7 @@ def _normaliseSeasonFolders(organizer, dryRun: bool, *, refreshCatalogue: bool):
             videoDirs,
             replaceMovies=True,
             replaceTv=True,
+            retiredRootKinds=_retiredRootKinds(organizer),
         )
     combined = SeasonFolderStats(
         renamed=showStats.renamed + movieFolderStats.renamed + seasonStats.renamed,
@@ -892,6 +900,7 @@ Folder errors:   {cleanStats['errors']}
             videoDirs,
             replaceMovies=True,
             replaceTv=True,
+            retiredRootKinds=_retiredRootKinds(organizer),
         )
         return 1 if tvStats.errors or movieStats.errors or seasonStats.errors else 0
     else:

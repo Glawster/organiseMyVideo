@@ -1,6 +1,6 @@
 # Requirements
 
-Next available number: 041
+Next available number: 044
 
 Requirements created after adoption of the managed process are recorded here.
 Historical behaviour is not assigned invented retrospective requirements.
@@ -47,6 +47,7 @@ Historical behaviour is not assigned invented retrospective requirements.
 | 038 | [Movie location lookup](features/038-movieLocate.md) | Locate movie library folders by title and year. | Completed | [Prompt](prompt/038-movieLocate.md) | Not required |
 | 039 | [Mixed movie folder split](features/039-mixedMovieFolderSplit.md) | Detect distinct movies sharing one folder and plan a safe confirmed split while ignoring ancillary media. | ToDo | Not required | [ADR-003](../adr/003-filesystemSafetyBoundary.md) |
 | 040 | [Video interface design](features/040-videoInterfaceDesign.md) | Design and implement MCM-like Qt/TUI applications, Wine interoperability and providers for OMS launch integration; preserve the CLI. | ToDo | [Prompt](prompt/040-videoInterfaceDesign.md) | [ADR-004](../adr/004-qtApplicationArchitecture.md), [ADR-008](../adr/008-sqliteMediaCatalogue.md), launch/worker decision pending |
+| 043 | [Catalogue stale location removal](features/043-catalogueStaleLocationRemoval.md) | Remove stale catalogue locations on the following scan, retire dropped storage roots, and hide stale locations from `media locate` unless `--all` is given. | InProgress | [Prompt](prompt/043-catalogueStaleLocationRemoval.md) | [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
 
 ## Prompt index
 
@@ -82,4 +83,5 @@ Historical behaviour is not assigned invented retrospective requirements.
 - [036-incomingMediaPreparation](prompt/036-incomingMediaPreparation.md)
 - [038-movieLocate](prompt/038-movieLocate.md)
 - [040-videoInterfaceDesign](prompt/040-videoInterfaceDesign.md)
+- [043-catalogueStaleLocationRemoval](prompt/043-catalogueStaleLocationRemoval.md)
 <!-- OMP-PROMPT-INDEX-END -->

@@ -94,8 +94,8 @@ organiseMyVideo media locate --show Lanterns
 organiseMyVideo media locate --movie "Zone 414"
 ```
 
-`media locate` prints catalogued folders as `current`, `stale`, or
-`unverified`. Use `--movie TITLE` to find movies by case-insensitive exact or
+`media locate` prints catalogued folders as `current` or `unverified`, and
+`--all` also prints `stale` locations. Use `--movie TITLE` to find movies by case-insensitive exact or
 partial title, optionally including the year (for example `"Zone 414 (2021)"`).
 Movie results include their release year. `--movie` and `--show` are mutually
 exclusive; omit both to list every catalogued TV show.

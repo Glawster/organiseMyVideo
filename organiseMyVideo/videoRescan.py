@@ -1947,4 +1947,5 @@ class VideoRescanMixin:
             videoDirs,
             replaceMovies=replaceMovies,
             replaceTv=replaceTv,
+            retiredRootKinds=self.configuredStorageKinds(),
         )

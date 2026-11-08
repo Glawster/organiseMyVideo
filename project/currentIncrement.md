@@ -2,26 +2,22 @@
 
 ## Objective and scope
 
-Capture OMV REQ-040 videoInterfaceDesign as the counterpart to OMS REQ-012.
-OMV owns MCM-inspired design and real Qt/TUI implementation, catalogue/workflow
-services, provider executables, Wine compatibility and shared-library handoff.
-OMS owns Studio dispatch, config/provider/lifecycle integration and generic media.
+Deliver REQ-043, removing stale catalogue locations on the following scan and
+retiring dropped configured roots, with the REQ-035 correction for hour-only
+MCM runtimes, on `bugfix/043-catalogueStaleAndMovieRuntime`.
 
 ## Acceptance and verification
 
-Preserve existing CLI workflows and REQ-002 browsing acceptance. Map broader
-functional delivery and actual Wine compatibility to explicit staged acceptance.
-Validate new requirement/prompt links, indices and project conventions. Existing
-README and roadmap edits remain unrelated user work and are preserved.
+REQ-043 acceptance criteria are covered by `tests/test_catalogueStaleRemoval.py`
+and `tests/test_catalogueLocationReconciliation.py`. The runtime correction is
+covered by `tests/test_movieIdentitySuspectMetadata.py`.
 
 ## Verification still required
 
-The requirement remains ToDo. Wireframes, provider/worker decisions and actual
-interface implementation are future delivery. Classify existing project-check
-findings separately from the new records; do not claim Wine tests have run.
+Run two library scans on the real catalogue, then confirm the old disk rows have
+gone and `media locate` no longer reports them.
 
 ## Next
 
-Agree the launch contract with OMS, deliver the MCM coverage/design matrix,
-and implement one real catalogue-backed slice before management/compatibility
-extensions. Keep application policy and CLI semantics under OMV ownership.
+Commit and merge the branch, then complete REQ-043. REQ-042 follows, and REQ-040
+remains ToDo.

@@ -147,6 +147,16 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         )
         return movieDirs, videoDirs
 
+    def configuredStorageKinds(self) -> frozenset[str]:
+        """Return the catalogue root kinds whose storage list config states.
+
+        A root missing from a configured list has been dropped by the owner. A
+        root missing from /mnt discovery may only be unmounted.
+        """
+        movieDirs, videoDirs = self._loadConfiguredStorageLocations()
+        kinds = (("movie", movieDirs), ("tv", videoDirs))
+        return frozenset(kind for kind, dirs in kinds if dirs is not None)
+
     def _movieStorageLocationForMount(self, mountDir: Path) -> Path:
         """Return the movie library folder for a movie-like mount."""
         moviesSubDir = mountDir / "Movies"

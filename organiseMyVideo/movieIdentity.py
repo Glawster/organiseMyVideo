@@ -27,6 +27,13 @@ MOVIE_IDENTITY_STATE_KEYS = (
 _APOSTROPHE_PATTERN = re.compile(r"['\u2019]")
 _NON_IDENTITY_PATTERN = re.compile(r"[^0-9a-z]+")
 _PATH_LIKE_TITLE_PATTERN = re.compile(r"^(?:[A-Za-z]:[\\/]|/|\\\\)")
+_RUNTIME_HOURS_PATTERN = re.compile(r"(\d+)\s*h(?:rs?|ours?)?", re.IGNORECASE)
+_RUNTIME_HOURS_MINUTES_PATTERN = re.compile(
+    r"(\d+)\s*h(?:rs?|ours?)?\s*(\d+)\s*(?:m|mins?|minutes?)?", re.IGNORECASE
+)
+_RUNTIME_MINUTES_PATTERN = re.compile(
+    r"(\d+(?:\.\d+)?)\s*(?:m|mins?|minutes?)?", re.IGNORECASE
+)
 
 
 @dataclass(frozen=True)
@@ -141,10 +148,13 @@ def movieIdentityMetadataSuspectReasons(
     if titleText and _PATH_LIKE_TITLE_PATTERN.match(titleText):
         reasons.append("metadata title contains a filesystem path")
 
-    metadataMinutes = _runtimeMinutes(metadataRuntime)
-    mediaMinutes = _runtimeMinutes(mediaRuntime)
-    if metadataMinutes is not None and mediaMinutes is not None and mediaMinutes > 0:
-        difference = abs(metadataMinutes - mediaMinutes)
+    metadataRange = _runtimeRange(metadataRuntime)
+    mediaRange = _runtimeRange(mediaRuntime)
+    if metadataRange is not None and mediaRange is not None and mediaRange[0] > 0:
+        mediaMinutes = mediaRange[0]
+        difference = max(
+            metadataRange[0] - mediaMinutes, mediaMinutes - metadataRange[1], 0.0
+        )
         if difference >= 15 and difference / mediaMinutes >= 0.25:
             reasons.append("metadata runtime conflicts materially with media runtime")
 
@@ -186,7 +196,9 @@ def movieIdentityReport(
         mediaRuntime=mediaRuntime,
     )
     heading = (
-        "movie metadata identity suspect" if suspectReasons else "movie identity conflict"
+        "movie metadata identity suspect"
+        if suspectReasons
+        else "movie identity conflict"
     )
     lines = [
         heading,
@@ -261,18 +273,29 @@ def _movieIdentityLabel(title: Optional[str], year: Optional[str]) -> str:
     return title or ""
 
 
-def _runtimeMinutes(value: object) -> Optional[float]:
-    """Return a numeric runtime in minutes when *value* begins with a number."""
+def _runtimeRange(value: object) -> Optional[tuple[float, float]]:
+    """Return the shortest and longest minutes a stored runtime can mean.
+
+    ``1h`` has lost its minutes, and may be rounded or cut down to the hour, so
+    it stands for a range. An unrecognised format returns None rather than a
+    guess, because a wrong number here blocks a rename.
+    """
     text = _displayText(value)
     if text is None:
         return None
-    match = re.match(r"^\s*(\d+(?:\.\d+)?)", text)
-    if not match:
-        return None
-    try:
-        return float(match.group(1))
-    except ValueError:
-        return None
+    match = _RUNTIME_HOURS_MINUTES_PATTERN.fullmatch(text)
+    if match:
+        minutes = int(match.group(1)) * 60 + int(match.group(2))
+        return float(minutes), float(minutes)
+    match = _RUNTIME_HOURS_PATTERN.fullmatch(text)
+    if match:
+        hours = int(match.group(1))
+        return max(hours * 60.0 - 30.0, 0.0), (hours + 1) * 60.0
+    match = _RUNTIME_MINUTES_PATTERN.fullmatch(text)
+    if match:
+        minutes = float(match.group(1))
+        return minutes, minutes
+    return None
 
 
 def _yearText(value: object) -> Optional[str]:
