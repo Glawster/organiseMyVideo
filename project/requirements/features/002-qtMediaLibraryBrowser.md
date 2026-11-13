@@ -61,7 +61,7 @@ decision below.
   [REQ-014](014-homeVideoCatalogue.md), and
   [REQ-015](015-usbVolumeInventory.md); refresh that catalogue by running
   scan services rather than treating a live disk walk as the record.
-  Home video includes GoPro and Drone folders under `/mnt/myVideo/Video`.
+  Home video includes GoPro and Drone folders under `/mnt/media/homeVideo`.
   Removable volumes show sold size and free space for SD cards and USB
   sticks.
 - Headless automated tests for the presentation model and appropriate Qt tests
@@ -178,3 +178,4 @@ decision below.
   REQ-010 rather than treating a live disk walk as the record.
 - 2026-09-04: changed — Home video and Removable volumes added as
   collections (REQ-014, REQ-015).
+- 2026-11-03: refined — updated the home video location to the current layout.

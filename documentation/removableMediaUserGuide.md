@@ -212,7 +212,8 @@ describes a discovery, not an operation performed by this command.
 `unreadable` means a destination could not be checked or the archive search was
 incomplete because of permissions, disappearing files, or other I/O errors.
 Restore access and rerun before drawing conclusions about missing or moved files.
-Searches use the GoPro, Drone, Dashcam or By Date roots inferred from manifests.
+Searches use the GoPro, Drone, Dashcam or date-folder roots inferred from manifests.
+Older manifests name the date folder `By Date`; the standard name is `byDate`.
 
 Progress is shown during checking and archive indexing. A completed index caches
 only its file count in `$XDG_STATE_HOME/organiseMyVideo/cameraHistoryProgress.json`
@@ -229,7 +230,7 @@ CAMERA IMPORT HISTORY — CARD 004
 
 IMPORT 2026/09/15 12:34
   Source root:   /media/card
-  Archive root:  /mnt/myVideo/Video/GoPro/2026/09-Sep/15
+  Archive root:  /mnt/media/homeVideo/GoPro/2026/09/15
   Manifest:      ~/.local/state/organiseMyVideo/cameraImports/camera-import-....json
   Result:        2 copied, 1 already present
 

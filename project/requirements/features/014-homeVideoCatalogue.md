@@ -7,7 +7,7 @@ ToDo
 ## Outcome
 
 As a media-library operator, I need original and personal video under
-`/mnt/myVideo/Video` indexed in the shared SQLite catalogue so that the CLI
+`/mnt/media/homeVideo` indexed in the shared SQLite catalogue so that the CLI
 and Qt UI can present a coherent home-video library independently of the
 physical historical folder layout.
 
@@ -19,19 +19,19 @@ are all Home Video rather than movie or television releases.
 
 ## Context
 
-Movies live under `/mnt/movie<n>/Title (Year)/`. TV lives under
-`/mnt/video<n>/TV/` and `/mnt/myVideo/TV`. Personal footage is a third
-library rooted at `/mnt/myVideo/Video`.
+Movies live under `/mnt/movies/Movies` and `/mnt/raid/Movies`. TV lives under
+`/mnt/video/TV` and `/mnt/raid/TV`. Personal footage is a third library, with
+Video Master at `/mnt/media/homeVideo` and Video Root at its `byDate` folder.
 
-The existing archive is primarily chronological under `By Date`, but its
+The existing archive is primarily chronological under `byDate`, but its
 historical layout is not canonical. Observed month-directory conventions
 include, for example:
 
 ```text
-By Date/2019/08 - Aug/
-By Date/1985/1985-08/
-By Date/2020/01/
-By Date/1986/03 - March/
+byDate/2019/08 - Aug/
+byDate/1985/1985-08/
+byDate/2020/01/
+byDate/1986/03 - March/
 ```
 
 Files may also have an embedded or filename-derived date which disagrees
@@ -48,9 +48,9 @@ REQ-004 stores new camera imports under source-specific dated folders such
 as:
 
 ```text
-/mnt/myVideo/Video/GoPro/YYYY/MM-MMM/DD/
-/mnt/myVideo/Video/Drone/YYYY/MM-MMM/DD/
-/mnt/myVideo/Video/Dashcam/YYYY/MM-MMM/DD/
+/mnt/media/homeVideo/GoPro/YYYY/MM/DD/
+/mnt/media/homeVideo/Drone/YYYY/MM/DD/
+/mnt/media/homeVideo/Dashcam/YYYY/MM/DD/
 ```
 
 Those files become Home Video catalogue items after import. Camera-card
@@ -94,7 +94,7 @@ or deleted automatically.
 
 ## Scope
 
-- Treat `/mnt/myVideo/Video` as the default home-video root. The root must be
+- Scan the configured Video Master, currently `/mnt/media/homeVideo`. It must be
   configurable/injectable and tests must not require the real mount.
 - Scan personal video recursively without treating it as movie or TV media.
 - Persist one durable catalogue row for each primary Home Video media file.
@@ -155,7 +155,7 @@ features can enrich later.
 
 ## Out of scope
 
-- Moving, renaming, or deleting files under `/mnt/myVideo/Video`.
+- Moving, renaming, or deleting files under `/mnt/media/homeVideo`.
 - Automatically fixing historical month folder names.
 - Automatically deleting or consolidating duplicate candidates.
 - Implementing REQ-004 `camera import` / `camera migrate`.
@@ -176,7 +176,7 @@ features can enrich later.
    when the catalogue is queried by timeline, then their files can appear
    under the same canonical August view without renaming those directories.
 3. Given a media file whose reliable embedded capture date conflicts with
-   its containing `By Date` folder, when scanned, then the best-known capture
+   its containing `byDate` folder, when scanned, then the best-known capture
    date and the folder-derived date evidence are both retained and the item
    is available to the folder/date-mismatch audit query.
 4. Given a file with no reliable embedded date but a recognised dated
@@ -204,7 +204,7 @@ features can enrich later.
 12. Given the catalogue service is used directly, when it lists Home Video
     or Home Video issues, then it does not import Qt or argparse.
 13. Given tests execute, then they use temporary trees and never read from or
-    write to the real `/mnt/myVideo/Video` mount.
+    write to the real `/mnt/media/homeVideo` mount.
 14. Given Home Video catalogue data is presented by a future UI, then it can
     construct year/month/day timeline views from catalogue fields rather
     than parsing the physical path itself.
@@ -222,7 +222,7 @@ reasonable initial ordering is:
 1. reliable embedded capture/original timestamp;
 2. trusted camera/import metadata;
 3. recognised filename capture timestamp;
-4. historical `By Date` path;
+4. historical `byDate` path;
 5. filesystem modification timestamp only as low-confidence fallback where
    explicitly enabled.
 
@@ -241,7 +241,7 @@ change and must be covered by tests.
 
 ## Verification
 
-- Temporary directory fixtures representing historical `By Date` folder
+- Temporary directory fixtures representing historical `byDate` folder
   variants and source/topic folders.
 - Fixtures with embedded, filename-derived, path-derived, conflicting, and
   unknown dates.
@@ -268,3 +268,5 @@ change and must be covered by tests.
   inconsistencies, duplicate candidates, sidecars, maintenance issues,
   camera-import provenance, and compatibility with later keyword/OCR/sports
   enrichment.
+- 2026-11-03: refined — updated to the current library layout and the suite's
+  master, root and `byDate` terms.
