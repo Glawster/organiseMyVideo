@@ -428,6 +428,9 @@ def testMergeReconcilesWhenNoGroupIsMerged(
         def scanStorageLocations(self):
             return ([], [video1, video2])
 
+        def sourceLibraryOverlap(self):
+            return None
+
     monkeypatch.setattr("organiseMyVideo.VideoOrganizer", Organizer)
     monkeypatch.setattr(
         "organiseMyVideo.mediaMerge.mergeDuplicateTvShows",

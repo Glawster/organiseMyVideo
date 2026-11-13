@@ -55,6 +55,164 @@ def testCleanSourceBoundary(confirmed, tmp_path):
         assert list(source.glob(".organiseMyVideo-quarantine/**/*.mkv"))
 
 
+@pytest.mark.parametrize(
+    "relativeSource", ["video", "video/TV", "video/TV/Show"], ids=str
+)
+def testCleanRefusesSourceOverlappingLibrary(relativeSource, tmp_path):
+    store = tmp_path / "video" / "TV"
+    season = store / "Show" / "Season 1"
+    metadata = season / "metadata"
+    metadata.mkdir(parents=True)
+    (season / "Show.S01E01.mkv").write_bytes(b"episode")
+    (tmp_path / "video" / "www.UIndex.org - Empty").mkdir()
+    organizer = VideoOrganizer(str(tmp_path / relativeSource), dryRun=False)
+
+    with patch.object(
+        organizer, "_loadConfiguredStorageLocations", return_value=([], [store])
+    ):
+        names = organizer.cleanNames()
+        folders = organizer.cleanEmptyFolders()
+
+    assert names["errors"] == 1 and names["renamed"] == 0
+    assert folders["errors"] == 1 and folders["removed"] == 0
+    assert metadata.is_dir()
+    assert (tmp_path / "video" / "www.UIndex.org - Empty").is_dir()
+    assert not list(tmp_path.rglob(".organiseMyVideo-quarantine"))
+
+
+def testCleanAllowsStagingBesideLibrary(tmp_path):
+    store = tmp_path / "video" / "TV"
+    store.mkdir(parents=True)
+    source = tmp_path / "video" / "toFile"
+    empty = source / "empty"
+    empty.mkdir(parents=True)
+    organizer = VideoOrganizer(str(source), dryRun=False)
+
+    with patch.object(
+        organizer, "_loadConfiguredStorageLocations", return_value=([], [store])
+    ):
+        stats = organizer.cleanEmptyFolders()
+
+    assert stats["errors"] == 0 and stats["removed"] == 1
+    assert not empty.exists()
+
+
+def testCleanRefusesDiscoveredLibraryWithoutConfig(tmp_path):
+    store = tmp_path / "video" / "TV"
+    store.mkdir(parents=True)
+    organizer = VideoOrganizer(str(tmp_path / "video"), dryRun=False)
+
+    with (
+        patch.object(
+            organizer, "_loadConfiguredStorageLocations", return_value=(None, None)
+        ),
+        patch.object(
+            organizer, "_scanMountedStorageLocations", return_value=([], [store])
+        ),
+    ):
+        assert organizer.cleanEmptyFolders()["errors"] == 1
+
+
+def testCleanKeepsMetadataInsideKeptTitle(tmp_path):
+    source = tmp_path / "toFile"
+    title = source / "Show" / "Season 1"
+    metadata = title / "metadata"
+    metadata.mkdir(parents=True)
+    (title / "Show.S01E01.mkv").write_bytes(b"episode")
+    (metadata / "Show.S01E01.xml").write_text("<x/>", encoding="utf-8")
+    other = title / "Screens"
+    other.mkdir()
+    organizer = VideoOrganizer(str(source), dryRun=False)
+
+    with patch.object(
+        organizer, "_loadConfiguredStorageLocations", return_value=([], [])
+    ):
+        stats = organizer.cleanEmptyFolders()
+
+    assert metadata.is_dir()
+    assert not other.exists()
+    assert stats["removed"] == 1
+
+
+def testCleanStillRemovesMetadataWithoutAVideo(tmp_path):
+    source = tmp_path / "toFile"
+    metadata = source / "Leftover" / "metadata"
+    metadata.mkdir(parents=True)
+    organizer = VideoOrganizer(str(source), dryRun=False)
+
+    with patch.object(
+        organizer, "_loadConfiguredStorageLocations", return_value=([], [])
+    ):
+        assert organizer.cleanEmptyFolders()["removed"] == 1
+
+    assert not metadata.exists()
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["-h"],
+        ["media", "clean", "-h"],
+        ["media", "organise", "-h"],
+    ],
+    ids=" ".join,
+)
+def testHelpDoesNotOfferLegacyFlags(arguments, capsys):
+    with pytest.raises(SystemExit):
+        mainLegacy.main(arguments)
+    output = capsys.readouterr().out
+    assert "--clean" not in output
+    assert "--rescan" not in output
+    assert "--torrent" not in output
+
+
+def testCleanHelpNamesSourceAndHidesInternalNames(capsys):
+    with pytest.raises(SystemExit):
+        mainLegacy.main(["media", "clean", "-h"])
+    output = capsys.readouterr().out
+    assert "SOURCEOVERRIDE" not in output
+    assert "SOURCE" in output and "-s, --source PATH" in output
+    assert 'default: "source" in config.json' in " ".join(output.split())
+
+
+@pytest.mark.parametrize(
+    ("arguments", "command"),
+    [
+        (["media", "--clean"], "media clean"),
+        (["media", "organise", "--clean"], "media clean"),
+        (["media", "organise", "--rescan"], "library rescan"),
+        (["media", "scan", "--torrent"], "torrent maintain"),
+    ],
+)
+def testMisplacedLegacyFlagNamesTheCommand(arguments, command, capsys):
+    with pytest.raises(SystemExit) as error:
+        mainLegacy.main(arguments)
+    assert error.value.code == 2
+    assert f"use: omv {command}" in capsys.readouterr().err
+
+
+def testMissingActionUsesAReadableName(capsys):
+    with pytest.raises(SystemExit):
+        mainLegacy.main(["media"])
+    message = capsys.readouterr().err
+    assert "ACTION" in message and "mediaAction" not in message
+
+
+def testMissingSourceExplainsHowToSetIt(tmp_path, capsys):
+    missing = tmp_path / "absent"
+    with patch.object(mainLegacy, "_configuredSource", return_value=str(missing)):
+        with pytest.raises(SystemExit):
+            mainLegacy.main(["media", "clean"])
+    message = capsys.readouterr().err
+    assert "-s PATH" in message and '"source"' in message
+
+
+def testLegacyCleanFlagStillParses(tmp_path):
+    organizer = VideoOrganizer(str(tmp_path))
+    with patch("organiseMyVideo.VideoOrganizer", return_value=organizer):
+        assert mainLegacy.main(["--source", str(tmp_path), "--clean"]) == 0
+
+
 def testCleanNeverDiscoversLibraries(tmp_path):
     organizer = VideoOrganizer(str(tmp_path), dryRun=False)
     with (

@@ -132,3 +132,9 @@ maintenance workflows.
 
 - 2026-10-02: created from real-world MCM download-parser observations and
   workflow review.
+- 2026-11-09: corrected — a clean of `/mnt/video` quarantined 105 season
+  `metadata` folders from the TV library. Clean now refuses a source that is,
+  contains or lies inside a movie or TV store, and keeps `metadata` beside real
+  video. Help no longer offers the legacy `--clean`, and using it after a command
+  names `media clean` instead. A folder given on the command line that differs
+  from its config value now offers to replace that value, in interactive runs.

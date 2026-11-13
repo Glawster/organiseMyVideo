@@ -2419,6 +2419,36 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
             and ".organiseMyVideo-quarantine" not in relative.parts
         )
 
+    def sourceLibraryOverlap(self) -> Optional[Path]:
+        """Return a library store the source is, contains or lies inside."""
+        movieDirs, videoDirs = self._loadConfiguredStorageLocations()
+        if movieDirs is None or videoDirs is None:
+            discoveredMovies, discoveredTv = self._scanMountedStorageLocations()
+            movieDirs = discoveredMovies if movieDirs is None else movieDirs
+            videoDirs = discoveredTv if videoDirs is None else videoDirs
+
+        source = self.sourceDir.resolve()
+        for store in [*movieDirs, *videoDirs]:
+            resolved = store.resolve()
+            if (
+                source == resolved
+                or source in resolved.parents
+                or resolved in source.parents
+            ):
+                return store
+        return None
+
+    def _cleanSourceRefused(self, stats: dict) -> bool:
+        """Record an error and return True when the source overlaps a library."""
+        store = self.sourceLibraryOverlap()
+        if store is None:
+            return False
+        logger.error(
+            f"refusing to clean {self.sourceDir}: it overlaps library store {store}"
+        )
+        stats["errors"] += 1
+        return True
+
     def cleanNames(self) -> dict:
         """
         Strip known torrent/index prefixes from file and directory names in the source directory.
@@ -2432,6 +2462,8 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
 
         if not self.sourceDir.exists():
             logger.error(f"source directory does not exist: {self.sourceDir}")
+            return stats
+        if self._cleanSourceRefused(stats):
             return stats
 
         for entry in sorted(self.sourceDir.iterdir()):
@@ -2487,6 +2519,8 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
         if not self.sourceDir.exists():
             logger.error(f"source directory does not exist: {self.sourceDir}")
             return stats
+        if self._cleanSourceRefused(stats):
+            return stats
 
         # Select complete eligible trees first: quarantine a sample-only release
         # once rather than separately moving each nested sample directory.
@@ -2500,6 +2534,14 @@ class VideoMixin(VideoRescanMixin, VideoMoveMixin):
                 continue
             if self._hasRealVideoContent(subDir):
                 logger.value("keeping (has video content)", subDir.name)
+                stats["skipped"] += 1
+                continue
+            if (
+                subDir.name.casefold() == "metadata"
+                and subDir.parent != self.sourceDir
+                and self._hasRealVideoContent(subDir.parent)
+            ):
+                logger.value("keeping (title metadata)", subDir)
                 stats["skipped"] += 1
                 continue
 

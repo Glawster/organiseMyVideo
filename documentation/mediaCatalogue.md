@@ -39,6 +39,8 @@ Tables use camelCase names: `cardInventory`, `cardInventoryFile`,
   and TV rows from storage roots that can be listed.
 - `media organise --merge` reconciles those rows after its live library scan,
   including a dry-run that changes no media files.
+- `media organise` reconciles those rows in the library repair scan that
+  follows filing, including a dry-run that changes no media files.
 - `metadataLibrary.json` remains a move-time lookup cache. It is not the UI
   catalogue.
 
@@ -115,7 +117,7 @@ Do not use USB-reader vendor strings as the card brand. See
 ## Home video
 
 The UI Home video collection will list `catalogueHomeVideoList()` rows
-from `/mnt/myVideo/Video` ([REQ-014](../project/requirements/features/014-homeVideoCatalogue.md)).
+from `/mnt/media/homeVideo` ([REQ-014](../project/requirements/features/014-homeVideoCatalogue.md)).
 First-level folders are kinds: `GoPro` and `Drone` are part of this
 collection. See [Home video archive](homeVideo.md).
 

@@ -4,7 +4,8 @@
 
 Deliver REQ-043, removing stale catalogue locations on the following scan and
 retiring dropped configured roots, with the REQ-035 correction for hour-only
-MCM runtimes, on `bugfix/043-catalogueStaleAndMovieRuntime`.
+MCM runtimes, on `bugfix/043-catalogueStaleAndMovieRuntime`. Guard `media clean`
+against library stores on `bugfix/036-mediaCleanLibraryGuard`.
 
 ## Acceptance and verification
 

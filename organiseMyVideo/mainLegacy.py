@@ -8,6 +8,7 @@ import os
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+import sys
 from typing import Optional, Sequence
 
 from organiseMyProjects.logUtils import (  # type: ignore
@@ -90,6 +91,60 @@ def _configuredSource(configPath: Path) -> str:
     return "/mnt/video2/toFile"
 
 
+def _configFolderValue(config: dict, keys: tuple[str, ...]) -> Optional[str]:
+    """Return the non-blank text stored at *keys*, or None."""
+    value: object = config
+    for key in keys:
+        value = value.get(key) if isinstance(value, dict) else None
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _offerConfigFolderUpdate(
+    args: argparse.Namespace,
+    configPath: Path,
+    label: str,
+    given: Optional[str],
+    keys: tuple[str, ...],
+) -> None:
+    """Ask whether a folder given for this run should replace its config value."""
+    if not given or args.quiet or getattr(args, "auto", False):
+        return
+    if not sys.stdin.isatty():
+        return
+    folder = Path(given).expanduser()
+    if not folder.is_dir():
+        return
+    config = _loadAppConfig(configPath)
+    if configPath.exists() and not config:
+        # An unreadable config must not be replaced by a single value.
+        return
+    configured = _configFolderValue(config, keys)
+    if (
+        configured is not None
+        and Path(configured).expanduser().resolve() == folder.resolve()
+    ):
+        return
+    try:
+        answer = input(
+            f"{label} differs from config.\n"
+            f"  config:   {configured or 'not set'}\n"
+            f"  this run: {folder}\n"
+            "Replace the config value? [y/N] "
+        )
+    except EOFError:
+        return
+    if answer.strip().casefold() not in {"y", "yes"}:
+        return
+    section = config
+    for key in keys[:-1]:
+        if not isinstance(section.get(key), dict):
+            section[key] = {}
+        section = section[key]
+    section[keys[-1]] = str(folder)
+    _saveAppConfig(configPath, config)
+    logger.value("saved config value", ".".join(keys))
+
+
 def _promptForTvdbApiKey(configPath: Path) -> Optional[str]:
     """Prompt the user for a TVDB API key and persist it when provided."""
     try:
@@ -158,6 +213,16 @@ def _getSummaryReportPath(sourcePath: str, mode: str) -> Path:
     )
 
 
+_LEGACY_FLAG_COMMANDS = {
+    "--clean": "media clean",
+    "--rescan": "library rescan",
+    "--torrent": "torrent maintain",
+}
+_PUBLIC_COMMANDS = {"media", "library", "torrent"}
+_BUILT_IN_SOURCE = "/mnt/video2/toFile"
+_ROOT_VALUE_FLAGS = {"-s", "--source", "--key"}
+
+
 def _buildSharedFlags(suppressDefaults: bool = False) -> argparse.ArgumentParser:
     """Return flags shared by the organiser and grok subcommands."""
     shared = argparse.ArgumentParser(
@@ -179,6 +244,42 @@ def _buildSharedFlags(suppressDefaults: bool = False) -> argparse.ArgumentParser
     )
     shared.add_argument("--quiet", action="store_true", help="show errors only")
     return shared
+
+
+def _addSourceArguments(
+    parser: argparse.ArgumentParser, *, default: Optional[str], sourceHelp: str
+) -> None:
+    """Add the positional staging source and its ``-s`` equivalent."""
+    parser.add_argument(
+        "source", nargs="?", default=default, metavar="SOURCE", help=sourceHelp
+    )
+    parser.add_argument(
+        "-s",
+        "--source",
+        dest="sourceOverride",
+        metavar="PATH",
+        help="same as SOURCE, and takes precedence over it",
+    )
+
+
+def _misplacedLegacyFlag(argv: Sequence[str]) -> Optional[tuple[str, str]]:
+    """Return a legacy flag given after a command, and the command replacing it."""
+    values = list(argv)
+    commandIndex = next(
+        (
+            index
+            for index, value in enumerate(values)
+            if value in _PUBLIC_COMMANDS
+            and (index == 0 or values[index - 1] not in _ROOT_VALUE_FLAGS)
+        ),
+        None,
+    )
+    if commandIndex is None:
+        return None
+    for value in values[commandIndex + 1 :]:
+        if value in _LEGACY_FLAG_COMMANDS:
+            return value, _LEGACY_FLAG_COMMANDS[value]
+    return None
 
 
 def buildParser(*, internalCamera: bool = False) -> argparse.ArgumentParser:
@@ -204,7 +305,7 @@ def buildParser(*, internalCamera: bool = False) -> argparse.ArgumentParser:
     parser.add_argument(
         "--clean",
         action="store_true",
-        help="remove empty sub-folders from source directory (folders with only sample content are treated as empty)",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--refresh",
@@ -215,22 +316,22 @@ def buildParser(*, internalCamera: bool = False) -> argparse.ArgumentParser:
     parser.add_argument(
         "--rescan",
         action="store_true",
-        help="scan existing movie and TV libraries for metadata and naming fixes",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--movie",
         action="store_true",
-        help="with --rescan, limit repairs to movies",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--video",
         action="store_true",
-        help="with --rescan, limit repairs to TV/video episodes",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--torrent",
         action="store_true",
-        help="scan the torrent download directory for .torrent files and delete those already in the library (dry-run by default; use --confirm to delete)",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--key",
@@ -244,7 +345,9 @@ def buildParser(*, internalCamera: bool = False) -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command")
     mediaParser = subparsers.add_parser("media", help="organise or clean staged media")
-    mediaSub = mediaParser.add_subparsers(dest="mediaAction", required=True)
+    mediaSub = mediaParser.add_subparsers(
+        dest="mediaAction", metavar="ACTION", required=True
+    )
     mediaLocate = mediaSub.add_parser(
         "locate",
         parents=[_buildSharedFlags(True)],
@@ -265,13 +368,21 @@ def buildParser(*, internalCamera: bool = False) -> argparse.ArgumentParser:
     mediaOrganise = mediaSub.add_parser(
         "organise", parents=[_buildSharedFlags(True)], help="organise staged media"
     )
-    mediaOrganise.add_argument("source", nargs="?", default="/mnt/video2/toFile")
-    mediaOrganise.add_argument(
-        "-s", "--source", dest="sourceOverride", help="override the positional source"
+    _addSourceArguments(
+        mediaOrganise,
+        default="/mnt/video2/toFile",
+        sourceHelp="staging folder to organise (default: /mnt/video2/toFile)",
     )
-    mediaOrganise.add_argument("--auto", action="store_true")
     mediaOrganise.add_argument(
-        "--refresh", dest="refresh_metadata_library", action="store_true"
+        "--auto",
+        action="store_true",
+        help="run without prompts and append a dated text summary",
+    )
+    mediaOrganise.add_argument(
+        "--refresh",
+        dest="refresh_metadata_library",
+        action="store_true",
+        help="rebuild the saved metadata library from storage first",
     )
     mediaOrganise.add_argument(
         "--merge",
@@ -282,11 +393,15 @@ def buildParser(*, internalCamera: bool = False) -> argparse.ArgumentParser:
         "clean",
         parents=[_buildSharedFlags(True)],
         help="clean incoming/staging source names and empty folders",
-        description="Clean only the selected incoming/staging source; libraries are excluded.",
+        description=(
+            "Clean only the incoming/staging folder. A folder that is, contains or "
+            "lies inside a movie or TV store is refused."
+        ),
     )
-    mediaClean.add_argument("source", nargs="?", default=None)
-    mediaClean.add_argument(
-        "-s", "--source", dest="sourceOverride", help="override the positional source"
+    _addSourceArguments(
+        mediaClean,
+        default=None,
+        sourceHelp='staging folder to clean (default: "source" in config.json)',
     )
     mediaScan = mediaSub.add_parser(
         "scan",
@@ -311,28 +426,34 @@ def buildParser(*, internalCamera: bool = False) -> argparse.ArgumentParser:
     )
 
     libraryParser = subparsers.add_parser("library", help="maintain media libraries")
-    librarySub = libraryParser.add_subparsers(dest="libraryAction", required=True)
+    librarySub = libraryParser.add_subparsers(
+        dest="libraryAction", metavar="ACTION", required=True
+    )
     libraryRescan = librarySub.add_parser(
         "rescan", parents=[_buildSharedFlags(True)], help="rescan movie and TV metadata"
     )
-    libraryRescan.add_argument("source", nargs="?", default="/mnt/video2/toFile")
-    libraryRescan.add_argument(
-        "-s", "--source", dest="sourceOverride", help="override the positional source"
+    _addSourceArguments(
+        libraryRescan,
+        default="/mnt/video2/toFile",
+        sourceHelp="staging folder (default: /mnt/video2/toFile)",
     )
     libraryRescan.add_argument(
         "--target", choices=("both", "movies", "tv"), default="both"
     )
 
     torrentParser = subparsers.add_parser("torrent", help="maintain torrent downloads")
-    torrentSub = torrentParser.add_subparsers(dest="torrentAction", required=True)
+    torrentSub = torrentParser.add_subparsers(
+        dest="torrentAction", metavar="ACTION", required=True
+    )
     torrentMaintain = torrentSub.add_parser(
         "maintain",
         parents=[_buildSharedFlags(True)],
         help="remove obsolete torrent files",
     )
-    torrentMaintain.add_argument("source", nargs="?", default="/mnt/video2/toFile")
-    torrentMaintain.add_argument(
-        "-s", "--source", dest="sourceOverride", help="override the positional source"
+    _addSourceArguments(
+        torrentMaintain,
+        default="/mnt/video2/toFile",
+        sourceHelp="staging folder (default: /mnt/video2/toFile)",
     )
     torrentMaintain.add_argument("--clean-names", action="store_true")
 
@@ -531,7 +652,11 @@ def _validateArguments(
     if args.command in {"media", "library", "torrent"}:
         sourcePath = Path(args.source).expanduser()
         if not sourcePath.is_dir():
-            parser.error(f"source directory does not exist: {sourcePath}")
+            parser.error(
+                f"source directory does not exist: {sourcePath} "
+                '(give a staging folder with -s PATH, or set "source" in '
+                f"{_getAppConfigPath()})"
+            )
         args.source = str(sourcePath)
 
 
@@ -573,7 +698,18 @@ def _runCameraImportWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
     from . import constants
     from .cameraImport import cameraImportRun, cameraImportSummary
 
-    config = _loadAppConfig(_getAppConfigPath())
+    configPath = _getAppConfigPath()
+    for label, given, key in (
+        ("GoPro destination", args.gopro_destination, "gopro"),
+        ("Drone destination", args.drone_destination, "drone"),
+        ("Dashcam destination", args.dashcam_destination, "dashcam"),
+        ("Photo destination", args.photo_destination, "photos"),
+        ("Video destination", args.video_destination, "homeVideo"),
+    ):
+        _offerConfigFolderUpdate(
+            args, configPath, label, given, ("storage_locations", key)
+        )
+    config = _loadAppConfig(configPath)
     configuredStorage = config.get("storage_locations", {})
     if not isinstance(configuredStorage, dict):
         configuredStorage = {}
@@ -817,6 +953,11 @@ def _runOrganizerWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
         organizer.summaryReportMode = selectedMode
     logger.done("video organizer initialized")
 
+    # The built-in default was not chosen by the owner, and a source overlapping
+    # a library store is never a staging folder worth remembering.
+    if args.source != _BUILT_IN_SOURCE and organizer.sourceLibraryOverlap() is None:
+        _offerConfigFolderUpdate(args, configPath, "Source", args.source, ("source",))
+
     if args.torrent:
         logger.doing("running torrent maintenance")
         torrentDir = organizer.sourceDir.parent / "Downloads"
@@ -922,6 +1063,10 @@ Folder errors:   {cleanStats['errors']}
 def main(argv: Optional[Sequence[str]] = None, *, internalCamera: bool = False) -> int:
     """Run the command-line application and return a process status."""
     parser = buildParser(internalCamera=internalCamera)
+    misplaced = _misplacedLegacyFlag(sys.argv[1:] if argv is None else argv)
+    if misplaced is not None:
+        flag, command = misplaced
+        parser.error(f"{flag} is not an option here; use: omv {command}")
     args = _normalizeArguments(parser.parse_args(argv))
     _validateArguments(parser, args)
 
