@@ -339,7 +339,9 @@ class VideoRescanMixin:
             return False
         return any(self._isSampleLikeFolder(Path(part)) for part in relativeParts[:-1])
 
-    def _resetMovieFilenameIdentity(self, videoFile: Path) -> Optional[tuple[str, Optional[str]]]:
+    def _resetMovieFilenameIdentity(
+        self, videoFile: Path
+    ) -> Optional[tuple[str, Optional[str]]]:
         """Return a usable movie identity parsed from one feature filename."""
         parsed = self.parseMovieFilename(videoFile.name)
         if not parsed or not parsed.get("title"):
