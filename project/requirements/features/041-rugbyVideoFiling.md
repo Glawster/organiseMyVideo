@@ -32,8 +32,8 @@ Names alone are not enough:
 
 The store is a personal collection rather than the TV library, as described in
 [homeVideo.md](../../../documentation/homeVideo.md). It is currently at
-`/mnt/media/homeVideo/Rugby`. Some older documents still place home video under
-`homeVideo/Video`, so the store path must come from configuration.
+`/mnt/raid/Rugby`, having moved from `/mnt/media/homeVideo/Rugby`, so the store
+path must come from configuration.
 
 ## Scope
 
@@ -47,6 +47,17 @@ The store is a personal collection rather than the TV library, as described in
   `~/.config/organiseMyVideo/config.json`, and accept an explicit store override.
 - Run only the rugby workflow. `--rugby` does not perform movie or TV organising
   and is rejected in combination with `--merge`.
+
+### Source folder
+
+- When SOURCE is a download folder outside the store, read it and its
+  subfolders.
+- When SOURCE is the store itself, read only the loose files at its top level.
+  Never read the competition, team or season folders, because files there are
+  already filed.
+- Refuse a SOURCE inside the store, such as `<store>/Six Nations`, with a clear
+  message, and change no files.
+- Refuse a SOURCE that contains the store, for the same reason.
 
 ### Naming convention
 
@@ -142,6 +153,13 @@ The store is a personal collection rather than the TV library, as described in
     with a clear message and no files change.
 14. Given a Lions tour match, a two-part match or a highlights file, when it is
     planned, then its name follows the matching rule in the naming convention.
+15. Given SOURCE is the store, when the workflow runs, then only loose files at
+    the store's top level are planned, and no file in a subfolder is reported or
+    changed.
+16. Given SOURCE is inside the store or contains it, when the command runs, then
+    it is refused with a clear message and no files change.
+17. Given a download folder with videos in subfolders, when the workflow runs,
+    then the videos in the subfolders are planned.
 
 ## Dependencies and decisions
 
@@ -165,6 +183,17 @@ The store is a personal collection rather than the TV library, as described in
 - Pending decision: how earlier seasons are looked up, and how results are read and
   cached. This needs an ADR before delivery starts. Matches that no source can
   confirm are held for review.
+- Pending decision: a results source for the Nations Championship, which began in
+  2026. A search on 2026-11-16 found the format and the finals weekend, but not
+  the dates of the November rounds. Until a source is chosen, its matches are held
+  for review.
+- Pending decision: the store folder and competition label for the Nations
+  Championship. It replaces the Autumn Nations Series in November and also has
+  July rounds, so it could have its own `Nations Championship` folder or its
+  November rounds could file under `Autumn Internationals`. Its season year is the
+  calendar year, because it runs within one year.
+- [REQ-036](036-incomingMediaPreparation.md): `media clean` refuses library stores in
+  the same way that this workflow refuses a SOURCE inside the rugby store.
 
 ## Verification
 
@@ -190,3 +219,7 @@ The store is a personal collection rather than the TV library, as described in
   into the rugby store, using the naming convention agreed on 2026-10-29.
 - 2026-11-02: refined — recorded the results sources for women's club games, for
   Gloucester and Gloucester-Hartpury, and for other men's and international games.
+- 2026-11-16: updated — the rugby store moved to `/mnt/raid/Rugby`.
+- 2026-11-16: refined — defined which files are read from SOURCE when it is a
+  download folder, the store itself, or inside the store; recorded pending
+  decisions for the Nations Championship results source and store folder.

@@ -46,7 +46,8 @@ TV for the organiser stays in the configured TV locations, currently
 | `Video8`, `VideoDV` | Named for tape formats; contents need discovery/review |
 | `Productions` | Finished or production material; needs discovery/review |
 | `Extension`, `Evelyn`, `Cycling`, `Singapore`, `Meghan In Moldova`, `M & J Wedding`, `Misc` | Topic, subject, event, project, or production-oriented collections requiring discovery/review |
-| `Rugby`, `Footy`, `Music` | Personal recordings, not the TV library |
+| `Footy`, `Music` | Personal recordings, not the TV library |
+| `Rugby` | Empty; the rugby store moved to `/mnt/raid/Rugby` |
 | `Captures`, `Favourites` | Described as empty or tiny leftovers before the move; recheck during discovery |
 
 These descriptions document this archive only. The folder names must not be
