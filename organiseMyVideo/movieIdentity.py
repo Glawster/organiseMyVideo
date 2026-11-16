@@ -22,6 +22,7 @@ MOVIE_IDENTITY_STATE_KEYS = (
     "identityConflict",
     "identityConflictReported",
     "identityNamingTitle",
+    "mediaRuntime",
 )
 
 _APOSTROPHE_PATTERN = re.compile(r"['\u2019]")
@@ -161,6 +162,21 @@ def movieIdentityMetadataSuspectReasons(
     return tuple(reasons)
 
 
+def movieFeatureLengthShort(metadataRuntime: object, mediaRuntime: object) -> bool:
+    """Return True when the feature is materially shorter than its metadata runtime.
+
+    A short feature that still plays to its end is usually a partial download or
+    a cut-down copy, so it is reported for replacement rather than as an
+    identity problem.
+    """
+    metadataRange = _runtimeRange(metadataRuntime)
+    mediaRange = _runtimeRange(mediaRuntime)
+    if metadataRange is None or mediaRange is None:
+        return False
+    shortfall = metadataRange[0] - mediaRange[1]
+    return shortfall >= 15 and shortfall / metadataRange[0] >= 0.25
+
+
 def movieIdentityEvidence(movieInfo: Mapping[str, object]) -> str:
     """Return the local source that supplied the proposed movie identity."""
     source = movieInfo.get("metadataSource")
@@ -278,8 +294,17 @@ def _runtimeRange(value: object) -> Optional[tuple[float, float]]:
 
     ``1h`` has lost its minutes, and may be rounded or cut down to the hour, so
     it stands for a range. An unrecognised format returns None rather than a
-    guess, because a wrong number here blocks a rename.
+    guess, because a wrong number here blocks a rename. A zero runtime means
+    the value was never filled in, so it also returns None.
     """
+    runtimeRange = _runtimeRangeRead(value)
+    if runtimeRange is None or runtimeRange[1] <= 0:
+        return None
+    return runtimeRange
+
+
+def _runtimeRangeRead(value: object) -> Optional[tuple[float, float]]:
+    """Return the minutes range a runtime text spells out, including zero."""
     text = _displayText(value)
     if text is None:
         return None

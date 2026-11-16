@@ -11,6 +11,8 @@ from organiseMyProjects.logUtils import getLogger  # type: ignore
 from .constants import VIDEO_EXTENSIONS
 from .incomingNames import mediaNameIsAncillary
 from .movieIdentity import (
+    MOVIE_IDENTITY_CONFLICT,
+    movieFeatureLengthShort,
     movieIdentityClassifySources,
     movieIdentityEvidence,
     movieIdentityMetadataSuspectReasons,
@@ -41,15 +43,23 @@ class MovieIdentityReviewMixin:
 
         try:
             videoFile = self._movieFeatureFile(*paths)
-            if videoFile is None:
-                return None
+        except OSError:
+            return None
+        if videoFile is None:
+            return None
+        # The guard runs before and after enrichment; probe each file once.
+        cache = self.__dict__.setdefault("_movieFeatureRuntimeCache", {})
+        if videoFile in cache:
+            return cache[videoFile]
+        try:
             durationSeconds = videoProbe(videoFile).durationSeconds
         except (OSError, VideoProcessingError):
-            return None
-        if durationSeconds is None or durationSeconds <= 0:
-            return None
-        minutes = durationSeconds / 60.0
-        return f"{minutes:.1f}".rstrip("0").rstrip(".")
+            durationSeconds = None
+        runtime = None
+        if durationSeconds is not None and durationSeconds > 0:
+            runtime = f"{durationSeconds / 60.0:.1f}".rstrip("0").rstrip(".")
+        cache[videoFile] = runtime
+        return runtime
 
     def _movieFeatureFile(self, *paths: Path) -> Path | None:
         """Return the largest video among *paths* and their same-named siblings.
@@ -88,30 +98,58 @@ class MovieIdentityReviewMixin:
         )
 
     def _refuseMovieIdentityChange(self, movieInfo: dict, *paths: Path) -> bool:
-        """Block suspect MCM evidence before ordinary identity comparison."""
-        if movieInfo.get("metadataSource") == "mcm":
-            mediaRuntime = movieInfo.get("mediaRuntime")
-            if movieInfo.get("runtime") and mediaRuntime is None:
-                mediaRuntime = self._movieTechnicalRuntimeMinutes(*paths)
+        """Block suspect MCM evidence before ordinary identity comparison.
 
-            suspectReasons = movieIdentityMetadataSuspectReasons(
-                movieInfo.get("title"),
-                metadataRuntime=movieInfo.get("runtime"),
-                mediaRuntime=mediaRuntime,
-            )
-            if suspectReasons:
-                if mediaRuntime is not None:
-                    movieInfo["mediaRuntime"] = mediaRuntime
-                if not movieInfo.get("identityConflict"):
-                    movieInfo["identityConflict"] = self._movieIdentityDecisionForPaths(
-                        movieInfo, *paths
-                    )
-                if not movieInfo.get("identityConflictReported"):
-                    self._reportMovieIdentityConflict(movieInfo, *paths)
-                    movieInfo["identityConflictReported"] = True
-                return True
+        A path-like title blocks even when the normalised identity agrees. A
+        runtime that differs from the feature only adds evidence to a real
+        title or year conflict; on its own it says nothing about identity, so
+        a feature much shorter than its metadata is reported as possibly
+        incomplete instead.
+        """
+        if movieInfo.get("metadataSource") != "mcm":
+            return super()._refuseMovieIdentityChange(movieInfo, *paths)
+
+        mediaRuntime = movieInfo.get("mediaRuntime")
+        if movieInfo.get("runtime") and mediaRuntime is None:
+            mediaRuntime = self._movieTechnicalRuntimeMinutes(*paths)
+        if mediaRuntime is not None:
+            movieInfo["mediaRuntime"] = mediaRuntime
+
+        if movieIdentityMetadataSuspectReasons(movieInfo.get("title")):
+            if not movieInfo.get("identityConflict"):
+                movieInfo["identityConflict"] = self._movieIdentityDecisionForPaths(
+                    movieInfo, *paths
+                )
+            if not movieInfo.get("identityConflictReported"):
+                self._reportMovieIdentityConflict(movieInfo, *paths)
+                movieInfo["identityConflictReported"] = True
+            return True
+
+        decision = self._movieIdentityDecisionForPaths(movieInfo, *paths)
+        if decision.kind != MOVIE_IDENTITY_CONFLICT and movieFeatureLengthShort(
+            movieInfo.get("runtime"), mediaRuntime
+        ):
+            self._reportShortMovieFeature(movieInfo, *paths)
 
         return super()._refuseMovieIdentityChange(movieInfo, *paths)
+
+    def _reportShortMovieFeature(self, movieInfo: dict, *paths: Path) -> None:
+        """Warn once that a feature is much shorter than its metadata runtime."""
+        feature = self._movieFeatureFile(*paths)
+        reported = self.__dict__.setdefault("_shortMovieFeaturesReported", set())
+        if feature in reported:
+            return
+        reported.add(feature)
+        details = [
+            f"folder: {feature.parent}" if feature is not None else "",
+            f"file: {feature.name}" if feature is not None else "",
+            f"metadata runtime: {movieInfo.get('runtime')}",
+            f"media runtime: {movieInfo.get('mediaRuntime')}",
+            "reason: the feature is much shorter than its metadata runtime",
+        ]
+        details = [detail for detail in details if detail]
+        logger.warning("%s", "\n".join(["movie file possibly incomplete", *details]))
+        self._recordSummaryInvestigation("movie file possibly incomplete", *details)
 
     def _reportMovieIdentityConflict(self, movieInfo: dict, *paths: Path) -> None:
         """Include the affected folder in the visible operator warning."""

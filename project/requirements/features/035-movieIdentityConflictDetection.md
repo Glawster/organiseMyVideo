@@ -145,10 +145,17 @@ are blocking completion items for this requirement.
   title/year agreement. A path-like metadata title remains suspect even if
   punctuation stripping would otherwise make it compare equal to an on-disk
   title.
-- When metadata runtime/duration materially contradicts the actual feature
-  runtime, downgrade that metadata from authoritative identity evidence and
-  report the contradiction for investigation rather than silently renaming from
-  it.
+- When metadata proposes a different title or year and its runtime/duration
+  materially contradicts the actual feature runtime, include the contradiction
+  in the conflict report as evidence that the metadata is suspect.
+- A runtime contradiction alone is not an identity conflict. When the metadata
+  title and year agree with the current name, do not report or block on runtime.
+  MCM runtimes are often wrong, and a mismatch then says nothing about identity.
+- Treat a zero metadata runtime as unknown, not as zero minutes.
+- When the feature is materially shorter than its metadata runtime and the
+  identity agrees, report it once as possibly incomplete, naming the folder,
+  file and both runtimes. This is a file-health warning, usually a partial
+  download or cut-down copy, and does not block the rename.
 - When MCM runtime is being used as identity evidence, obtain the actual feature
   duration through the shared video-probe service when available so a material
   contradiction can be detected. Technical runtime gathered only for this guard
@@ -273,9 +280,10 @@ are blocking completion items for this requirement.
    identifies the affected folder path, the current movie identity, the
    conflicting proposed identity, and the evidence source responsible for the
    disagreement.
-7. Given MCM runtime/duration evidence for a feature, when the identity guard is
-   evaluated and technical feature duration is available, then OMV compares the
-   metadata runtime with the actual feature runtime and includes a material
+7. Given MCM runtime/duration evidence for a feature whose metadata title or year
+   conflicts with the current name, when the identity guard is evaluated and
+   technical feature duration is available, then OMV compares the metadata
+   runtime with the actual feature runtime and includes a material
    contradiction in the conflict evidence rather than silently ignoring it.
 8. Given an identity conflict during a confirmed workflow, when the operation
    reaches that movie, then the conflicting rename remains blocked unless a
@@ -334,8 +342,9 @@ are blocking completion items for this requirement.
 23. Given the same `Entangled (2019)` case where `movie.xml` reports a three-minute
    runtime while the actual MKV is roughly 91 minutes, OMV obtains/uses the
    technical feature duration when available, reports the material runtime
-   contradiction, keeps the rename blocked, and does not treat the TMDb ID alone
-   as sufficient proof that the MCM identity is authoritative.
+   contradiction alongside the path-like title, keeps the rename blocked, and
+   does not treat the TMDb ID alone as sufficient proof that the MCM identity is
+   authoritative.
 24. Given one movie folder containing two distinct feature movies, such as
    `Love And Jane (2024)` and `An American in Austen (2024)`, when scan evidence
    resolves both identities, then OMV reports a mixed-identity folder / split
@@ -378,6 +387,16 @@ are blocking completion items for this requirement.
    for scan, OMV does not exclude them merely because `interview` or `trailer`
    appears as a word in the title; explicit ancillary labels such as
    `Michael McIntyre - Behind The Scenes` remain ancillary.
+34. Given `Relic, The (2020)` with a `movie.xml` title of `The Relic`, a runtime
+   of `0` and a 89.5-minute feature, when it is scanned, then no identity or
+   runtime warning is reported and the rename is not blocked.
+35. Given `Brutalist, The (2024)` with a `movie.xml` runtime of `6` and a
+   201-minute feature, when it is scanned, then no warning is reported, because
+   the identity agrees and the feature is not shorter than its metadata.
+36. Given `Mickey 17 (2025)` with a `movie.xml` runtime of `137` and a
+   12.9-minute feature, when it is scanned, then it is reported once as a
+   possibly incomplete movie file with its folder, file and both runtimes, the
+   feature is probed once, and the rename is not blocked.
 
 ## Dependencies and decisions
 
@@ -506,3 +525,9 @@ are blocking completion items for this requirement.
   minute and blocked 148 valid movies. It now stands for the range of minutes it
   can mean, `1h 31m` and `30min` are read as durations, an unrecognised format
   is not compared, and the probe uses the largest same-named video.
+- 2026-11-16: corrected — a library scan reported 30 films as "identity suspect"
+  although each agreed with its folder name; most had a wrong MCM runtime such
+  as `0`, `3` or `6`. Runtime now only adds evidence to a real title or year
+  conflict, a zero runtime is unknown, and a feature much shorter than its
+  metadata is reported as possibly incomplete instead. A play test of the 30
+  files found one damaged file and several short copies.

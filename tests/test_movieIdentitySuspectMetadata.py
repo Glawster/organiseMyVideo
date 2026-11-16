@@ -6,6 +6,7 @@ import pytest
 
 from organiseMyVideo.movieIdentity import (
     MovieIdentityDecision,
+    movieFeatureLengthShort,
     movieIdentityMetadataSuspectReasons,
     movieIdentityReport,
 )
@@ -85,6 +86,44 @@ def testUnrecognisedRuntimeFormatIsNotCompared():
         metadataRuntime="1:31:00",
         mediaRuntime="91",
     )
+
+
+def testZeroRuntimeMeansUnknownAndIsNotCompared():
+    assert not movieIdentityMetadataSuspectReasons(
+        "The Relic",
+        metadataRuntime="0",
+        mediaRuntime="89.5",
+    )
+
+
+@pytest.mark.parametrize(
+    ("metadataRuntime", "mediaRuntime"),
+    [
+        ("137", "12.9"),
+        ("95", "24.6"),
+        ("253", "109.3"),
+        ("2h 10m", "91.2"),
+    ],
+)
+def testFeatureMuchShorterThanMetadataIsShort(metadataRuntime, mediaRuntime):
+    assert movieFeatureLengthShort(metadataRuntime, mediaRuntime)
+
+
+@pytest.mark.parametrize(
+    ("metadataRuntime", "mediaRuntime"),
+    [
+        ("94", "91"),
+        ("3", "91.3"),
+        ("70", "116.8"),
+        ("1h", "45"),
+        ("0", "89.5"),
+        (None, "89.5"),
+        ("137", None),
+        ("1:31:00", "20"),
+    ],
+)
+def testFeatureNotMateriallyShorterIsNotShort(metadataRuntime, mediaRuntime):
+    assert not movieFeatureLengthShort(metadataRuntime, mediaRuntime)
 
 
 def _writeVideo(path: Path, size: int) -> Path:
