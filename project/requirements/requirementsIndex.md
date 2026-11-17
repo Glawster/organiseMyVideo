@@ -1,6 +1,6 @@
 # Requirements
 
-Next available number: 044
+Next available number: 045
 
 Requirements created after adoption of the managed process are recorded here.
 Historical behaviour is not assigned invented retrospective requirements.
@@ -50,6 +50,7 @@ Historical behaviour is not assigned invented retrospective requirements.
 | 041 | [Rugby video filing](features/041-rugbyVideoFiling.md) | Rename downloaded rugby matches to the agreed convention and move them safely into the rugby store with `media organise --rugby`. | ToDo | [Prompt](prompt/041-rugbyVideoFiling.md) | [ADR-003](../adr/003-filesystemSafetyBoundary.md), earlier-season results lookup decision pending |
 | 042 | [Storage paths and camelCase names](features/042-storagePathsAndCamelCaseNames.md) | Take storage paths from configuration for the new library layout, and rename config keys and other OMV-owned names to camelCase with backwards-compatible reading. | ToDo | [Prompt](prompt/042-storagePathsAndCamelCaseNames.md) | Not required |
 | 043 | [Catalogue stale location removal](features/043-catalogueStaleLocationRemoval.md) | Remove stale catalogue locations on the following scan, retire dropped storage roots, and hide stale locations from `media locate` unless `--all` is given. | InProgress | [Prompt](prompt/043-catalogueStaleLocationRemoval.md) | [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
+| 044 | [Replace an existing movie file](features/044-replaceExistingMovieFile.md) | Match existing movie folders by title identity, and let `media organise --replace` swap in a new feature file with the old one quarantined and journalled. | ToDo | [Prompt](prompt/044-replaceExistingMovieFile.md) | [ADR-003](../adr/003-filesystemSafetyBoundary.md), TV and interactive-prompt decisions pending |
 
 ## Prompt index
 
@@ -88,4 +89,5 @@ Historical behaviour is not assigned invented retrospective requirements.
 - [041-rugbyVideoFiling](prompt/041-rugbyVideoFiling.md)
 - [042-storagePathsAndCamelCaseNames](prompt/042-storagePathsAndCamelCaseNames.md)
 - [043-catalogueStaleLocationRemoval](prompt/043-catalogueStaleLocationRemoval.md)
+- [044-replaceExistingMovieFile](prompt/044-replaceExistingMovieFile.md)
 <!-- OMP-PROMPT-INDEX-END -->
