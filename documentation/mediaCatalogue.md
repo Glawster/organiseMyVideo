@@ -39,6 +39,8 @@ Tables use camelCase names: `cardInventory`, `cardInventoryFile`,
   and TV rows from storage roots that can be listed.
 - `media organise --merge` reconciles those rows after its live library scan,
   including a dry-run that changes no media files.
+- `media organise` reconciles those rows in the library repair scan that
+  follows filing, including a dry-run that changes no media files.
 - `metadataLibrary.json` remains a move-time lookup cache. It is not the UI
   catalogue.
 
@@ -64,17 +66,26 @@ IDs may be null until a later scan has them.
 Each movie and TV location has `locationState`: `current`, `stale`, or
 `unverified`. A root that was listed is authoritative for the folders directly
 inside it. Folders found there are `current`. A catalogued folder that the
-listing no longer contains becomes `stale` and stays in the database. An error
+listing no longer contains becomes `stale`, and the next scan removes it from
+the database unless the folder has come back. An error
 while reading a directory inside a TV show does not retire the episodes under
 that directory; those rows stay as they were. A root that is missing,
 unmounted, or unlistable is not authoritative, so its existing rows are left
 unchanged.
+
+A root is dropped when the configuration states that kind's storage list and the
+root is no longer in it. A scan removes a dropped root's `stale` rows. If the
+root no longer exists it is also retired: its other rows become `stale` and the
+next scan removes them. Roots found by `/mnt` discovery are never dropped,
+because a disk missing from discovery may only be unmounted. Nothing is dropped
+on a scan that could list none of that kind's roots.
 Opening an older catalogue marks existing rows `unverified` until the next
 authoritative scan. `catalogueMoviesList()`, `catalogueTvSeriesList()`, and
 `catalogueTvEpisodesList()` return current and unverified rows. Pass
 `states` to include stale rows.
 
-`media locate` prints every matching folder with that freshness. A path is
+`media locate` prints matching folders with that freshness and leaves out
+`stale` locations unless `--all` is given. A path is
 printed as `current` only when the catalogue says so and the folder is
 present. A missing path that has not been authoritatively retired is
 `unverified`. `--show` is optional: with a name it selects matching shows,
@@ -106,7 +117,7 @@ Do not use USB-reader vendor strings as the card brand. See
 ## Home video
 
 The UI Home video collection will list `catalogueHomeVideoList()` rows
-from `/mnt/myVideo/Video` ([REQ-014](../project/requirements/features/014-homeVideoCatalogue.md)).
+from `/mnt/media/homeVideo` ([REQ-014](../project/requirements/features/014-homeVideoCatalogue.md)).
 First-level folders are kinds: `GoPro` and `Drone` are part of this
 collection. See [Home video archive](homeVideo.md).
 
@@ -121,12 +132,13 @@ fall back individually to these stored values. Current MCM and metadata-library
 IDs always win when supplied. Descriptions are rebuilt from current evidence;
 SQLite titles, show names, season numbers and episode titles are never reused.
 Show and movie folders absent from an authoritatively listed root are marked
-stale and kept. Episode rows under a TV directory that could not be read stay
-as they were. Paths whose root was not listed stay as they were. When organiseMyVideo itself
+stale and removed by the next scan. Episode rows under a TV directory that could not be read stay
+as they were. Paths whose root was not listed stay as they were, unless the root
+has been retired. When organiseMyVideo itself
 moves a catalogued folder or file, the destination becomes current and receives
 provider IDs that the destination does not already have; the old path remains
-as stale. A path renamed outside organiseMyVideo does not inherit the old
-path's IDs. Those IDs remain on the stale row.
+as stale until the next scan. A path renamed outside organiseMyVideo does not
+inherit the old path's IDs, and those IDs are removed with the stale row.
 
 [REQ-019](../project/requirements/features/019-catalogueMetadataResolution.md)
 uses the existing local MCM readers, library lookup and canonical filename

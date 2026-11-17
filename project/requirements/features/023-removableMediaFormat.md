@@ -1,4 +1,4 @@
-# REQ-023 — Removable media format and recycle
+# 023: Removable media format and recycle
 
 ## Status
 

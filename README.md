@@ -4,6 +4,9 @@ Moves video files from a staging directory to organised storage locations and ca
 
 ## Documentation
 
+- [Suite roadmap](../organiseMediaStudio/project/suiteRoadmap.md)
+- [Media library organisation](../organiseMediaStudio/documentation/mediaLibraryOrganisation.md)
+
 The README is the canonical entry point for repository documentation. The living guides are:
 
 - [Camera capture-time correction](documentation/cameraCaptureCorrection.md): preview and confirm clock offsets for imports or existing folders.
@@ -26,11 +29,11 @@ The README is the canonical entry point for repository documentation. The living
 - [Home video archive](documentation/homeVideo.md)
 - [Command-line interface](documentation/commandLineInterface.md)
 
-- **Movies** → `/mnt/movie<n>/Title (Year)/` (`The Title` folders are stored as `Title, The (Year)`; the title stays `The Title`. A different title or release year in metadata is reported and is not applied as a rename. Filesystem-invalid characters are removed before a rename is planned, `Sample.mkv` is not treated as the feature, and an existing canonical folder or file is classified and left in place.)
-- **TV shows** → `/mnt/video<n>/TV/Show Name/Season NN/` (`The Name` folders are stored as `Name, The`; the show title stays `The Name`)
-- **Home video** → `/mnt/myVideo/Video/` (GoPro, Drone, tape transfers, and other personal folders)
-- **Default staging/source folder** → `/mnt/video2/toFile`
-- **Torrent download folder** → sibling `Downloads` folder next to the source directory, e.g. `/mnt/video2/Downloads`
+- **Movies** → `<movie location>/Title (Year)/`, in the configured locations such as `/mnt/movies/Movies` and `/mnt/raid/Movies` (`The Title` folders are stored as `Title, The (Year)`; the title stays `The Title`. A different title or release year in metadata is reported and is not applied as a rename. Filesystem-invalid characters are removed before a rename is planned, `Sample.mkv` is not treated as the feature, and an existing canonical folder or file is classified and left in place.)
+- **TV shows** → `<TV location>/Show Name/Season NN/`, in the configured locations such as `/mnt/video/TV` and `/mnt/raid/TV` (`The Name` folders are stored as `Name, The`; the show title stays `The Name`)
+- **Home video** → `/mnt/media/homeVideo/` (GoPro, Drone, tape transfers, and other personal folders), with dated footage in `byDate/`
+- **Staging/source folder** → `/mnt/video/toFile`. Pass it explicitly until [REQ-042](project/requirements/features/042-storagePathsAndCamelCaseNames.md) makes the configured source the default; the built-in default `/mnt/video2/toFile` no longer exists
+- **Torrent download folder** → sibling `Downloads` folder next to the source directory, e.g. `/mnt/video/Downloads`
 
 ---
 
@@ -94,8 +97,8 @@ organiseMyVideo media locate --show Lanterns
 organiseMyVideo media locate --movie "Zone 414"
 ```
 
-`media locate` prints catalogued folders as `current`, `stale`, or
-`unverified`. Use `--movie TITLE` to find movies by case-insensitive exact or
+`media locate` prints catalogued folders as `current` or `unverified`, and
+`--all` also prints `stale` locations. Use `--movie TITLE` to find movies by case-insensitive exact or
 partial title, optionally including the year (for example `"Zone 414 (2021)"`).
 Movie results include their release year. `--movie` and `--show` are mutually
 exclusive; omit both to list every catalogued TV show.
@@ -163,7 +166,7 @@ python -m organiseMyVideo --torrent --clean --confirm
 
 | Option | Description |
 |--------|-------------|
-| `--source PATH` | Source directory containing files to organize. Default: `/mnt/video2/toFile` |
+| `--source PATH` | Source directory containing files to organize. Pass this explicitly: the built-in default `/mnt/video2/toFile` no longer exists |
 | `--confirm` | Execute changes. Without this flag the script runs as a dry-run |
 | `--auto` | Run organisation without prompts and write run summary state under `~/.local/state/organiseMyVideo/` |
 | `--clean` | Clean the source directory, or when combined with `--torrent`, also clean prefixed `.torrent` names |

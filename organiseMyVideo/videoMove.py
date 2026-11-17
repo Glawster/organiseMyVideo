@@ -613,7 +613,7 @@ class VideoMoveMixin:
         musicStats = self.processMusicFolders()
 
         if not movieDirs:
-            logger.error("No Movie storage locations found")
+            logger.error("No movie storage locations found")
         if not videoDirs:
             logger.error("No TV storage locations found!")
             if musicStats["music"] or musicStats["errors"]:

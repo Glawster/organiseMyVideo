@@ -67,34 +67,102 @@ def testPathLikeMcmTitleBlocksEvenWhenNormalisedIdentityAgrees(tmp_path: Path):
     assert "tmdb: 641556" in report
 
 
-def testMcmRuntimeContradictionUsesActualFeatureDurationAndBlocks(tmp_path: Path):
-    organizer = _organizer(tmp_path)
+def _entangled(tmp_path: Path, title: str, runtime: str) -> tuple[Path, Path, dict]:
     folder = tmp_path / "Entangled (2019)"
     folder.mkdir()
     feature = folder / "Entangled (2019).mkv"
     feature.write_bytes(b"feature")
     movieInfo = {
-        "title": "Entangled",
+        "title": title,
         "year": "2019",
         "metadataSource": "mcm",
-        "runtime": "3",
+        "runtime": runtime,
         "tmdbId": "641556",
     }
+    return folder, feature, movieInfo
+
+
+def testRuntimeContradictionAddsEvidenceToTitleConflict(tmp_path: Path):
+    organizer = _organizer(tmp_path)
+    folder, feature, movieInfo = _entangled(tmp_path, "One Second Forever", "3")
 
     probeResult = SimpleNamespace(durationSeconds=91 * 60)
     with patch(
         "organiseMediaStudio.video.probe.videoProbe", return_value=probeResult
     ) as probe:
         with patch("organiseMyVideo.movieIdentityReview.logger.warning") as warning:
-            assert organizer._refuseMovieIdentityChange(movieInfo, folder, feature) is True
+            assert (
+                organizer._refuseMovieIdentityChange(movieInfo, folder, feature) is True
+            )
 
     probe.assert_called_once_with(feature)
     assert movieInfo["mediaRuntime"] == "91"
     report = warning.call_args.args[1]
+    assert report.startswith("movie metadata identity suspect\n")
     assert f"folder: {folder}" in report
     assert "reason: metadata runtime conflicts materially with media runtime" in report
     assert "metadata runtime: 3" in report
     assert "media runtime: 91" in report
+
+
+def testRuntimeContradictionAloneDoesNotBlockAgreeingIdentity(tmp_path: Path):
+    organizer = _organizer(tmp_path)
+    folder, feature, movieInfo = _entangled(tmp_path, "Entangled", "3")
+
+    probeResult = SimpleNamespace(durationSeconds=91 * 60)
+    with patch("organiseMediaStudio.video.probe.videoProbe", return_value=probeResult):
+        with patch("organiseMyVideo.movieIdentityReview.logger.warning") as warning:
+            assert (
+                organizer._refuseMovieIdentityChange(movieInfo, folder, feature)
+                is False
+            )
+
+    warning.assert_not_called()
+
+
+def testZeroMetadataRuntimeIsNotReported(tmp_path: Path):
+    organizer = _organizer(tmp_path)
+    folder, feature, movieInfo = _entangled(tmp_path, "Entangled", "0")
+
+    probeResult = SimpleNamespace(durationSeconds=89.5 * 60)
+    with patch("organiseMediaStudio.video.probe.videoProbe", return_value=probeResult):
+        with patch("organiseMyVideo.movieIdentityReview.logger.warning") as warning:
+            assert (
+                organizer._refuseMovieIdentityChange(movieInfo, folder, feature)
+                is False
+            )
+
+    warning.assert_not_called()
+
+
+def testShortFeatureIsReportedOnceAsPossiblyIncomplete(tmp_path: Path):
+    organizer = _organizer(tmp_path)
+    folder, feature, movieInfo = _entangled(tmp_path, "Entangled", "137")
+
+    probeResult = SimpleNamespace(durationSeconds=12.9 * 60)
+    with patch(
+        "organiseMediaStudio.video.probe.videoProbe", return_value=probeResult
+    ) as probe:
+        with patch("organiseMyVideo.movieIdentityReview.logger.warning") as warning:
+            assert (
+                organizer._refuseMovieIdentityChange(movieInfo, folder, feature)
+                is False
+            )
+            # The guard runs again after enrichment, without transient state.
+            enriched = organizer._movieMetadataWithoutIdentityState(movieInfo)
+            assert "mediaRuntime" not in enriched
+            assert (
+                organizer._refuseMovieIdentityChange(enriched, folder, feature) is False
+            )
+
+    probe.assert_called_once_with(feature)
+    warning.assert_called_once()
+    report = warning.call_args.args[1]
+    assert report.startswith("movie file possibly incomplete\n")
+    assert f"folder: {folder}" in report
+    assert f"file: {feature.name}" in report
+    assert "metadata runtime: 137" in report
+    assert "media runtime: 12.9" in report
 
 
 def testAncillaryDescriptorsDoNotConsumeRealFeatureTitles(tmp_path: Path):

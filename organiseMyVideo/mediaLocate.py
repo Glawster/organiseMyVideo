@@ -32,7 +32,10 @@ class MediaLocation:
 
 
 def locateMedia(
-    search: str, *, catalogue: MediaCatalogue | None = None
+    search: str,
+    *,
+    catalogue: MediaCatalogue | None = None,
+    includeStale: bool = False,
 ) -> list[MediaLocation]:
     """Return movie and TV folders matching one case-insensitive search."""
     requested = search.strip().casefold()
@@ -40,8 +43,8 @@ def locateMedia(
         return []
     mediaCatalogue = catalogue or MediaCatalogue()
     matches = [
-        *locateMovie(search, catalogue=mediaCatalogue),
-        *locateTvShow(search, catalogue=mediaCatalogue),
+        *locateMovie(search, catalogue=mediaCatalogue, includeStale=includeStale),
+        *locateTvShow(search, catalogue=mediaCatalogue, includeStale=includeStale),
     ]
     return sorted(
         matches,
@@ -56,12 +59,16 @@ def locateMedia(
 
 
 def locateMovie(
-    movieName: str, *, catalogue: MediaCatalogue | None = None
+    movieName: str,
+    *,
+    catalogue: MediaCatalogue | None = None,
+    includeStale: bool = False,
 ) -> list[MediaLocation]:
     """Return movie folders matching a case-insensitive title or title and year.
 
-    Include all recorded location states and check each folder's presence.
-    Exact title matches precede partial matches; years distinguish remakes.
+    Check each folder's presence and leave out stale locations unless
+    *includeStale* is set. Exact title matches precede partial matches; years
+    distinguish remakes.
     """
     requested = movieName.strip().casefold()
     if not requested:
@@ -74,13 +81,16 @@ def locateMovie(
         title = row.title.strip().casefold()
         if requested not in name.strip().casefold():
             continue
+        state = _locationVisibility(row.locationState, row.folderPath)
+        if state == LOCATION_STALE and not includeStale:
+            continue
         if requested in (title, name.strip().casefold()):
             exactNames.add(name)
         matches.append(
             MediaLocation(
                 name=name,
                 folderPath=row.folderPath,
-                state=_locationVisibility(row.locationState, row.folderPath),
+                state=state,
                 mediaType="Movie",
             )
         )
@@ -96,7 +106,10 @@ def locateMovie(
 
 
 def locateTvShow(
-    showName: str | None = None, *, catalogue: MediaCatalogue | None = None
+    showName: str | None = None,
+    *,
+    catalogue: MediaCatalogue | None = None,
+    includeStale: bool = False,
 ) -> list[MediaLocation]:
     """Return catalogued TV folders, optionally matching *showName*.
 
@@ -104,7 +117,8 @@ def locateTvShow(
     Exact matches and names containing the requested text are returned so
     similarly named shows are shown together. Omit *showName* to return every
     catalogued show. A stored path is not reported as current unless the
-    catalogue marks it current and the folder is present.
+    catalogue marks it current and the folder is present. Stale locations are
+    left out unless *includeStale* is set.
     """
 
     requested = None if showName is None else showName.strip().casefold()
@@ -116,11 +130,14 @@ def locateTvShow(
     for row in mediaCatalogue.catalogueTvSeriesList(states=LOCATION_STATES):
         if requested is not None and requested not in row.showName.strip().casefold():
             continue
+        state = _locationVisibility(row.locationState, row.folderPath)
+        if state == LOCATION_STALE and not includeStale:
+            continue
         matches.append(
             MediaLocation(
                 name=row.showName,
                 folderPath=row.folderPath,
-                state=_locationVisibility(row.locationState, row.folderPath),
+                state=state,
                 mediaType="TV",
             )
         )

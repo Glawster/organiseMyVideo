@@ -108,10 +108,11 @@ points the moved catalogue row at the new path and keeps the old path as
 
 `media locate` reads catalogued TV show folders. `--show NAME` selects a
 case-insensitive exact or partial name. Omitting `--show` lists every
-catalogued show. Each folder is printed as `current`, `stale`, or
-`unverified`. `current` means an authoritative scan saw the folder and it is
-still present. `stale` means that scan's root was listed and the folder was
-absent. `unverified` means the catalogue has not confirmed the path, or the
+catalogued show. Each folder is printed as `current` or `unverified`, and
+`--all` also prints `stale` locations. `current` means an authoritative scan saw
+the folder and it is still present. `stale` means that scan's root was listed
+and the folder was absent, and the next scan removes the location from the
+catalogue. `unverified` means the catalogue has not confirmed the path, or the
 folder is missing and its root was not listed. Locate does not delete rows.
 
 `media scan` is non-destructive. It inspects movie and TV libraries, reports
@@ -150,7 +151,14 @@ overwritten or deleted. A merge of the two folders is not performed.
 tree. It cleans staged release/site-name noise and may quarantine/remove empty
 or sample-only staged folders when confirmed. It does not normalise established
 TV show/season folders, rename library media, merge folders, or perform
-catalogue-wide reconciliation.
+catalogue-wide reconciliation. It refuses a source that is, contains or lies
+inside a movie or TV store, and keeps a `metadata` folder whose parent holds
+real video.
+
+When a source or camera destination given on the command line differs from its
+config value, an interactive run asks whether to replace that value. The default
+is no. Runs with `--auto` or `--quiet`, or without a terminal, do not ask, and a
+source that overlaps a library store is never offered.
 
 The normal workflow is:
 
@@ -160,6 +168,11 @@ organiseMyVideo media clean --confirm
 organiseMyVideo media scan
 organiseMyVideo media organise
 ```
+
+After filing, `media organise` runs the library repair scan, which reconciles
+catalogue location state from the storage roots it can list. That reconcile runs
+on a dry-run too: the catalogue records what is on disk, and dry-run still
+moves and renames no media.
 
 `media scan` may reuse the same name-normalisation rules in memory for
 classification without filesystem writes. Trusted metadata takes precedence,
@@ -182,7 +195,10 @@ duplicates.
 ## Compatibility interface
 
 The previous flags and the no-command organiser form remain supported without
-deprecation warnings during Phase 3. Examples include:
+deprecation warnings during Phase 3. `--clean`, `--rescan`, `--movie`, `--video`
+and `--torrent` no longer appear in help, because `media clean`, `library rescan`
+and `torrent maintain` replace them. Given after a command, such as
+`media organise --clean`, they stop with the command to use. Examples include:
 
 ```bash
 organiseMyVideo --source SOURCE

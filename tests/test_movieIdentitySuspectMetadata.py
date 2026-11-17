@@ -1,10 +1,16 @@
 """REQ-035 regression tests for suspect MCM movie identity evidence."""
 
+from pathlib import Path
+
+import pytest
+
 from organiseMyVideo.movieIdentity import (
     MovieIdentityDecision,
+    movieFeatureLengthShort,
     movieIdentityMetadataSuspectReasons,
     movieIdentityReport,
 )
+from organiseMyVideo.movieIdentityReview import MovieIdentityReviewMixin
 
 
 def testPathLikeMcmTitleIsSuspectIdentityEvidence():
@@ -22,9 +28,7 @@ def testMaterialRuntimeMismatchIsSuspectIdentityEvidence():
         mediaRuntime="91",
     )
 
-    assert reasons == (
-        "metadata runtime conflicts materially with media runtime",
-    )
+    assert reasons == ("metadata runtime conflicts materially with media runtime",)
 
 
 def testSmallRuntimeDifferenceIsNotEnoughToDistrustMetadata():
@@ -33,6 +37,127 @@ def testSmallRuntimeDifferenceIsNotEnoughToDistrustMetadata():
         metadataRuntime="88",
         mediaRuntime="91",
     )
+
+
+@pytest.mark.parametrize(
+    ("metadataRuntime", "mediaRuntime"),
+    [
+        ("1h", "91"),
+        ("1h", "118.2"),
+        ("2h", "135.8"),
+        ("3h", "167.7"),
+        ("2h", "119.6"),
+        ("1h", "121.4"),
+        ("1h 31m", "91"),
+        ("1h31", "95"),
+        ("91 min", "91"),
+        ("30min", "32"),
+    ],
+)
+def testRuntimeFormatsThatAgreeWithMediaAreNotSuspect(metadataRuntime, mediaRuntime):
+    assert not movieIdentityMetadataSuspectReasons(
+        "Fist Fight",
+        metadataRuntime=metadataRuntime,
+        mediaRuntime=mediaRuntime,
+    )
+
+
+@pytest.mark.parametrize(
+    ("metadataRuntime", "mediaRuntime"),
+    [
+        ("1h", "200"),
+        ("3h", "95"),
+        ("1h 31m", "150"),
+        ("30min", "95"),
+        ("6", "201.1"),
+    ],
+)
+def testRuntimeFormatsThatContradictMediaAreSuspect(metadataRuntime, mediaRuntime):
+    assert movieIdentityMetadataSuspectReasons(
+        "Fist Fight",
+        metadataRuntime=metadataRuntime,
+        mediaRuntime=mediaRuntime,
+    ) == ("metadata runtime conflicts materially with media runtime",)
+
+
+def testUnrecognisedRuntimeFormatIsNotCompared():
+    assert not movieIdentityMetadataSuspectReasons(
+        "Fist Fight",
+        metadataRuntime="1:31:00",
+        mediaRuntime="91",
+    )
+
+
+def testZeroRuntimeMeansUnknownAndIsNotCompared():
+    assert not movieIdentityMetadataSuspectReasons(
+        "The Relic",
+        metadataRuntime="0",
+        mediaRuntime="89.5",
+    )
+
+
+@pytest.mark.parametrize(
+    ("metadataRuntime", "mediaRuntime"),
+    [
+        ("137", "12.9"),
+        ("95", "24.6"),
+        ("253", "109.3"),
+        ("2h 10m", "91.2"),
+    ],
+)
+def testFeatureMuchShorterThanMetadataIsShort(metadataRuntime, mediaRuntime):
+    assert movieFeatureLengthShort(metadataRuntime, mediaRuntime)
+
+
+@pytest.mark.parametrize(
+    ("metadataRuntime", "mediaRuntime"),
+    [
+        ("94", "91"),
+        ("3", "91.3"),
+        ("70", "116.8"),
+        ("1h", "45"),
+        ("0", "89.5"),
+        (None, "89.5"),
+        ("137", None),
+        ("1:31:00", "20"),
+    ],
+)
+def testFeatureNotMateriallyShorterIsNotShort(metadataRuntime, mediaRuntime):
+    assert not movieFeatureLengthShort(metadataRuntime, mediaRuntime)
+
+
+def _writeVideo(path: Path, size: int) -> Path:
+    """Create a video file of *size* bytes."""
+
+    path.write_bytes(b"x" * size)
+    return path
+
+
+def testFeatureFileIsLargestSameNamedVideo(tmp_path: Path):
+    trailer = _writeVideo(tmp_path / "Made in Dagenham (2010).mov", 10)
+    feature = _writeVideo(tmp_path / "Made in Dagenham (2010).mkv", 100)
+
+    assert MovieIdentityReviewMixin()._movieFeatureFile(tmp_path, trailer) == feature
+
+
+def testFeatureFileIgnoresUnrelatedFilmsInStagingFolder(tmp_path: Path):
+    wanted = _writeVideo(tmp_path / "Wanted (2010).mkv", 10)
+    _writeVideo(tmp_path / "Other (2011).mkv", 100)
+
+    assert MovieIdentityReviewMixin()._movieFeatureFile(tmp_path, wanted) == wanted
+
+
+def testFeatureFileChoosesLargestOfSuppliedVideos(tmp_path: Path):
+    first = _writeVideo(tmp_path / "Part (2010) cd1.mkv", 10)
+    second = _writeVideo(tmp_path / "Part (2010) cd2.mkv", 100)
+
+    assert (
+        MovieIdentityReviewMixin()._movieFeatureFile(tmp_path, first, second) == second
+    )
+
+
+def testFeatureFileIsNoneWithoutVideo(tmp_path: Path):
+    assert MovieIdentityReviewMixin()._movieFeatureFile(tmp_path) is None
 
 
 def testEntangledConflictReportDoesNotDuplicateYearAndFlagsSuspectTitle():

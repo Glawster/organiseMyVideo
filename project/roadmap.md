@@ -45,7 +45,7 @@ local-state snapshots; it does not import media.
 REQ-010 stores movies, TV, and cards in one SQLite catalogue that the UI
 reads and that scans update.
 REQ-011 adds dash-cam cards to the same inventory routine as GoPro and DJI.
-REQ-014 indexes `/mnt/myVideo/Video` as home video, including GoPro and
+REQ-014 indexes `/mnt/media/homeVideo` as home video, including GoPro and
 Drone. REQ-015 inventories USB thumb drives in the same numbered volume
 list. REQ-017 merges provider-identified duplicate TV and movie folders
 with `media organise --merge`.
@@ -54,3 +54,10 @@ with `media organise --merge`.
 
 - Phase 4: a future purge command and its permanent-deletion safeguards.
 - Phase 7: ownership of `rugbyAudit.py` and the root XML artifact.
+
+## Suite coordination
+
+The [suite roadmap](../../organiseMediaStudio/project/suiteRoadmap.md) in organiseMediaStudio coordinates shared-core, Qt and
+Textual work across Photos and Video using OMPR 0.9a3 guidance. Shared storage
+paths and existing archive conventions live in [media library organisation](../../organiseMediaStudio/documentation/mediaLibraryOrganisation.md).
+Local requirements, ADRs and the current increment retain their ownership.

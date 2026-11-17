@@ -29,7 +29,7 @@ For a reference JPEG with a naive recorded timestamp of
 ```bash
 organiseMyVideo camera correct-time \
   --import-manifest /path/to/camera-import-session.json \
-  -r /mnt/myVideo/Video/GoPro \
+  -r /mnt/media/homeVideo/GoPro \
   -R DCIM/100GOPRO/G0010001.JPG \
   -a 2018-08-25T19:00:00 \
   --reason 'Event photograph confirms this reference frame at 19:00'
@@ -52,14 +52,15 @@ Existing import manifests remain the recorded evidence for manifest-scoped work.
 
 The preview lists the reference pair, signed offset, reason, affected count,
 raw and corrected times, current and proposed paths, duplicates and conflicts.
-Corrected dates use `YYYY/MM/DD`, for example `2018/08/25/G0010001.JPG`.
+Corrected dates use `YYYY/MM/DD`, for example `2018/08/25/G0010001.JPG`. REQ-042
+changes this to `YYYY/MM` when `--root` is Photo Root or Video Root.
 No archive, catalogue or manifest writes occur during preview.
 
 By default the scope is the entire selected import. Repeat `--file RELATIVE_PATH`
 to select a bounded subset; the reference must be included. Recorded same-stem
 companions are included automatically. Every selected archive path must be under
 `--root`, which is the camera-specific directory immediately above the date
-hierarchy (for SLR media, the appropriate `By Date` root). For a mixed-camera
+hierarchy (for SLR media, Photo Root or Video Root). For a mixed-camera
 import, select the files belonging to one archive root explicitly.
 
 ## Correct a folder without import history

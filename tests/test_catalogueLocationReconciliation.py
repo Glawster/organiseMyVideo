@@ -60,7 +60,7 @@ def testAuthoritativeScanMarksMissingLanternsStale(tmp_path: Path):
 
     before = locateTvShow("Lanterns", catalogue=catalogue)
     catalogue.catalogueReplaceFromStorage([], [video1, video2])
-    after = locateTvShow("Lanterns", catalogue=catalogue)
+    after = locateTvShow("Lanterns", catalogue=catalogue, includeStale=True)
     visible = catalogue.catalogueTvSeriesList()
     episodes = catalogue.catalogueTvEpisodesList(states=LOCATION_STATES)
 
@@ -94,12 +94,15 @@ def testLocateShowsLanternsStates(tmp_path: Path, capsys: pytest.CaptureFixture[
     removed.rmdir()
     catalogue.catalogueReplaceFromStorage([], [video1, video2])
 
-    assert _runMediaLocate(["Lanterns"]) == 0
+    assert _runMediaLocate(["Lanterns", "--all"]) == 0
     output = capsys.readouterr().out
 
     assert output == (
         "TV: Lanterns\n" f"  {live}    current\n" f"  {removed}    stale\n"
     )
+
+    assert _runMediaLocate(["Lanterns"]) == 0
+    assert capsys.readouterr().out == f"TV: Lanterns\n  {live}    current\n"
 
 
 def testMergeDiscoveryIgnoresStaleLanternsFolder(tmp_path: Path):
@@ -424,6 +427,9 @@ def testMergeReconcilesWhenNoGroupIsMerged(
 
         def scanStorageLocations(self):
             return ([], [video1, video2])
+
+        def sourceLibraryOverlap(self):
+            return None
 
     monkeypatch.setattr("organiseMyVideo.VideoOrganizer", Organizer)
     monkeypatch.setattr(

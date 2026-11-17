@@ -383,6 +383,7 @@ class MediaCatalogue:
         *,
         replaceMovies: bool = True,
         replaceTv: bool = True,
+        retiredRootKinds: frozenset[str] = frozenset(),
     ) -> dict[str, int]:
         """Reconcile movie and/or TV rows from the supplied storage roots.
 
@@ -392,6 +393,15 @@ class MediaCatalogue:
         authoritative, so rows already stored beneath it are left unchanged.
         A directory inside a TV show that cannot be listed does not make the
         episodes beneath it stale.
+
+        Rows already stale when this scan starts, and not seen again, are
+        deleted, so a location is removed on the scan after it became stale.
+
+        *retiredRootKinds* names the kinds (``movie``, ``tv``) whose root list
+        is stated explicitly by the caller's configuration. For those kinds, a
+        previously recorded root this scan omitted has been dropped. Its stale
+        rows are removed, and if it no longer exists it is retired: its other
+        rows become stale, and the next scan removes them.
         """
 
         scannedAt = _timestampNow()
@@ -415,7 +425,13 @@ class MediaCatalogue:
             connection.execute("BEGIN IMMEDIATE")
             if movies is not None:
                 logger.doing("updating movie catalogue")
-                _moviesReconcile(connection, movies, scannedAt, movieCoverage)
+                _moviesReconcile(
+                    connection,
+                    movies,
+                    scannedAt,
+                    movieCoverage,
+                    _droppedRoots(connection, "movie", movieCoverage, retiredRootKinds),
+                )
                 logger.value("movie rows", len(movies))
             if episodes is not None and series is not None:
                 logger.doing("updating tv catalogue")
@@ -426,6 +442,7 @@ class MediaCatalogue:
                     scannedAt,
                     tvCoverage,
                     incompleteDirectories,
+                    _droppedRoots(connection, "tv", tvCoverage, retiredRootKinds),
                 )
                 logger.value("tv episode rows", len(episodes))
             _coverageStore(connection, [*movieCoverage, *tvCoverage], scannedAt)
@@ -582,6 +599,15 @@ def _catalogueColumnEnsure(
 ## movies
 
 
+_MOVIE_LOCATION_TABLES: tuple[tuple[str, str, Optional[str]], ...] = (
+    ("movieItem", "folderPath", None),
+)
+_TV_LOCATION_TABLES: tuple[tuple[str, str, Optional[str]], ...] = (
+    ("tvSeries", "folderPath", None),
+    ("tvEpisode", "filePath", "seriesFolderPath"),
+)
+
+
 def _moviesCollect(
     movieDirs: list[Path], identity
 ) -> tuple[list[MovieCatalogueRecord], list[CatalogueRootCoverage]]:
@@ -672,8 +698,9 @@ def _moviesReconcile(
     movies: list[MovieCatalogueRecord],
     scannedAt: str,
     coverage: list[CatalogueRootCoverage],
+    droppedRoots: list[Path],
 ) -> None:
-    """Upsert movies from authoritative roots and mark absent ones stale."""
+    """Upsert movies, remove rows already stale and mark absent ones stale."""
 
     movies = _providerIdsPreserve(
         connection, "movieItem", "folderPath", movies, ("imdbId", "tmdbId")
@@ -709,16 +736,27 @@ def _moviesReconcile(
             for item in movies
         ],
     )
+    roots = _authoritativeRoots(coverage)
+    removedCount = _removeStale(
+        connection, "movieItem", "folderPath", [*roots, *droppedRoots]
+    )
     staleCount = _markAbsentStale(
         connection,
         "movieItem",
         "folderPath",
         {item.folderPath for item in movies},
-        _authoritativeRoots(coverage),
+        roots,
         scannedAt,
     )
+    retiredCount = _retireRoots(
+        connection, "movie", droppedRoots, _MOVIE_LOCATION_TABLES, scannedAt
+    )
+    if removedCount:
+        logger.value("removed stale movie locations", removedCount)
     if staleCount:
         logger.value("stale movie locations", staleCount)
+    if retiredCount:
+        logger.value("retired movie locations", retiredCount)
 
 
 ## tv
@@ -876,8 +914,9 @@ def _tvReconcile(
     scannedAt: str,
     coverage: list[CatalogueRootCoverage],
     incompleteDirectories: list[Path],
+    droppedRoots: list[Path],
 ) -> None:
-    """Upsert TV rows from authoritative roots and mark absent ones stale."""
+    """Upsert TV rows, remove rows already stale and mark absent ones stale."""
 
     series = _providerIdsPreserve(
         connection, "tvSeries", "folderPath", series, ("tvdbId", "tmdbId", "imdbId")
@@ -892,6 +931,22 @@ def _tvReconcile(
     roots = _authoritativeRoots(coverage)
     _seriesUpsert(connection, series, scannedAt)
     _episodeUpsert(connection, episodes, scannedAt)
+    removalRoots = [*roots, *droppedRoots]
+    removedEpisodes = _removeStale(
+        connection,
+        "tvEpisode",
+        "filePath",
+        removalRoots,
+        extraPathColumn="seriesFolderPath",
+        withheldRoots=incompleteDirectories,
+    )
+    removedSeries = _removeStale(
+        connection,
+        "tvSeries",
+        "folderPath",
+        removalRoots,
+        withheldRoots=incompleteDirectories,
+    )
     staleSeries = _markAbsentStale(
         connection,
         "tvSeries",
@@ -910,10 +965,19 @@ def _tvReconcile(
         extraPathColumn="seriesFolderPath",
         withheldRoots=incompleteDirectories,
     )
+    retiredCount = _retireRoots(
+        connection, "tv", droppedRoots, _TV_LOCATION_TABLES, scannedAt
+    )
+    if removedSeries:
+        logger.value("removed stale tv locations", removedSeries)
+    if removedEpisodes:
+        logger.value("removed stale tv episodes", removedEpisodes)
     if staleSeries:
         logger.value("stale tv locations", staleSeries)
     if staleEpisodes:
         logger.value("stale tv episodes", staleEpisodes)
+    if retiredCount:
+        logger.value("retired tv locations", retiredCount)
 
 
 def _tvSeriesFromFolder(showDir: Path, identity) -> TvSeriesCatalogueRecord:
@@ -1224,22 +1288,12 @@ def _markAbsentStale(
         pathColumn if extraPathColumn is None else f"{pathColumn}, {extraPathColumn}"
     )
     rows = connection.execute(f"SELECT {columns} FROM {table}").fetchall()
-    stalePaths = []
-    for row in rows:
-        path = row[pathColumn]
-        if path in freshPaths:
-            continue
-        if _pathWithinRoots(path, protected):
-            continue
-        if extraPathColumn is not None and _pathWithinRoots(
-            row[extraPathColumn], protected
-        ):
-            continue
-        governed = _pathWithinRoots(path, roots)
-        if not governed and extraPathColumn is not None:
-            governed = _pathWithinRoots(row[extraPathColumn], roots)
-        if governed:
-            stalePaths.append(path)
+    stalePaths = [
+        row[pathColumn]
+        for row in rows
+        if row[pathColumn] not in freshPaths
+        and _rowGoverned(row, pathColumn, extraPathColumn, roots, protected)
+    ]
     connection.executemany(
         f"""
         UPDATE {table}
@@ -1249,6 +1303,120 @@ def _markAbsentStale(
         [(LOCATION_STALE, scannedAt, path) for path in stalePaths],
     )
     return len(stalePaths)
+
+
+def _removeStale(
+    connection: sqlite3.Connection,
+    table: str,
+    pathColumn: str,
+    roots: list[Path],
+    *,
+    extraPathColumn: Optional[str] = None,
+    withheldRoots: Optional[list[Path]] = None,
+) -> int:
+    """Delete rows under *roots* that an earlier scan left stale.
+
+    Call this after upserting the scan's rows, so a location that has come back
+    is current and survives, and before marking new absences, so a location
+    stays stale for one scan. *withheldRoots* keep their rows, because their
+    absence could not be confirmed.
+    """
+
+    if not roots:
+        return 0
+    protected = withheldRoots or []
+    columns = (
+        pathColumn if extraPathColumn is None else f"{pathColumn}, {extraPathColumn}"
+    )
+    rows = connection.execute(
+        f"SELECT {columns} FROM {table} WHERE locationState = ?", (LOCATION_STALE,)
+    ).fetchall()
+    removedPaths = [
+        row[pathColumn]
+        for row in rows
+        if _rowGoverned(row, pathColumn, extraPathColumn, roots, protected)
+    ]
+    connection.executemany(
+        f"DELETE FROM {table} WHERE {pathColumn} = ?",
+        [(path,) for path in removedPaths],
+    )
+    return len(removedPaths)
+
+
+def _rowGoverned(
+    row: sqlite3.Row,
+    pathColumn: str,
+    extraPathColumn: Optional[str],
+    roots: list[Path],
+    protected: list[Path],
+) -> bool:
+    """Return True when *row* lies under *roots* and outside *protected*."""
+
+    paths = [row[pathColumn]]
+    if extraPathColumn is not None:
+        paths.append(row[extraPathColumn])
+    if any(_pathWithinRoots(path, protected) for path in paths):
+        return False
+    return any(_pathWithinRoots(path, roots) for path in paths)
+
+
+def _droppedRoots(
+    connection: sqlite3.Connection,
+    kind: str,
+    coverage: list[CatalogueRootCoverage],
+    retiredRootKinds: frozenset[str],
+) -> list[Path]:
+    """Return recorded roots this scan omitted.
+
+    Nothing counts as dropped unless the configuration states this kind's roots
+    and at least one of them could be listed, so an outage cannot drop a library.
+    """
+
+    if kind not in retiredRootKinds or not _authoritativeRoots(coverage):
+        return []
+    scanned = {item.rootPath for item in coverage}
+    rows = connection.execute(
+        "SELECT rootPath FROM catalogueScanRoot WHERE kind = ?", (kind,)
+    ).fetchall()
+    return [Path(row["rootPath"]) for row in rows if row["rootPath"] not in scanned]
+
+
+def _retireRoots(
+    connection: sqlite3.Connection,
+    kind: str,
+    roots: list[Path],
+    tables: tuple[tuple[str, str, Optional[str]], ...],
+    scannedAt: str,
+) -> int:
+    """Retire the dropped *roots* that no longer exist.
+
+    Their rows become stale, and a retired root left without rows is forgotten.
+    A dropped root that still exists keeps its rows, as its media may be there.
+    """
+
+    total = 0
+    for root in roots:
+        if root.is_dir():
+            continue
+        marked = sum(
+            _markAbsentStale(
+                connection,
+                table,
+                pathColumn,
+                set(),
+                [root],
+                scannedAt,
+                extraPathColumn=extraPathColumn,
+            )
+            for table, pathColumn, extraPathColumn in tables
+        )
+        if not marked:
+            connection.execute(
+                "DELETE FROM catalogueScanRoot WHERE rootPath = ? AND kind = ?",
+                (str(root), kind),
+            )
+        total += marked
+    return total
 
 
 def _moviePathRetarget(

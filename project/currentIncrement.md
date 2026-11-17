@@ -1,25 +1,18 @@
 # Current increment
 
-## Objective and status
+## Objective and scope
 
-REQ-038 movie location lookup is complete. `media locate --movie TITLE` searches
-the persisted movie catalogue and prints titles with years, folders and states.
+No increment is in progress. REQ-043 and the REQ-035 runtime correction were
+completed and merged to `main` on 2026-11-17, with the REQ-036 `media clean`
+store guard.
 
-## Accepted scope and evidence
+## Next
 
-- Case-insensitive partial matching accepts surrounding whitespace and years.
-- Exact title matches precede partial matches.
-- Missing folders are unverified until an authoritative scan marks them stale.
-- No matches exit 1; movie and show selectors are mutually exclusive.
-- Default TV listing and shared debug flags retain their existing routing.
-- Public CLI integration uses real movie files and a temporary SQLite catalogue.
-
-## Final verification
-
-- Locate, CLI and catalogue location reconciliation tests: 59 passed.
-- Black applied to changed Python files; `git diff --check` passed.
-- README and both locate parsers describe the new option.
-
-## Remaining work and immediate next action
-
-No implementation or verification remains. Review the working-tree change.
+- REQ-044: replace an existing movie file. Get the TV-episode and
+  interactive-prompt decisions first.
+- REQ-041: rugby video filing. Needs the results-lookup ADR and the Nations
+  Championship decisions first.
+- REQ-042: storage paths and camelCase names.
+- Proposed: split `media organise` (filing new media) from `library organise`
+  (library consistency). Not yet written up as a requirement.
+- REQ-040 remains ToDo.

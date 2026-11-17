@@ -406,4 +406,4 @@ def testDebugPreservesMediaLocateDispatch():
 
     with patch("organiseMyVideo.cli.locateMedia", return_value=[]) as locate:
         assert main(["--debug", "media", "locate", "Example"]) == 1
-    locate.assert_called_once_with("Example")
+    locate.assert_called_once_with("Example", includeStale=False)

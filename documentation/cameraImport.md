@@ -17,9 +17,9 @@ package's object/action command-line interface.
 The initial archive destinations are:
 
 ```text
-/mnt/myVideo/Video/GoPro/YYYY/MM/DD/
-/mnt/myVideo/Video/Drone/YYYY/MM/DD/
-/mnt/myVideo/Video/Dashcam/YYYY/MM/DD/
+/mnt/media/homeVideo/GoPro/YYYY/MM/DD/
+/mnt/media/homeVideo/Drone/YYYY/MM/DD/
+/mnt/media/homeVideo/Dashcam/YYYY/MM/DD/
 ```
 
 New GoPro and DJI imports use the same nested capture-date convention. For
@@ -91,15 +91,25 @@ Routing is decided per asset, using a numeric month folder rather than
 `MM-MMM`:
 
 ```text
-DCIM/100CANON/IMG_0154.CR3  ->  <photo-root>/By Date/YYYY/MM/DD/IMG_0154.CR3
-DCIM/100CANON/IMG_0154.JPG  ->  <photo-root>/By Date/YYYY/MM/DD/IMG_0154.JPG
-DCIM/100CANON/MVI_0204.MP4  ->  <video-root>/By Date/YYYY/MM/DD/MVI_0204.MP4
+DCIM/100CANON/IMG_0154.CR3  ->  <photo-root>/YYYY/MM/IMG_0154.CR3
+DCIM/100CANON/IMG_0154.JPG  ->  <photo-root>/YYYY/MM/IMG_0154.JPG
+DCIM/100CANON/MVI_0204.MP4  ->  <video-root>/YYYY/MM/MVI_0204.MP4
 ```
 
-The photo root defaults to `/mnt/myPictures` and the video root defaults to
-`/mnt/myVideo/Video`. Both may be overridden through `storage_locations.photos`
-and `storage_locations.homeVideo`. Original filenames are preserved. Same-stem
-RAW/JPEG pairs stay in the same capture-date directory, preferring embedded
+Photo Root is `<photo-master>/byDate` and Video Root is `<video-master>/byDate`, as
+defined in
+[Media library organisation](../../organiseMediaStudio/documentation/mediaLibraryOrganisation.md#master-and-root).
+The masters come from `storage_locations.photos` and
+`storage_locations.homeVideo`. Their built-in fallbacks, `/mnt/myPictures` and
+`/mnt/myVideo/Video`, are out of date, so set both.
+
+**Pending [REQ-042](../project/requirements/features/042-storagePathsAndCamelCaseNames.md):**
+the code still writes `By Date/YYYY/MM/DD` under the master, so do not run confirmed
+SLR imports until that is delivered. REQ-042 also renames these keys to
+`photoMaster` and `videoMaster`.
+
+Original filenames are preserved. Same-stem
+RAW/JPEG pairs stay in the same month directory, preferring embedded
 CR3/JPEG capture metadata. When capture metadata is missing, the documented
 filename or filesystem fallback is recorded as `dateSource`.
 
@@ -300,11 +310,11 @@ The existing application configuration may be extended as follows:
 ```json
 {
   "storage_locations": {
-    "gopro": "/mnt/myVideo/Video/GoPro",
-    "drone": "/mnt/myVideo/Video/Drone",
-    "dashcam": "/mnt/myVideo/Video/Dashcam",
-    "photos": "/mnt/myPictures",
-    "homeVideo": "/mnt/myVideo/Video"
+    "gopro": "/mnt/media/homeVideo/GoPro",
+    "drone": "/mnt/media/homeVideo/Drone",
+    "dashcam": "/mnt/media/homeVideo/Dashcam",
+    "photos": "/mnt/media/Pictures",
+    "homeVideo": "/mnt/media/homeVideo"
   },
   "camera_import": {
     "include_gopro_companions": false,

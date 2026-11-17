@@ -110,8 +110,10 @@ def testLocateMovieThroughPublicCli(tmp_path, capsys):
     missing.rmdir()
     assert locateMovie("Zone 414 (2021)")[0].state == "unverified"
     catalogue.catalogueReplaceFromStorage([root], [])
-    assert main(["media", "locate", "Zone 414 (2021)"]) == 0
+    assert main(["media", "locate", "Zone 414 (2021)", "--all"]) == 0
     assert "stale" in capsys.readouterr().out
+    assert main(["media", "locate", "Zone 414 (2021)"]) == 1
+    capsys.readouterr()
     assert main(["media", "locate", "Unknown media"]) == 1
     assert (
         "Media not found in media catalogue: Unknown media" in capsys.readouterr().err

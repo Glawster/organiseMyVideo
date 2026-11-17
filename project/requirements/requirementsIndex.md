@@ -1,6 +1,6 @@
 # Requirements
 
-Next available number: 040
+Next available number: 045
 
 Requirements created after adoption of the managed process are recorded here.
 Historical behaviour is not assigned invented retrospective requirements.
@@ -20,7 +20,7 @@ Historical behaviour is not assigned invented retrospective requirements.
 | 011 | [Dash cam card support](features/011-dashcamCardSupport.md) | Inventory dash-cam SD cards with the same numeric card-ID routine as GoPro and DJI. | Completed | [Prompt](prompt/011-dashcamCardSupport.md) | [ADR-006](../adr/006-cameraImportArchitecture.md), [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
 | 012 | [Camera card ID file](features/012-cameraCardIdFile.md) | Write a machine-readable card ID onto the SD card on confirmed inventory. | Completed | [Prompt](prompt/012-cameraCardIdFile.md) | [ADR-003](../adr/003-filesystemSafetyBoundary.md), [ADR-007](../adr/007-cameraInventoryPersistence.md) |
 | 013 | [Camera card ID reassign](features/013-cameraCardIdRetie.md) | Explicit confirmed action to change the numeric ID bound on an SD card. | Completed | [Prompt](prompt/013-cameraCardIdRetie.md) | Not required |
-| 014 | [Home video catalogue](features/014-homeVideoCatalogue.md) | Present `/mnt/myVideo/Video` as a logical Home Video timeline with capture-date provenance, audit issues, sidecars, duplicate candidates, and camera-import provenance. | ToDo | [Prompt](prompt/014-homeVideoCatalogue.md) | [ADR-008](../adr/008-sqliteMediaCatalogue.md), [ADR-010](../adr/010-sharedMediaProcessingBoundary.md) |
+| 014 | [Home video catalogue](features/014-homeVideoCatalogue.md) | Present `/mnt/media/homeVideo` as a logical Home Video timeline with capture-date provenance, audit issues, sidecars, duplicate candidates, and camera-import provenance. | ToDo | [Prompt](prompt/014-homeVideoCatalogue.md) | [ADR-008](../adr/008-sqliteMediaCatalogue.md), [ADR-010](../adr/010-sharedMediaProcessingBoundary.md) |
 | 015 | [USB volume inventory](features/015-usbVolumeInventory.md) | Inventory USB thumb drives with the same numeric ID, size, and free space as SD cards. | ToDo | [Prompt](prompt/015-usbVolumeInventory.md) | [ADR-009](../adr/009-numberedRemovableVolumes.md) |
 | 016 | [Catalogue media identities](features/016-catalogueMediaIdentities.md) | Prepare external identities, home-video rows, and removable-volume kinds with safe schema upgrades. | Completed | [Prompt](prompt/016-catalogueMediaIdentities.md) | [ADR-008](../adr/008-sqliteMediaCatalogue.md), [ADR-009](../adr/009-numberedRemovableVolumes.md) |
 | 017 | [Merge duplicate TV and movie folders](features/017-mergeDuplicateTvFolders.md) | Merge provider-identified duplicate TV and movie folders into the most complete existing folder. | Completed | [Prompt](prompt/017-mergeDuplicateTvFolders.md) | Not required |
@@ -46,6 +46,11 @@ Historical behaviour is not assigned invented retrospective requirements.
 | 037 | [Media storage redistribution](features/037-mediaStorageRedistribution.md) | Rebalance movie and TV stores by utilisation percentage using persisted dry-run plans and confirmed whole-folder moves. | ToDo | Not required | [ADR-003](../adr/003-filesystemSafetyBoundary.md), [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
 | 038 | [Movie location lookup](features/038-movieLocate.md) | Locate movie library folders by title and year. | Completed | [Prompt](prompt/038-movieLocate.md) | Not required |
 | 039 | [Mixed movie folder split](features/039-mixedMovieFolderSplit.md) | Detect distinct movies sharing one folder and plan a safe confirmed split while ignoring ancillary media. | ToDo | Not required | [ADR-003](../adr/003-filesystemSafetyBoundary.md) |
+| 040 | [Video interface design](features/040-videoInterfaceDesign.md) | Design and implement MCM-like Qt/TUI applications, Wine interoperability and providers for OMS launch integration; preserve the CLI. | ToDo | [Prompt](prompt/040-videoInterfaceDesign.md) | [ADR-004](../adr/004-qtApplicationArchitecture.md), [ADR-008](../adr/008-sqliteMediaCatalogue.md), launch/worker decision pending |
+| 041 | [Rugby video filing](features/041-rugbyVideoFiling.md) | Rename downloaded rugby matches to the agreed convention and move them safely into the rugby store with `media organise --rugby`. | ToDo | [Prompt](prompt/041-rugbyVideoFiling.md) | [ADR-003](../adr/003-filesystemSafetyBoundary.md), earlier-season results lookup decision pending |
+| 042 | [Storage paths and camelCase names](features/042-storagePathsAndCamelCaseNames.md) | Take storage paths from configuration for the new library layout, and rename config keys and other OMV-owned names to camelCase with backwards-compatible reading. | ToDo | [Prompt](prompt/042-storagePathsAndCamelCaseNames.md) | Not required |
+| 043 | [Catalogue stale location removal](features/043-catalogueStaleLocationRemoval.md) | Remove stale catalogue locations on the following scan, retire dropped storage roots, and hide stale locations from `media locate` unless `--all` is given. | Completed | [Prompt](prompt/043-catalogueStaleLocationRemoval.md) | [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
+| 044 | [Replace an existing movie file](features/044-replaceExistingMovieFile.md) | Match existing movie folders by title identity, and let `media organise --replace` swap in a new feature file with the old one quarantined and journalled. | ToDo | [Prompt](prompt/044-replaceExistingMovieFile.md) | [ADR-003](../adr/003-filesystemSafetyBoundary.md), TV and interactive-prompt decisions pending |
 
 ## Prompt index
 
@@ -80,4 +85,9 @@ Historical behaviour is not assigned invented retrospective requirements.
 - [035-movieIdentityConflictDetection](prompt/035-movieIdentityConflictDetection.md)
 - [036-incomingMediaPreparation](prompt/036-incomingMediaPreparation.md)
 - [038-movieLocate](prompt/038-movieLocate.md)
+- [040-videoInterfaceDesign](prompt/040-videoInterfaceDesign.md)
+- [041-rugbyVideoFiling](prompt/041-rugbyVideoFiling.md)
+- [042-storagePathsAndCamelCaseNames](prompt/042-storagePathsAndCamelCaseNames.md)
+- [043-catalogueStaleLocationRemoval](prompt/043-catalogueStaleLocationRemoval.md)
+- [044-replaceExistingMovieFile](prompt/044-replaceExistingMovieFile.md)
 <!-- OMP-PROMPT-INDEX-END -->

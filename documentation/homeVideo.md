@@ -12,7 +12,7 @@ are specified by
 
 ## Outcome
 
-Personal video under `/mnt/myVideo/Video` is a catalogue collection of its
+Personal video under `/mnt/media/homeVideo` is a catalogue collection of its
 own. GoPro, Drone, and Dashcam archives are folders inside that collection,
 not movie or TV titles.
 
@@ -21,14 +21,19 @@ OMV should impose on other users. OMV discovers the organisation patterns in
 each library and allows the user to confirm or correct them before policy is
 applied.
 
-## Root
+## Location
 
 ```text
-/mnt/myVideo/Video/
+/mnt/media/homeVideo/         Video Master
+/mnt/media/homeVideo/byDate/  Video Root
 ```
 
-TV for the organiser stays at `/mnt/myVideo/TV` and `/mnt/video<n>/TV`.
-Do not scan those as home video.
+Master and root are defined in
+[Media library organisation](../../organiseMediaStudio/documentation/mediaLibraryOrganisation.md#master-and-root).
+This catalogue covers the whole master, not only the root.
+
+TV for the organiser stays in the configured TV locations, currently
+`/mnt/video/TV` and `/mnt/raid/TV`. Do not scan those as home video.
 
 ## First-level folders (observed)
 
@@ -36,12 +41,14 @@ Do not scan those as home video.
 | --- | --- |
 | `GoPro` | Camera originals, mostly dated directories, plus some loose AVI |
 | `Drone` | DJI source media |
-| `Home Video` | Historical mixture including tape transfers and edited/finished material |
-| `By Date` | Personal/family footage organised primarily by date |
-| `Extension`, `Evelyn`, `Cycling`, `Singapore` | Topic, subject, event, project, or production-oriented collections requiring discovery/review |
-| `Rugby`, `Footy`, `Music` | Personal recordings, not the TV library |
-| `Video` | Nested mixed dump containing GOPR AVIs, productions, project material, and other files; reconciliation candidate |
-| `Captures`, `Favourites`, `Skeptic` | Empty or tiny leftovers |
+| `Dashcam` | Dash camera media |
+| `byDate` | Personal/family footage organised primarily by date |
+| `Video8`, `VideoDV` | Named for tape formats; contents need discovery/review |
+| `Productions` | Finished or production material; needs discovery/review |
+| `Extension`, `Evelyn`, `Cycling`, `Singapore`, `Meghan In Moldova`, `M & J Wedding`, `Misc` | Topic, subject, event, project, or production-oriented collections requiring discovery/review |
+| `Footy`, `Music` | Personal recordings, not the TV library |
+| `Rugby` | Empty; the rugby store moved to `/mnt/raid/Rugby` |
+| `Captures`, `Favourites` | Described as empty or tiny leftovers before the move; recheck during discovery |
 
 These descriptions document this archive only. The folder names must not be
 encoded as universal classification rules.
@@ -85,8 +92,6 @@ organisation workflow.
 Leave these to existing or later dry-run migrations/organisation plans:
 
 - REQ-004 `camera migrate` for camera-import normalisation;
-- nested `Video/Video` GOPR dumps versus canonical camera originals;
-- classification of mixed material in `Home Video`;
 - loose `GOPR*.avi` sitting beside dated camera folders;
 - editing/project files mixed with finished productions;
 - confirmed duplicate copies.
@@ -108,6 +113,6 @@ remains independent of the physical spelling of historical folders.
 ## Verification
 
 Tests use temporary trees. They must not depend on the real
-`/mnt/myVideo/Video` mount. REQ-031 tests should include multiple synthetic
+`/mnt/media/homeVideo` mount. REQ-031 tests should include multiple synthetic
 layouts so implementation cannot accidentally learn this archive's folder
 names as universal rules.

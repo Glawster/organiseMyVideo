@@ -176,3 +176,8 @@ it, is the behaviour required here.
 - 2026-09-30: tightened — an error while reading a directory inside a TV show
   does not mark the episodes under that directory stale. `media locate`
   without `--show` is covered for a catalogue that contains shows.
+- 2026-11-08: narrowed by
+  [REQ-043](043-catalogueStaleLocationRemoval.md) — a stale row is removed by
+  the following scan, rows under a dropped configured root are retired, and
+  `media locate` hides stale locations unless `--all` is given. The criteria
+  above are unchanged as the record of this requirement.

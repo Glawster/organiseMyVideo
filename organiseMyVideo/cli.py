@@ -22,6 +22,12 @@ def _locateParser() -> argparse.ArgumentParser:
         metavar="SEARCH",
         help="movie or TV title to locate (case-insensitive exact or partial match)",
     )
+    parser.add_argument(
+        "--all",
+        dest="includeStale",
+        action="store_true",
+        help="also show stale locations that a scan found to be gone",
+    )
     return parser
 
 
@@ -41,7 +47,7 @@ def _runMediaLocate(argv: Sequence[str]) -> int:
     """Run one catalogue-only movie/TV location query."""
 
     args = _locateParser().parse_args(list(argv))
-    matches = locateMedia(args.search)
+    matches = locateMedia(args.search, includeStale=args.includeStale)
     if not matches:
         print(f"Media not found in media catalogue: {args.search}", file=sys.stderr)
         return 1
