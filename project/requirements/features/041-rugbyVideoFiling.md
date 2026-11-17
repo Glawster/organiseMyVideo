@@ -71,8 +71,8 @@ path must come from configuration.
   `2025-11-01 Ireland v New Zealand - Autumn International.mkv`.
 - Lions tours name only the opponent, for example
   `British Lions/2013/2013-06-22 Australia - Lions Tour Test 1.mp4`.
-- Halves of one match get ` Part 1` and ` Part 2`. Highlights get a ` Highlights`
-  suffix.
+- Halves of one match end with a space and `Part 1` or `Part 2`. Highlights end
+  with a space and `Highlights`.
 - Keep the original extension and never re-encode.
 - Use configured folder and team-name mappings, because the two can differ: the
   folder is `Gloucester Hartpury` and the team name in a file is

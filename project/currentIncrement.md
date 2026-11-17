@@ -2,23 +2,17 @@
 
 ## Objective and scope
 
-Deliver REQ-043, removing stale catalogue locations on the following scan and
-retiring dropped configured roots, with the REQ-035 correction for hour-only
-MCM runtimes, on `bugfix/043-catalogueStaleAndMovieRuntime`. Guard `media clean`
-against library stores on `bugfix/036-mediaCleanLibraryGuard`.
-
-## Acceptance and verification
-
-REQ-043 acceptance criteria are covered by `tests/test_catalogueStaleRemoval.py`
-and `tests/test_catalogueLocationReconciliation.py`. The runtime correction is
-covered by `tests/test_movieIdentitySuspectMetadata.py`.
-
-## Verification still required
-
-Run two library scans on the real catalogue, then confirm the old disk rows have
-gone and `media locate` no longer reports them.
+No increment is in progress. REQ-043 and the REQ-035 runtime correction were
+completed and merged to `main` on 2026-11-17, with the REQ-036 `media clean`
+store guard.
 
 ## Next
 
-Commit and merge the branch, then complete REQ-043. REQ-042 follows, and REQ-040
-remains ToDo.
+- REQ-044: replace an existing movie file. Get the TV-episode and
+  interactive-prompt decisions first.
+- REQ-041: rugby video filing. Needs the results-lookup ADR and the Nations
+  Championship decisions first.
+- REQ-042: storage paths and camelCase names.
+- Proposed: split `media organise` (filing new media) from `library organise`
+  (library consistency). Not yet written up as a requirement.
+- REQ-040 remains ToDo.

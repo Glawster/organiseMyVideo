@@ -2,7 +2,7 @@
 
 ## Status
 
-InProgress
+Completed
 
 ## Outcome
 
@@ -91,6 +91,10 @@ No new architecture decision.
   the configured kinds are derived.
 - `tests/test_catalogueLocationReconciliation.py` covers criterion 9.
 - A rehearsal on a copy of the real catalogue, scanning the real stores twice.
+- Verified on 2026-11-17 against the real catalogue after library scans on
+  2026-11-16: no rows remain under `/mnt/movie1` or `/mnt/movie2`, and the
+  catalogue holds 1,843 current and 1 stale movie rows, 287 current series and
+  14,473 current episodes.
 
 ## Traceability
 
@@ -102,7 +106,7 @@ No new architecture decision.
   `tests/test_catalogueLocationReconciliation.py`
 - Documentation: `documentation/mediaCatalogue.md`,
   `documentation/commandLineInterface.md`, `README.md`
-- Pull request: pending
+- Pull request: none; merged directly to `main`
 - Agent runs: None
 
 ## Change history
@@ -110,3 +114,5 @@ No new architecture decision.
 - 2026-11-08: created — `media locate` kept reporting `/mnt/movie2` after the
   disk had moved to the RAID, and the owner asked for stale locations to be
   removed on a subsequent scan.
+- 2026-11-17: completed — real-catalogue scans removed every `/mnt/movie1`
+  and `/mnt/movie2` row.
