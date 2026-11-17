@@ -15,4 +15,5 @@ store guard.
 - REQ-042: storage paths and camelCase names.
 - Proposed: split `media organise` (filing new media) from `library organise`
   (library consistency). Not yet written up as a requirement.
+- REQ-045: cross-platform support, after REQ-042.
 - REQ-040 remains ToDo.
