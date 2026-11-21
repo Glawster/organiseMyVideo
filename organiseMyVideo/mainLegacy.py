@@ -389,6 +389,24 @@ def buildParser(*, internalCamera: bool = False) -> argparse.ArgumentParser:
         action="store_true",
         help="merge provider-identified duplicate TV and movie folders into the most complete existing folder",
     )
+    mediaOrganise.add_argument(
+        "--adult",
+        action="store_true",
+        help=(
+            "rename adult scenes to 'Studio - yymmdd - Performers - Title' and "
+            "file them by studio (default source: storage_locations.adultSource "
+            "or /mnt/video/toMove)"
+        ),
+    )
+    mediaOrganise.add_argument(
+        "--destination",
+        metavar="PATH",
+        default=None,
+        help=(
+            "with --adult, the folder to file into (default: "
+            "storage_locations.adultDestination or /mnt/myVideo/decrypted/Pron/toMove)"
+        ),
+    )
     mediaClean = mediaSub.add_parser(
         "clean",
         parents=[_buildSharedFlags(True)],
@@ -649,6 +667,8 @@ def _validateArguments(
         args.source = _configuredSource(_getAppConfigPath())
     if args.command == "media" and args.mediaAction == "locate":
         return
+    if args.command == "media" and args.mediaAction == "organise":
+        _validateAdultArguments(parser, args)
     if args.command in {"media", "library", "torrent"}:
         sourcePath = Path(args.source).expanduser()
         if not sourcePath.is_dir():
@@ -658,6 +678,87 @@ def _validateArguments(
                 f"{_getAppConfigPath()})"
             )
         args.source = str(sourcePath)
+
+
+_ADULT_SOURCE_KEY = "adultSource"
+_ADULT_DESTINATION_KEY = "adultDestination"
+
+
+def _adultStorage(key: str, fallback: str) -> str:
+    """Return a configured adult storage folder, or *fallback*."""
+    storage = _loadAppConfig(_getAppConfigPath()).get("storage_locations", {})
+    value = storage.get(key) if isinstance(storage, dict) else None
+    return value.strip() if isinstance(value, str) and value.strip() else fallback
+
+
+def _validateAdultArguments(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> None:
+    """Reject invalid --adult combinations and fill in its default folders."""
+    from .adultFiling import DEFAULT_ADULT_DESTINATION, DEFAULT_ADULT_SOURCE
+
+    if not getattr(args, "adult", False):
+        if getattr(args, "destination", None):
+            parser.error("--destination is only used with --adult")
+        return
+    if getattr(args, "merge", False):
+        parser.error("--adult cannot be combined with --merge")
+    # --adult has its own source and destination config values, separate from
+    # the movie/TV "source", whose built-in default the parser fills in here.
+    sourceGiven = args.sourceOverride is not None or args.source != _BUILT_IN_SOURCE
+    args.adultSourceGiven = args.source if sourceGiven else None
+    args.adultDestinationGiven = args.destination
+    if not sourceGiven:
+        args.source = _adultStorage(_ADULT_SOURCE_KEY, DEFAULT_ADULT_SOURCE)
+    if not args.destination:
+        args.destination = _adultStorage(
+            _ADULT_DESTINATION_KEY, DEFAULT_ADULT_DESTINATION
+        )
+    destination = Path(args.destination).expanduser()
+    if not destination.is_dir():
+        parser.error(f"destination directory does not exist: {destination}")
+    args.destination = str(destination)
+
+
+def _runAdultWorkflow(args: argparse.Namespace, dryRun: bool) -> int:
+    """File adult scenes from the source into the destination (REQ-046)."""
+    from .adultFiling import adultFilingRun
+
+    configPath = _getAppConfigPath()
+    # Offer to remember folders given for this run, as media organise does.
+    for label, given, key in (
+        ("Adult source", args.adultSourceGiven, _ADULT_SOURCE_KEY),
+        ("Adult destination", args.adultDestinationGiven, _ADULT_DESTINATION_KEY),
+    ):
+        _offerConfigFolderUpdate(
+            args, configPath, label, given, ("storage_locations", key)
+        )
+    config = _loadAppConfig(configPath)
+    performers = config.get("adultPerformers", [])
+    if not isinstance(performers, list):
+        performers = []
+    logger.value("source directory", args.source)
+    logger.value("destination directory", args.destination)
+    logger.doing("filing adult scenes")
+    try:
+        stats = adultFilingRun(
+            Path(args.source),
+            Path(args.destination),
+            dryRun=dryRun,
+            knownPerformers=[name for name in performers if isinstance(name, str)],
+        )
+    except ValueError as error:
+        logger.error("%s", error)
+        return 2
+    movedLabel = "To move:" if dryRun else "Moved:  "
+    drawBox(f"""ADULT FILING SUMMARY
+{movedLabel}        {stats.moved}
+Unparsed:       {stats.unparsed}
+Conflicts:      {stats.conflicts}
+Folders kept:   {stats.foldersKept}
+Errors:         {stats.errors}
+""")
+    return 1 if stats.errors else 0
 
 
 def _loggingLevel(args: argparse.Namespace) -> int:
@@ -1103,6 +1204,8 @@ def main(argv: Optional[Sequence[str]] = None, *, internalCamera: bool = False) 
                 status = _runCameraImportWorkflow(args, dryRun)
             else:
                 status = _runCameraWorkflow(args, dryRun)
+        elif getattr(args, "adult", False):
+            status = _runAdultWorkflow(args, dryRun)
         else:
             status = _runOrganizerWorkflow(args, dryRun)
     except KeyboardInterrupt:

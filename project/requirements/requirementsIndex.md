@@ -1,6 +1,6 @@
 # Requirements
 
-Next available number: 046
+Next available number: 047
 
 Requirements created after adoption of the managed process are recorded here.
 Historical behaviour is not assigned invented retrospective requirements.
@@ -52,6 +52,7 @@ Historical behaviour is not assigned invented retrospective requirements.
 | 043 | [Catalogue stale location removal](features/043-catalogueStaleLocationRemoval.md) | Remove stale catalogue locations on the following scan, retire dropped storage roots, and hide stale locations from `media locate` unless `--all` is given. | Completed | [Prompt](prompt/043-catalogueStaleLocationRemoval.md) | [ADR-008](../adr/008-sqliteMediaCatalogue.md) |
 | 044 | [Replace an existing movie file](features/044-replaceExistingMovieFile.md) | Match existing movie folders by title identity, and let `media organise --replace` swap in a new feature file with the old one quarantined and journalled. | ToDo | [Prompt](prompt/044-replaceExistingMovieFile.md) | [ADR-003](../adr/003-filesystemSafetyBoundary.md), TV and interactive-prompt decisions pending |
 | 045 | [Cross-platform application support](features/045-crossPlatformSupport.md) | Run OMV on Linux, macOS and Windows using shared portability primitives, with non-destructive workflows enabled before destructive operations. | ToDo | [Prompt](prompt/045-crossPlatformSupport.md) | [ADR-003](../adr/003-filesystemSafetyBoundary.md), [ADR-010](../adr/010-sharedMediaProcessingBoundary.md) |
+| 046 | [Adult video filing](features/046-adultVideoFiling.md) | Rename downloaded adult scenes to `Studio - yymmdd - Performers - Title` and move them into the collection's staging folder with `media organise --adult`. | Completed | [Prompt](prompt/046-adultVideoFiling.md) | [ADR-003](../adr/003-filesystemSafetyBoundary.md) |
 
 ## Prompt index
 
@@ -92,4 +93,5 @@ Historical behaviour is not assigned invented retrospective requirements.
 - [043-catalogueStaleLocationRemoval](prompt/043-catalogueStaleLocationRemoval.md)
 - [044-replaceExistingMovieFile](prompt/044-replaceExistingMovieFile.md)
 - [045-crossPlatformSupport](prompt/045-crossPlatformSupport.md)
+- [046-adultVideoFiling](prompt/046-adultVideoFiling.md)
 <!-- OMP-PROMPT-INDEX-END -->

@@ -48,6 +48,8 @@ organiseMyVideo media organise /path/to/staging
 organiseMyVideo media organise /path/to/staging --confirm
 organiseMyVideo media organise --merge
 organiseMyVideo media organise --merge --confirm
+organiseMyVideo media organise --adult
+organiseMyVideo media organise --adult --confirm
 organiseMyVideo media clean /path/to/staging
 organiseMyVideo media scan
 organiseMyVideo media scan --source /path/to/staging
@@ -121,6 +123,13 @@ normalise TV show/season folders or perform library-wide reconciliation. Its
 quarantine stays inside the source and is excluded from later cleanup. Scan uses
 the shared name cleaner in memory; canonical library repairs belong to
 `media organise --confirm`, even if scan receives compatibility `--confirm`.
+
+### File adult scenes
+
+`media organise --adult` renames downloads in `/mnt/video/toMove` to
+`Studio - yymmdd - Performers - Title` and files them by studio under
+`/mnt/myVideo/decrypted/Pron/toMove`. Both folders can be set in `config.json`.
+See [adult scene filing](documentation/commandLineInterface.md#adult-scene-filing).
 
 ### Clean source-folder names and remove empty folders
 

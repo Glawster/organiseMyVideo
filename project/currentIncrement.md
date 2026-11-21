@@ -2,18 +2,17 @@
 
 ## Objective and scope
 
-No increment is in progress. REQ-043 and the REQ-035 runtime correction were
-completed and merged to `main` on 2026-11-17, with the REQ-036 `media clean`
-store guard.
+No increment is in progress. REQ-046 adult video filing (`media organise
+--adult`) was completed on 2026-11-21 on branch `feature/046-adultVideoFiling`.
 
 ## Next
 
-- REQ-044: replace an existing movie file. Get the TV-episode and
-  interactive-prompt decisions first.
-- REQ-041: rugby video filing. Needs the results-lookup ADR and the Nations
-  Championship decisions first.
-- REQ-042: storage paths and camelCase names.
-- Proposed: split `media organise` (filing new media) from `library organise`
-  (library consistency). Not yet written up as a requirement.
-- REQ-045: cross-platform support, after REQ-042.
-- REQ-040 remains ToDo.
+- Adult titles: remove a configured list of offending words from filed titles.
+  Waiting for the user's word list. Not yet written up as a requirement.
+- Adult destination cleanup: tidy the items already in
+  `/mnt/myVideo/decrypted/Pron/toMove`. Waiting for the user's naming and
+  layout choice. Not yet written up as a requirement.
+- Possible: replace an original with its Plex optimised version, keeping the
+  original in quarantine.
+- REQ-044, REQ-041, REQ-042 and REQ-045 as previously planned. REQ-040 remains
+  ToDo.

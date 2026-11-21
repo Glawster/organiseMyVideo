@@ -22,6 +22,7 @@ New scripts and documentation should use the object/action hierarchy:
 organiseMyVideo media organise [SOURCE]
 organiseMyVideo media organise [-s SOURCE]
 organiseMyVideo media organise --merge
+organiseMyVideo media organise --adult [SOURCE] [--destination PATH]
 organiseMyVideo media clean [SOURCE]
 organiseMyVideo media clean [-s SOURCE]
 organiseMyVideo library rescan [SOURCE] [--target both|movies|tv]
@@ -191,6 +192,45 @@ Run summaries are application state and are written under
 movie folder/file renames and finish with a `Needs further investigation`
 section for unresolved identity conflicts, merge candidates and possible
 duplicates.
+
+## Adult scene filing
+
+`media organise --adult [SOURCE]` renames downloaded adult scenes and files
+them into the collection's staging folder
+([REQ-046](../project/requirements/features/046-adultVideoFiling.md)).
+SOURCE defaults to `storage_locations.adultSource` in `config.json`, otherwise
+`/mnt/video/toMove`. `--destination PATH` overrides
+`storage_locations.adultDestination`, otherwise `/mnt/myVideo/decrypted/Pron/toMove`.
+These two values are separate from the movie and TV `source`, which `--adult`
+never reads. When SOURCE or `--destination` differs from its config value, the
+command offers to save it. Dry-run is the default; `--confirm` moves files.
+
+Each video is filed as `<Studio>/<Studio> - <yymmdd> - <Performers> - <Title>.<ext>`,
+for example `PureTaboo/PureTaboo - 260526 - Sophia Locke - Her Loss His Gain.mp4`.
+The title part is left out when the name has none, and several performers are
+joined with `, `. Three name forms are recognised:
+
+- scene releases such as `PervMom.26.10.04.Lexi.Luna.XXX.1080p.MP4-WRB[XC]`,
+  read from the release folder name when the folder holds one video;
+- `Studio - Performer, Performer - Title (dd.mm.yyyy) rq.mp4`; and
+- `[Studio] Performers Title (yy.mm.dd)[720p].mp4`.
+
+Scene and bracket names do not mark where performers end. The first two words,
+and further names joined by `And`, are taken as performers, as is any known
+performer: those listed in `adultPerformers` in `config.json` and those named
+explicitly by hyphen-form files in the same run. Add a name to
+`adultPerformers` when a scene puts a second performer straight after the
+first without `And`.
+
+Names without a recognisable studio and date are reported as unparsed and left
+in place. An existing destination, or two videos planned to the same name, is
+reported as a conflict and neither file changes. Moves go through the
+filesystem safety boundary, so a move between drives is copied, verified and
+only then removed from the source. Once a release folder's video has moved, its
+tracker files (`.nfo`, `.txt`, `.url`, `.sfv`) are quarantined under
+`SOURCE/.organiseMyVideo-quarantine` and the empty folder is removed. A folder
+holding anything else is kept and reported. `--adult` cannot be combined with
+`--merge`. The command exits non-zero if any move fails.
 
 ## Compatibility interface
 
